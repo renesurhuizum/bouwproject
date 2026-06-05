@@ -64,6 +64,20 @@ export function distToSegment(p: Point, a: Point, b: Point): number {
   return dist(p, { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) });
 }
 
+// Projecteer punt p op segment a-b. Geeft t (0..1), het punt en de afstand.
+export function projectOnSegment(
+  p: Point,
+  a: Point,
+  b: Point,
+): { t: number; point: Point; dist: number } {
+  const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+  if (l2 === 0) return { t: 0, point: a, dist: dist(p, a) };
+  let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const point = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
+  return { t, point, dist: dist(p, point) };
+}
+
 // Bounding box van een set punten.
 export function bounds(points: Point[]): { min: Point; max: Point } {
   if (points.length === 0) {

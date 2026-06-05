@@ -2,6 +2,7 @@
 
 import type {
   ElectricalType,
+  OpeningType,
   WallMaterial,
   WallStatus,
   PhaseStatus,
@@ -208,3 +209,30 @@ export const WALL_STATUS_COLOR: Record<WallStatus, string> = {
 // Rastermaat in meters voor snapping.
 export const GRID_SIZE_M = 0.1; // 10 cm
 export const GRID_MAJOR_EVERY = 10; // elke 1 m een zware lijn
+
+// ── Deuren & ramen ────────────────────────────────────────────────────────────
+
+export const OPENING_LABEL: Record<OpeningType, string> = {
+  door: "Deur",
+  window: "Raam",
+  passage: "Doorgang",
+};
+
+// Standaardafmetingen (m): breedte, hoogte, borsthoogte.
+export const OPENING_DEFAULTS: Record<
+  OpeningType,
+  { width: number; height: number; sillHeight: number }
+> = {
+  door: { width: 0.9, height: 2.1, sillHeight: 0 },
+  window: { width: 1.2, height: 1.2, sillHeight: 0.9 },
+  passage: { width: 0.9, height: 2.1, sillHeight: 0 },
+};
+
+export const OPENING_COLOR: Record<OpeningType, string> = {
+  door: "#a16207", // bruin
+  window: "#1d4ed8", // blauw
+  passage: "#78716c", // grijs
+};
+
+// Hoe dicht (m) een tik bij een muur moet zijn om er een opening op te plaatsen.
+export const OPENING_SNAP_M = 0.5;

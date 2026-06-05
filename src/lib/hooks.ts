@@ -38,6 +38,21 @@ export function useWalls(levelId?: string | null) {
   );
 }
 
+export function useOpenings(levelId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      const db = getDB();
+      const walls = notDeleted(await db.walls.where("levelId").equals(levelId).toArray());
+      const wallIds = new Set(walls.map((w) => w.id));
+      const all = notDeleted(await db.openings.toArray());
+      return all.filter((o) => wallIds.has(o.wallId));
+    },
+    [levelId],
+    [],
+  );
+}
+
 export function useRooms(levelId?: string | null) {
   return useLiveQuery(
     async () => {

@@ -5,9 +5,15 @@
 import { useState } from "react";
 import { MousePointer2, Minus, Plug, Layers, Grid3x3, Plus } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
-import type { ElectricalType, EditorLayer, WallStatus } from "@/lib/domain/types";
+import type {
+  ElectricalType,
+  EditorLayer,
+  OpeningType,
+  WallStatus,
+} from "@/lib/domain/types";
 import {
   ELECTRICAL_LABEL,
+  OPENING_LABEL,
   WALL_STATUS_LABEL,
 } from "@/lib/domain/constants";
 
@@ -21,6 +27,8 @@ const PLACE_TYPES: ElectricalType[] = [
   "panel",
   "outdoor",
 ];
+
+const OPENING_TYPES: OpeningType[] = ["door", "window", "passage"];
 
 const LAYERS: { key: EditorLayer; label: string }[] = [
   { key: "structure", label: "Muren" },
@@ -95,23 +103,68 @@ export function Toolbar() {
         </div>
       )}
 
-      {/* Contextueel paneel: elektra-types */}
+      {/* Contextueel paneel: plaatsen (elektra of deuren/ramen) */}
       {tool === "place" && (
-        <div className="pointer-events-auto grid max-w-md grid-cols-4 gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
-          {PLACE_TYPES.map((t) => {
-            const active = placeKind?.domain === "electrical" && placeKind.type === t;
-            return (
-              <button
-                key={t}
-                onClick={() => setPlaceKind({ domain: "electrical", type: t })}
-                className={`rounded-lg px-2 py-1.5 text-[11px] font-medium leading-tight ${
-                  active ? "bg-blueprint text-white" : "bg-paper-sunken text-ink-700"
-                }`}
-              >
-                {ELECTRICAL_LABEL[t]}
-              </button>
-            );
-          })}
+        <div className="pointer-events-auto flex max-w-md flex-col gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => setPlaceKind({ domain: "electrical", type: "socket" })}
+              className={`flex-1 rounded-lg py-1.5 text-xs font-semibold ${
+                placeKind?.domain === "electrical"
+                  ? "bg-blueprint text-white"
+                  : "bg-paper-sunken text-ink-700"
+              }`}
+            >
+              Elektra
+            </button>
+            <button
+              onClick={() => setPlaceKind({ domain: "opening", type: "door" })}
+              className={`flex-1 rounded-lg py-1.5 text-xs font-semibold ${
+                placeKind?.domain === "opening"
+                  ? "bg-accent text-white"
+                  : "bg-paper-sunken text-ink-700"
+              }`}
+            >
+              Deuren / ramen
+            </button>
+          </div>
+
+          {placeKind?.domain === "opening" ? (
+            <div className="grid grid-cols-3 gap-1.5">
+              {OPENING_TYPES.map((t) => {
+                const active = placeKind.type === t;
+                return (
+                  <button
+                    key={t}
+                    onClick={() => setPlaceKind({ domain: "opening", type: t })}
+                    className={`rounded-lg px-2 py-1.5 text-[11px] font-medium ${
+                      active ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"
+                    }`}
+                  >
+                    {OPENING_LABEL[t]}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 gap-1.5">
+              {PLACE_TYPES.map((t) => {
+                const active =
+                  placeKind?.domain === "electrical" && placeKind.type === t;
+                return (
+                  <button
+                    key={t}
+                    onClick={() => setPlaceKind({ domain: "electrical", type: t })}
+                    className={`rounded-lg px-2 py-1.5 text-[11px] font-medium leading-tight ${
+                      active ? "bg-blueprint text-white" : "bg-paper-sunken text-ink-700"
+                    }`}
+                  >
+                    {ELECTRICAL_LABEL[t]}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

@@ -8,12 +8,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Line, Circle, Label, Tag, Text } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
-import type { Point, Wall, ElectricalItem } from "@/lib/domain/types";
+import type { Point, Wall, ElectricalItem, Opening } from "@/lib/domain/types";
 import { create } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
-import { useWalls, useRooms, useElectrical } from "@/lib/hooks";
-import { GRID_SIZE_M, ELECTRICAL_DEFAULT_HEIGHT } from "@/lib/domain/constants";
-import { dist, snapToGrid, snapToPoints } from "@/lib/geometry";
+import { useWalls, useRooms, useElectrical, useOpenings } from "@/lib/hooks";
+import {
+  GRID_SIZE_M,
+  ELECTRICAL_DEFAULT_HEIGHT,
+  OPENING_DEFAULTS,
+  OPENING_SNAP_M,
+} from "@/lib/domain/constants";
+import { dist, snapToGrid, snapToPoints, projectOnSegment } from "@/lib/geometry";
 import { formatLength } from "@/lib/format";
 import {
   screenToMeters,
@@ -25,6 +30,7 @@ import {
 } from "./viewport";
 import { GridLayer } from "./GridLayer";
 import { WallsLayer } from "./WallsLayer";
+import { OpeningsLayer } from "./OpeningsLayer";
 import { RoomsLayer } from "./RoomsLayer";
 import { ElectricalLayer } from "./ElectricalLayer";
 
@@ -45,6 +51,7 @@ export function PlanEditor() {
   const walls = useWalls(activeLevelId) ?? [];
   const rooms = useRooms(activeLevelId) ?? [];
   const electrical = useElectrical(activeLevelId) ?? [];
+  const openings = useOpenings(activeLevelId) ?? [];
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
@@ -115,6 +122,31 @@ export function PlanEditor() {
     select({ kind: "electrical", id: item.id });
   }
 
+  // Plaats een deur/raam op de dichtstbijzijnde muur (binnen tolerantie).
+  async function placeOpening(at: Point) {
+    if (!placeKind || placeKind.domain !== "opening") return;
+    let best: { wall: Wall; t: number; d: number } | null = null;
+    for (const w of walls) {
+      const { t, dist: d } = projectOnSegment(at, w.start, w.end);
+      if (!best || d < best.d) best = { wall: w, t, d };
+    }
+    if (!best || best.d > OPENING_SNAP_M) return; // niet op een muur getikt
+    const len = dist(best.wall.start, best.wall.end);
+    const def = OPENING_DEFAULTS[placeKind.type];
+    // Houd de opening binnen de muur.
+    const half = def.width / 2;
+    const offset = Math.min(Math.max(best.t * len, half), Math.max(half, len - half));
+    const op = await create<Opening>("openings", {
+      wallId: best.wall.id,
+      type: placeKind.type,
+      width: def.width,
+      height: def.height,
+      sillHeight: def.sillHeight,
+      offset,
+    });
+    select({ kind: "opening", id: op.id });
+  }
+
   function handleTap(screenPos: Point, onStage: boolean) {
     const worldM = screenToMeters(screenPos, view);
     const snapped = snapPoint(worldM);
@@ -129,7 +161,8 @@ export function PlanEditor() {
       return;
     }
     if (tool === "place") {
-      void placeElectrical(snapped);
+      if (placeKind?.domain === "opening") void placeOpening(worldM);
+      else void placeElectrical(snapped);
       return;
     }
     // select: tik op leeg vlak = deselecteren
@@ -246,7 +279,10 @@ export function PlanEditor() {
     setView((v) => zoomAround(v, pos, factor));
   }
 
-  function onSelectEntity(kind: "wall" | "room" | "electrical", id: string) {
+  function onSelectEntity(
+    kind: "wall" | "room" | "electrical" | "opening",
+    id: string,
+  ) {
     if (tool !== "select") return; // bij tekenen niet selecteren
     select({ kind, id });
   }
@@ -287,6 +323,16 @@ export function PlanEditor() {
               walls={walls}
               selectedId={selection?.kind === "wall" ? selection.id : null}
               onSelect={(id) => onSelectEntity("wall", id)}
+            />
+          )}
+
+          {visibleLayers.structure && (
+            <OpeningsLayer
+              view={view}
+              walls={walls}
+              openings={openings}
+              selectedId={selection?.kind === "opening" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("opening", id)}
             />
           )}
 

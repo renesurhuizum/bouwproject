@@ -15,11 +15,14 @@ import {
   WALL_STATUS_COLOR,
   ELECTRICAL_LABEL,
   ELECTRICAL_HEIGHT_PRESETS,
+  OPENING_LABEL,
+  OPENING_COLOR,
 } from "@/lib/domain/constants";
-import type { WallMaterial, WallStatus } from "@/lib/domain/types";
+import type { WallMaterial, WallStatus, OpeningType } from "@/lib/domain/types";
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
 const MATERIALS = Object.keys(WALL_MATERIAL_LABEL) as WallMaterial[];
+const OPENING_TYPES: OpeningType[] = ["door", "window", "passage"];
 
 export function SelectionPanel() {
   const selection = useEditor((s) => s.selection);
@@ -34,6 +37,11 @@ export function SelectionPanel() {
       selection?.kind === "electrical" ? await getDB().electrical.get(selection.id) : null,
     [selection?.kind, selection?.id],
   );
+  const opening = useLiveQuery(
+    async () =>
+      selection?.kind === "opening" ? await getDB().openings.get(selection.id) : null,
+    [selection?.kind, selection?.id],
+  );
 
   if (!selection) return null;
 
@@ -42,7 +50,11 @@ export function SelectionPanel() {
       <div className="mx-auto max-w-md rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink-900">
-            {selection.kind === "wall" ? "Muur" : "Elektra"}
+            {selection.kind === "wall"
+              ? "Muur"
+              : selection.kind === "opening"
+                ? "Deur / raam"
+                : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -164,13 +176,57 @@ export function SelectionPanel() {
             <DeleteButton onClick={() => removeAnd("electrical", elec.id, () => select(null))} />
           </div>
         )}
+
+        {opening && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <div className="flex gap-1">
+                {OPENING_TYPES.map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => update("openings", opening.id, { type: t })}
+                    className="rounded-md px-2 py-1 text-[11px] font-medium"
+                    style={{
+                      background: opening.type === t ? OPENING_COLOR[t] : "#ece8df",
+                      color: opening.type === t ? "#fff" : "#44403c",
+                    }}
+                  >
+                    {OPENING_LABEL[t]}
+                  </button>
+                ))}
+              </div>
+            </Row>
+            <Row label="Breedte">
+              <NumberField
+                value={Math.round(opening.width * 100)}
+                unit="cm"
+                onChange={(v) => update("openings", opening.id, { width: v / 100 })}
+              />
+            </Row>
+            <Row label="Hoogte">
+              <NumberField
+                value={Math.round(opening.height * 100)}
+                unit="cm"
+                onChange={(v) => update("openings", opening.id, { height: v / 100 })}
+              />
+            </Row>
+            <Row label="Borsthoogte">
+              <NumberField
+                value={Math.round(opening.sillHeight * 100)}
+                unit="cm"
+                onChange={(v) => update("openings", opening.id, { sillHeight: v / 100 })}
+              />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("openings", opening.id, () => select(null))} />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 async function removeAnd(
-  table: "walls" | "electrical",
+  table: "walls" | "electrical" | "openings",
   id: string,
   after: () => void,
 ) {

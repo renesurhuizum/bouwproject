@@ -8,6 +8,7 @@ import type {
   ElectricalType,
   FixtureKind,
   HvacType,
+  OpeningType,
   WallMaterial,
   WallStatus,
 } from "../domain/types";
@@ -16,6 +17,7 @@ export type Tool = "select" | "wall" | "room" | "place";
 
 export type PlaceKind =
   | { domain: "electrical"; type: ElectricalType }
+  | { domain: "opening"; type: OpeningType }
   | { domain: "plumbing"; fixture: FixtureKind }
   | { domain: "hvac"; type: HvacType };
 

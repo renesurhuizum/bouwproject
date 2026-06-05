@@ -5,8 +5,8 @@
 
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
-import type { Wall, ElectricalItem } from "@/lib/domain/types";
-import { useWalls, useElectrical } from "@/lib/hooks";
+import type { Wall, Opening, ElectricalItem } from "@/lib/domain/types";
+import { useWalls, useElectrical, useOpenings } from "@/lib/hooks";
 import { useEditor } from "@/lib/store/editor";
 import { dist, angle, polygonCentroid } from "@/lib/geometry";
 
@@ -16,24 +16,66 @@ const STATUS_3D: Record<Wall["status"], { color: string; opacity: number }> = {
   demolish: { color: "#dc2626", opacity: 0.35 },
 };
 
-function WallMesh({ wall }: { wall: Wall }) {
+interface Box {
+  localX: number; // midden langs de muur (lokaal, -L/2..L/2)
+  y: number; // midden hoogte
+  w: number; // lengte van het segment
+  h: number; // hoogte van het segment
+}
+
+// Splits een muur in massieve segmenten rond de openingen (echte gaten).
+function wallBoxes(length: number, height: number, openings: Opening[]): Box[] {
+  const clamp = (v: number) => Math.max(0, Math.min(length, v));
+  const ops = openings
+    .map((o) => ({ s: clamp(o.offset - o.width / 2), e: clamp(o.offset + o.width / 2), o }))
+    .filter((x) => x.e > x.s)
+    .sort((a, b) => a.s - b.s);
+
+  const boxes: Box[] = [];
+  const solid = (a: number, b: number) => {
+    if (b - a < 0.001) return;
+    boxes.push({ localX: (a + b) / 2 - length / 2, y: height / 2, w: b - a, h: height });
+  };
+
+  let cursor = 0;
+  for (const { s, e, o } of ops) {
+    if (s > cursor) solid(cursor, s);
+    const top = o.sillHeight + o.height;
+    if (o.sillHeight > 0.001) {
+      boxes.push({ localX: (s + e) / 2 - length / 2, y: o.sillHeight / 2, w: e - s, h: o.sillHeight });
+    }
+    if (top < height - 0.001) {
+      boxes.push({ localX: (s + e) / 2 - length / 2, y: (top + height) / 2, w: e - s, h: height - top });
+    }
+    cursor = Math.max(cursor, e);
+  }
+  if (cursor < length) solid(cursor, length);
+  return boxes;
+}
+
+function WallMesh({ wall, openings }: { wall: Wall; openings: Opening[] }) {
   const length = dist(wall.start, wall.end);
   if (length < 0.01) return null;
   const cx = (wall.start.x + wall.end.x) / 2;
   const cz = (wall.start.y + wall.end.y) / 2;
   const rotY = -angle(wall.start, wall.end);
   const style = STATUS_3D[wall.status];
+  const boxes = wallBoxes(length, wall.height, openings);
 
   return (
-    <mesh position={[cx, wall.height / 2, cz]} rotation={[0, rotY, 0]} castShadow receiveShadow>
-      <boxGeometry args={[length, wall.height, wall.thickness]} />
-      <meshStandardMaterial
-        color={style.color}
-        transparent={style.opacity < 1}
-        opacity={style.opacity}
-        roughness={0.85}
-      />
-    </mesh>
+    <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
+      {boxes.map((b, i) => (
+        <mesh key={i} position={[b.localX, b.y, 0]} castShadow receiveShadow>
+          <boxGeometry args={[b.w, b.h, wall.thickness]} />
+          <meshStandardMaterial
+            color={style.color}
+            transparent={style.opacity < 1}
+            opacity={style.opacity}
+            roughness={0.85}
+          />
+        </mesh>
+      ))}
+    </group>
   );
 }
 
@@ -51,6 +93,14 @@ export function Scene3D() {
   const visibleLayers = useEditor((s) => s.visibleLayers);
   const walls = useWalls(activeLevelId) ?? [];
   const electrical = useElectrical(activeLevelId) ?? [];
+  const openings = useOpenings(activeLevelId) ?? [];
+
+  const openingsByWall = new Map<string, Opening[]>();
+  for (const op of openings) {
+    const list = openingsByWall.get(op.wallId) ?? [];
+    list.push(op);
+    openingsByWall.set(op.wallId, list);
+  }
 
   // Camera-doel: midden van de muren.
   const pts = walls.flatMap((w) => [w.start, w.end]);
@@ -89,7 +139,9 @@ export function Scene3D() {
       />
 
       {visibleLayers.structure &&
-        walls.map((w) => <WallMesh key={w.id} wall={w} />)}
+        walls.map((w) => (
+          <WallMesh key={w.id} wall={w} openings={openingsByWall.get(w.id) ?? []} />
+        ))}
 
       {visibleLayers.electrical &&
         electrical.map((it) => <ElectricalMarker key={it.id} item={it} />)}
