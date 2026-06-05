@@ -3,7 +3,7 @@
 // Zwevende gereedschapsbalk onderin de editor. Mobiel-first, grote tikdoelen.
 
 import { useState } from "react";
-import { MousePointer2, Minus, Plug, Layers, Grid3x3, Plus } from "lucide-react";
+import { MousePointer2, Minus, Pentagon, Plug, Layers, Grid3x3, Plus } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import type {
   ElectricalType,
@@ -202,6 +202,9 @@ export function Toolbar() {
         </ToolBtn>
         <ToolBtn active={tool === "wall"} onClick={() => setTool("wall")} label="Muur">
           <Minus size={20} strokeWidth={3} />
+        </ToolBtn>
+        <ToolBtn active={tool === "room"} onClick={() => setTool("room")} label="Ruimte">
+          <Pentagon size={20} />
         </ToolBtn>
         <ToolBtn
           active={tool === "place"}

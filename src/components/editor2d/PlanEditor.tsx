@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Line, Circle, Label, Tag, Text } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
-import type { Point, Wall, ElectricalItem, Opening } from "@/lib/domain/types";
+import type { Point, Wall, ElectricalItem, Opening, Room } from "@/lib/domain/types";
 import { create } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
 import { useWalls, useRooms, useElectrical, useOpenings } from "@/lib/hooks";
@@ -55,6 +55,7 @@ export function PlanEditor() {
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
+  const [roomDraft, setRoomDraft] = useState<Point[]>([]);
 
   // Gebaar-refs.
   const pointers = useRef<Map<number, Point>>(new Map());
@@ -79,6 +80,7 @@ export function PlanEditor() {
   // Tool wisselt → tekening afbreken.
   useEffect(() => {
     setDraftStart(null);
+    setRoomDraft([]);
   }, [tool, activeLevelId]);
 
   const endpoints = useMemo<Point[]>(
@@ -147,6 +149,17 @@ export function PlanEditor() {
     select({ kind: "opening", id: op.id });
   }
 
+  async function finalizeRoom(points: Point[]) {
+    if (!activeLevelId || points.length < 3) return;
+    const room = await create<Room>("rooms", {
+      levelId: activeLevelId,
+      name: `Ruimte ${rooms.length + 1}`,
+      polygon: points,
+    });
+    setRoomDraft([]);
+    select({ kind: "room", id: room.id });
+  }
+
   function handleTap(screenPos: Point, onStage: boolean) {
     const worldM = screenToMeters(screenPos, view);
     const snapped = snapPoint(worldM);
@@ -157,6 +170,18 @@ export function PlanEditor() {
       } else {
         void createWall(draftStart, snapped);
         setDraftStart(snapped); // doortekenen
+      }
+      return;
+    }
+    if (tool === "room") {
+      // Tik dicht bij het beginpunt (en ≥3 punten) = ruimte sluiten.
+      if (
+        roomDraft.length >= 3 &&
+        dist(snapped, roomDraft[0]) < pxToMeters(SNAP_RADIUS_PX * 1.6, view)
+      ) {
+        void finalizeRoom(roomDraft);
+      } else {
+        setRoomDraft((d) => [...d, snapped]);
       }
       return;
     }
@@ -202,7 +227,7 @@ export function PlanEditor() {
     const evt = e.evt;
     if (!pointers.current.has(evt.pointerId)) {
       // cursor voor rubber-band tonen ook zonder ingedrukt
-      if (tool === "wall" || tool === "place") {
+      if (tool === "wall" || tool === "place" || tool === "room") {
         setCursor(snapPoint(screenToMeters(posFromEvent(evt, stage), view)));
       }
       return;
@@ -237,7 +262,7 @@ export function PlanEditor() {
     if (tapRef.current && evt.pointerId === tapRef.current.id) {
       if (dist(pos, tapRef.current.start) > 8) tapRef.current.moved = true;
     }
-    if (tool === "wall" || tool === "place") {
+    if (tool === "wall" || tool === "place" || tool === "room") {
       setCursor(snapPoint(screenToMeters(pos, view)));
     }
     if (panPointer.current && evt.pointerId === panPointer.current.id && tool === "select") {
@@ -373,7 +398,7 @@ export function PlanEditor() {
                 </Label>
               </>
             )}
-            {(tool === "wall" || tool === "place") && cursor && (
+            {(tool === "wall" || tool === "place" || tool === "room") && cursor && (
               <Circle
                 x={metersToScreen(cursor, view).x}
                 y={metersToScreen(cursor, view).y}
@@ -391,8 +416,72 @@ export function PlanEditor() {
                 fill="#ea580c"
               />
             )}
+
+            {/* Ruimte in opbouw */}
+            {tool === "room" && roomDraft.length > 0 && (
+              <>
+                <Line
+                  points={[...roomDraft, ...(cursor ? [cursor] : [])].flatMap((p) => {
+                    const s = metersToScreen(p, view);
+                    return [s.x, s.y];
+                  })}
+                  stroke="#ea580c"
+                  strokeWidth={2}
+                  closed={roomDraft.length >= 2}
+                  fill="rgba(234,88,12,0.08)"
+                />
+                {roomDraft.map((p, i) => {
+                  const s = metersToScreen(p, view);
+                  return (
+                    <Circle
+                      key={i}
+                      x={s.x}
+                      y={s.y}
+                      radius={i === 0 ? 6 : 4}
+                      fill={i === 0 ? "#ea580c" : "#fff"}
+                      stroke="#ea580c"
+                      strokeWidth={2}
+                    />
+                  );
+                })}
+              </>
+            )}
           </Layer>
         </Stage>
+      )}
+
+      {/* Ruimte-tekenhulp */}
+      {tool === "room" && (
+        <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
+          <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 px-2 py-1.5 shadow-lg backdrop-blur">
+            <span className="px-1 text-[11px] text-ink-500">
+              {roomDraft.length === 0
+                ? "Tik de hoekpunten"
+                : `${roomDraft.length} ${roomDraft.length === 1 ? "punt" : "punten"}`}
+            </span>
+            <button
+              onClick={() => setRoomDraft((d) => d.slice(0, -1))}
+              disabled={roomDraft.length === 0}
+              className="rounded-lg bg-paper-sunken px-2.5 py-1 text-xs font-medium text-ink-700 disabled:opacity-40"
+            >
+              Wis punt
+            </button>
+            <button
+              onClick={() => setRoomDraft([])}
+              disabled={roomDraft.length === 0}
+              className="rounded-lg bg-paper-sunken px-2.5 py-1 text-xs font-medium text-ink-700 disabled:opacity-40"
+            >
+              Annuleer
+            </button>
+            <button
+              onClick={() => void finalizeRoom(roomDraft)}
+              disabled={roomDraft.length < 3}
+              className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
+            >
+              Sluiten
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

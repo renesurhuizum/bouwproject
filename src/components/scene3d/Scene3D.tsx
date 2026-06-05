@@ -3,10 +3,12 @@
 // 3D-weergave: plattegrond geëxtrudeerd naar muren. Orbit-camera om rond te kijken.
 // Plan-coördinaten (x, y in meters) → wereld (x, z). Hoogte = y omhoog.
 
+import { useMemo } from "react";
+import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
-import type { Wall, Opening, ElectricalItem } from "@/lib/domain/types";
-import { useWalls, useElectrical, useOpenings } from "@/lib/hooks";
+import type { Wall, Opening, ElectricalItem, Room } from "@/lib/domain/types";
+import { useWalls, useElectrical, useOpenings, useRooms } from "@/lib/hooks";
 import { useEditor } from "@/lib/store/editor";
 import { dist, angle, polygonCentroid } from "@/lib/geometry";
 
@@ -79,6 +81,28 @@ function WallMesh({ wall, openings }: { wall: Wall; openings: Opening[] }) {
   );
 }
 
+function RoomFloor3D({ room }: { room: Room }) {
+  const shape = useMemo(() => {
+    const s = new THREE.Shape();
+    room.polygon.forEach((p, i) => (i ? s.lineTo(p.x, p.y) : s.moveTo(p.x, p.y)));
+    s.closePath();
+    return s;
+  }, [room.polygon]);
+
+  return (
+    <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} receiveShadow>
+      <shapeGeometry args={[shape]} />
+      <meshStandardMaterial
+        color={room.color ?? "#e6d6bf"}
+        transparent
+        opacity={0.6}
+        roughness={1}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
 function ElectricalMarker({ item }: { item: ElectricalItem }) {
   return (
     <mesh position={[item.position.x, item.heightZ, item.position.y]}>
@@ -94,6 +118,7 @@ export function Scene3D() {
   const walls = useWalls(activeLevelId) ?? [];
   const electrical = useElectrical(activeLevelId) ?? [];
   const openings = useOpenings(activeLevelId) ?? [];
+  const rooms = useRooms(activeLevelId) ?? [];
 
   const openingsByWall = new Map<string, Opening[]>();
   for (const op of openings) {
@@ -137,6 +162,11 @@ export function Scene3D() {
         fadeDistance={60}
         infiniteGrid
       />
+
+      {visibleLayers.rooms &&
+        rooms
+          .filter((r) => r.polygon.length >= 3)
+          .map((r) => <RoomFloor3D key={r.id} room={r} />)}
 
       {visibleLayers.structure &&
         walls.map((w) => (

@@ -7,8 +7,8 @@ import { Trash2, X } from "lucide-react";
 import { getDB } from "@/lib/db/db";
 import { update, remove } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
-import { dist } from "@/lib/geometry";
-import { formatLength } from "@/lib/format";
+import { dist, polygonArea } from "@/lib/geometry";
+import { formatLength, formatArea } from "@/lib/format";
 import {
   WALL_MATERIAL_LABEL,
   WALL_STATUS_LABEL,
@@ -42,6 +42,10 @@ export function SelectionPanel() {
       selection?.kind === "opening" ? await getDB().openings.get(selection.id) : null,
     [selection?.kind, selection?.id],
   );
+  const room = useLiveQuery(
+    async () => (selection?.kind === "room" ? await getDB().rooms.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
 
   if (!selection) return null;
 
@@ -54,7 +58,9 @@ export function SelectionPanel() {
               ? "Muur"
               : selection.kind === "opening"
                 ? "Deur / raam"
-                : "Elektra"}
+                : selection.kind === "room"
+                  ? "Ruimte"
+                  : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -220,13 +226,40 @@ export function SelectionPanel() {
             <DeleteButton onClick={() => removeAnd("openings", opening.id, () => select(null))} />
           </div>
         )}
+
+        {room && (
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between text-xs text-ink-500">
+              <span>Oppervlak</span>
+              <span className="tabular text-ink-900">{formatArea(polygonArea(room.polygon))}</span>
+            </div>
+            <Row label="Naam">
+              <input
+                type="text"
+                defaultValue={room.name}
+                onBlur={(e) => update("rooms", room.id, { name: e.target.value })}
+                className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              />
+            </Row>
+            <Row label="Functie">
+              <input
+                type="text"
+                defaultValue={room.func ?? ""}
+                placeholder="bv. badkamer"
+                onBlur={(e) => update("rooms", room.id, { func: e.target.value })}
+                className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900 placeholder:text-ink-300"
+              />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("rooms", room.id, () => select(null))} />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 async function removeAnd(
-  table: "walls" | "electrical" | "openings",
+  table: "walls" | "electrical" | "openings" | "rooms",
   id: string,
   after: () => void,
 ) {
