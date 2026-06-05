@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/*
+  Technische / blueprint-stijl. Warm papier, inkt-donkere tekst, bouw-oranje
+  accent en blauwdruk-blauw. Hoog contrast voor buitengebruik op de bouwplaats.
+*/
+
+@theme {
+  /* Papier & inkt */
+  --color-paper: #f4f1ea;
+  --color-paper-raised: #fbfaf6;
+  --color-paper-sunken: #ece8df;
+
+  --color-ink-900: #1c1917;
+  --color-ink-700: #44403c;
+  --color-ink-500: #78716c;
+  --color-ink-300: #a8a29e;
+
+  --color-line: #ddd7ca;
+  --color-line-strong: #c4bca9;
+
+  /* Accenten */
+  --color-accent: #ea580c; /* bouw-oranje */
+  --color-accent-soft: #fff1e7;
+  --color-blueprint: #1d4ed8; /* blauwdruk-blauw */
+  --color-blueprint-soft: #e8effc;
+
+  /* Status */
+  --color-ok: #15803d;
+  --color-warn: #b45309;
+  --color-danger: #dc2626;
+
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 0.75rem;
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink-900);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* Voorkom dubbeltik-zoom op mobiel in de editor. */
+  touch-action: manipulation;
+}
+
+/* Veilige zones (notch / home-indicator) op telefoon. */
+.safe-bottom {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+.safe-top {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
+/* Maatvoering en getallen altijd in mono met tabulaire cijfers. */
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subtiele blauwdruk-rasterachtergrond voor sfeer op niet-editor schermen. */
+.blueprint-bg {
+  background-color: var(--color-paper);
+  background-image:
+    linear-gradient(to right, rgba(29, 78, 216, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(29, 78, 216, 0.05) 1px, transparent 1px);
+  background-size: 1.5rem 1.5rem;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: #fff;
+}

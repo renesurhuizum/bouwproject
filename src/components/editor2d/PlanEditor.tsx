@@ -1,0 +1,353 @@
+"use client";
+
+// Hart van de app: de 2D plattegrond-editor.
+// - Touch: 1 vinger pannen (select) of tekenen (wall/place); 2 vingers pinch-zoom + pan.
+// - Muis: slepen pant (select), scrollwiel zoomt.
+// - Muren tekenen met snapping op raster en bestaande eindpunten.
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Stage, Layer, Line, Circle, Label, Tag, Text } from "react-konva";
+import type { KonvaEventObject } from "konva/lib/Node";
+import type { Point, Wall, ElectricalItem } from "@/lib/domain/types";
+import { create } from "@/lib/db/repo";
+import { useEditor } from "@/lib/store/editor";
+import { useWalls, useRooms, useElectrical } from "@/lib/hooks";
+import { GRID_SIZE_M, ELECTRICAL_DEFAULT_HEIGHT } from "@/lib/domain/constants";
+import { dist, snapToGrid, snapToPoints } from "@/lib/geometry";
+import { formatLength } from "@/lib/format";
+import {
+  screenToMeters,
+  metersToScreen,
+  zoomAround,
+  pxToMeters,
+  SNAP_RADIUS_PX,
+  type ViewState,
+} from "./viewport";
+import { GridLayer } from "./GridLayer";
+import { WallsLayer } from "./WallsLayer";
+import { RoomsLayer } from "./RoomsLayer";
+import { ElectricalLayer } from "./ElectricalLayer";
+
+export function PlanEditor() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const [view, setView] = useState<ViewState>({ x: 60, y: 90, scale: 1 });
+
+  const tool = useEditor((s) => s.tool);
+  const placeKind = useEditor((s) => s.placeKind);
+  const wallDefaults = useEditor((s) => s.wallDefaults);
+  const visibleLayers = useEditor((s) => s.visibleLayers);
+  const showGrid = useEditor((s) => s.showGrid);
+  const activeLevelId = useEditor((s) => s.activeLevelId);
+  const selection = useEditor((s) => s.selection);
+  const select = useEditor((s) => s.select);
+
+  const walls = useWalls(activeLevelId) ?? [];
+  const rooms = useRooms(activeLevelId) ?? [];
+  const electrical = useElectrical(activeLevelId) ?? [];
+
+  const [draftStart, setDraftStart] = useState<Point | null>(null);
+  const [cursor, setCursor] = useState<Point | null>(null);
+
+  // Gebaar-refs.
+  const pointers = useRef<Map<number, Point>>(new Map());
+  const gesture = useRef<{ lastDist?: number; lastCenter?: Point }>({});
+  const panPointer = useRef<{ id: number; last: Point } | null>(null);
+  const tapRef = useRef<
+    { id: number; start: Point; time: number; moved: boolean; onStage: boolean } | null
+  >(null);
+
+  // Containergrootte volgen.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0].contentRect;
+      setSize({ width: r.width, height: r.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Tool wisselt → tekening afbreken.
+  useEffect(() => {
+    setDraftStart(null);
+  }, [tool, activeLevelId]);
+
+  const endpoints = useMemo<Point[]>(
+    () => walls.flatMap((w) => [w.start, w.end]),
+    [walls],
+  );
+
+  function posFromEvent(evt: PointerEvent | WheelEvent, stage: { container(): HTMLElement }): Point {
+    const rect = stage.container().getBoundingClientRect();
+    return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+  }
+
+  function snapPoint(m: Point): Point {
+    const near = snapToPoints(m, endpoints, pxToMeters(SNAP_RADIUS_PX, view));
+    return near ?? snapToGrid(m, GRID_SIZE_M);
+  }
+
+  async function createWall(start: Point, end: Point) {
+    if (!activeLevelId) return;
+    if (dist(start, end) < 0.01) return;
+    await create<Wall>("walls", {
+      levelId: activeLevelId,
+      start,
+      end,
+      thickness: wallDefaults.thickness,
+      height: wallDefaults.height,
+      material: wallDefaults.material,
+      loadBearing: wallDefaults.loadBearing,
+      status: wallDefaults.status,
+    });
+  }
+
+  async function placeElectrical(at: Point) {
+    if (!activeLevelId || !placeKind || placeKind.domain !== "electrical") return;
+    const item = await create<ElectricalItem>("electrical", {
+      levelId: activeLevelId,
+      type: placeKind.type,
+      position: at,
+      heightZ: ELECTRICAL_DEFAULT_HEIGHT[placeKind.type],
+    });
+    select({ kind: "electrical", id: item.id });
+  }
+
+  function handleTap(screenPos: Point, onStage: boolean) {
+    const worldM = screenToMeters(screenPos, view);
+    const snapped = snapPoint(worldM);
+
+    if (tool === "wall") {
+      if (!draftStart) {
+        setDraftStart(snapped);
+      } else {
+        void createWall(draftStart, snapped);
+        setDraftStart(snapped); // doortekenen
+      }
+      return;
+    }
+    if (tool === "place") {
+      void placeElectrical(snapped);
+      return;
+    }
+    // select: tik op leeg vlak = deselecteren
+    if (tool === "select" && onStage) {
+      select(null);
+    }
+  }
+
+  // ── Pointer events ─────────────────────────────────────────────────────────
+  function onPointerDown(e: KonvaEventObject<PointerEvent>) {
+    const stage = e.target.getStage();
+    if (!stage) return;
+    const evt = e.evt;
+    const pos = posFromEvent(evt, stage);
+    pointers.current.set(evt.pointerId, pos);
+
+    if (pointers.current.size === 1) {
+      tapRef.current = {
+        id: evt.pointerId,
+        start: pos,
+        time: Date.now(),
+        moved: false,
+        onStage: e.target === stage,
+      };
+      if (tool === "select") panPointer.current = { id: evt.pointerId, last: pos };
+    } else {
+      // tweede vinger: geen tap, geen 1-vinger-pan
+      tapRef.current = null;
+      panPointer.current = null;
+      gesture.current = {};
+    }
+  }
+
+  function onPointerMove(e: KonvaEventObject<PointerEvent>) {
+    const stage = e.target.getStage();
+    if (!stage) return;
+    const evt = e.evt;
+    if (!pointers.current.has(evt.pointerId)) {
+      // cursor voor rubber-band tonen ook zonder ingedrukt
+      if (tool === "wall" || tool === "place") {
+        setCursor(snapPoint(screenToMeters(posFromEvent(evt, stage), view)));
+      }
+      return;
+    }
+    const pos = posFromEvent(evt, stage);
+    pointers.current.set(evt.pointerId, pos);
+
+    if (pointers.current.size >= 2) {
+      const [p1, p2] = [...pointers.current.values()];
+      const d = dist(p1, p2);
+      const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      setView((v) => {
+        let next = v;
+        if (gesture.current.lastDist) {
+          next = zoomAround(next, center, d / gesture.current.lastDist);
+        }
+        if (gesture.current.lastCenter) {
+          next = {
+            ...next,
+            x: next.x + (center.x - gesture.current.lastCenter.x),
+            y: next.y + (center.y - gesture.current.lastCenter.y),
+          };
+        }
+        return next;
+      });
+      gesture.current.lastDist = d;
+      gesture.current.lastCenter = center;
+      if (tapRef.current) tapRef.current.moved = true;
+      return;
+    }
+
+    if (tapRef.current && evt.pointerId === tapRef.current.id) {
+      if (dist(pos, tapRef.current.start) > 8) tapRef.current.moved = true;
+    }
+    if (tool === "wall" || tool === "place") {
+      setCursor(snapPoint(screenToMeters(pos, view)));
+    }
+    if (panPointer.current && evt.pointerId === panPointer.current.id && tool === "select") {
+      const dx = pos.x - panPointer.current.last.x;
+      const dy = pos.y - panPointer.current.last.y;
+      setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+      panPointer.current.last = pos;
+    }
+  }
+
+  function onPointerUp(e: KonvaEventObject<PointerEvent>) {
+    const stage = e.target.getStage();
+    if (!stage) return;
+    const evt = e.evt;
+    const pos = posFromEvent(evt, stage);
+    const t = tapRef.current;
+    const wasTap =
+      !!t &&
+      evt.pointerId === t.id &&
+      !t.moved &&
+      Date.now() - t.time < 500 &&
+      pointers.current.size === 1;
+
+    pointers.current.delete(evt.pointerId);
+    if (pointers.current.size < 2) gesture.current = {};
+    if (panPointer.current && evt.pointerId === panPointer.current.id) {
+      panPointer.current = null;
+    }
+    if (wasTap) handleTap(pos, t!.onStage);
+    tapRef.current = null;
+  }
+
+  function onWheel(e: KonvaEventObject<WheelEvent>) {
+    const stage = e.target.getStage();
+    if (!stage) return;
+    e.evt.preventDefault();
+    const pos = posFromEvent(e.evt, stage);
+    const factor = e.evt.deltaY < 0 ? 1.1 : 1 / 1.1;
+    setView((v) => zoomAround(v, pos, factor));
+  }
+
+  function onSelectEntity(kind: "wall" | "room" | "electrical", id: string) {
+    if (tool !== "select") return; // bij tekenen niet selecteren
+    select({ kind, id });
+  }
+
+  // Draft (rubber-band) lengte.
+  const draftLen = draftStart && cursor ? dist(draftStart, cursor) : 0;
+
+  return (
+    <div
+      ref={containerRef}
+      className="absolute inset-0"
+      style={{ touchAction: "none", cursor: tool === "select" ? "grab" : "crosshair" }}
+    >
+      {size.width > 0 && (
+        <Stage
+          width={size.width}
+          height={size.height}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onWheel={onWheel}
+        >
+          {showGrid && <GridLayer view={view} width={size.width} height={size.height} />}
+
+          {visibleLayers.rooms && (
+            <RoomsLayer
+              view={view}
+              rooms={rooms}
+              selectedId={selection?.kind === "room" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("room", id)}
+            />
+          )}
+
+          {visibleLayers.structure && (
+            <WallsLayer
+              view={view}
+              walls={walls}
+              selectedId={selection?.kind === "wall" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("wall", id)}
+            />
+          )}
+
+          {visibleLayers.electrical && (
+            <ElectricalLayer
+              view={view}
+              items={electrical}
+              selectedId={selection?.kind === "electrical" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("electrical", id)}
+            />
+          )}
+
+          {/* Draft / cursor */}
+          <Layer listening={false}>
+            {tool === "wall" && draftStart && cursor && (
+              <>
+                <Line
+                  points={[
+                    ...Object.values(metersToScreen(draftStart, view)),
+                    ...Object.values(metersToScreen(cursor, view)),
+                  ]}
+                  stroke="#ea580c"
+                  strokeWidth={2}
+                  dash={[8, 6]}
+                />
+                <Label
+                  x={metersToScreen(cursor, view).x + 10}
+                  y={metersToScreen(cursor, view).y - 22}
+                >
+                  <Tag fill="#1c1917" cornerRadius={4} />
+                  <Text
+                    text={formatLength(draftLen)}
+                    fontSize={12}
+                    fontFamily="monospace"
+                    fill="#fff"
+                    padding={4}
+                  />
+                </Label>
+              </>
+            )}
+            {(tool === "wall" || tool === "place") && cursor && (
+              <Circle
+                x={metersToScreen(cursor, view).x}
+                y={metersToScreen(cursor, view).y}
+                radius={6}
+                stroke="#ea580c"
+                strokeWidth={2}
+                fill="rgba(234,88,12,0.2)"
+              />
+            )}
+            {tool === "wall" && draftStart && (
+              <Circle
+                x={metersToScreen(draftStart, view).x}
+                y={metersToScreen(draftStart, view).y}
+                radius={5}
+                fill="#ea580c"
+              />
+            )}
+          </Layer>
+        </Stage>
+      )}
+    </div>
+  );
+}

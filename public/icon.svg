@@ -1,0 +1,19 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bouwproject">
+  <rect width="512" height="512" rx="96" fill="#1c1917"/>
+  <!-- blauwdruk-raster -->
+  <g stroke="#3b3a36" stroke-width="2">
+    <path d="M96 0V512M160 0V512M224 0V512M288 0V512M352 0V512M416 0V512" />
+    <path d="M0 96H512M0 160H512M0 224H512M0 288H512M0 352H512M0 416H512" />
+  </g>
+  <!-- huis / blueprint -->
+  <g fill="none" stroke="#fbfaf6" stroke-width="16" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M120 240 L256 132 L392 240" />
+    <path d="M152 224 V392 H360 V224" />
+    <rect x="232" y="312" width="48" height="80" stroke="#ea580c"/>
+  </g>
+  <!-- maatlijn -->
+  <g stroke="#ea580c" stroke-width="10" stroke-linecap="round">
+    <path d="M120 432 H392"/>
+    <path d="M120 420 V444 M392 420 V444"/>
+  </g>
+</svg>
