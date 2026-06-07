@@ -8,12 +8,14 @@ import { useEditor } from "@/lib/store/editor";
 import type {
   ElectricalType,
   EditorLayer,
+  FixtureKind,
   OpeningType,
   WallStatus,
 } from "@/lib/domain/types";
 import {
   ELECTRICAL_LABEL,
   OPENING_LABEL,
+  FIXTURE_LABEL,
   WALL_STATUS_LABEL,
 } from "@/lib/domain/constants";
 
@@ -29,6 +31,17 @@ const PLACE_TYPES: ElectricalType[] = [
 ];
 
 const OPENING_TYPES: OpeningType[] = ["door", "window", "passage"];
+
+const FIXTURE_TYPES: FixtureKind[] = [
+  "toilet",
+  "sink",
+  "shower",
+  "bath",
+  "kitchen-tap",
+  "washing-machine",
+  "boiler",
+  "outdoor-tap",
+];
 
 const LAYERS: { key: EditorLayer; label: string }[] = [
   { key: "structure", label: "Muren" },
@@ -118,6 +131,16 @@ export function Toolbar() {
               Elektra
             </button>
             <button
+              onClick={() => setPlaceKind({ domain: "plumbing", fixture: "sink" })}
+              className={`flex-1 rounded-lg py-1.5 text-xs font-semibold ${
+                placeKind?.domain === "plumbing"
+                  ? "bg-[#0891b2] text-white"
+                  : "bg-paper-sunken text-ink-700"
+              }`}
+            >
+              Water
+            </button>
+            <button
               onClick={() => setPlaceKind({ domain: "opening", type: "door" })}
               className={`flex-1 rounded-lg py-1.5 text-xs font-semibold ${
                 placeKind?.domain === "opening"
@@ -125,44 +148,55 @@ export function Toolbar() {
                   : "bg-paper-sunken text-ink-700"
               }`}
             >
-              Deuren / ramen
+              Deur / raam
             </button>
           </div>
 
-          {placeKind?.domain === "opening" ? (
+          {placeKind?.domain === "opening" && (
             <div className="grid grid-cols-3 gap-1.5">
-              {OPENING_TYPES.map((t) => {
-                const active = placeKind.type === t;
-                return (
-                  <button
-                    key={t}
-                    onClick={() => setPlaceKind({ domain: "opening", type: t })}
-                    className={`rounded-lg px-2 py-1.5 text-[11px] font-medium ${
-                      active ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"
-                    }`}
-                  >
-                    {OPENING_LABEL[t]}
-                  </button>
-                );
-              })}
+              {OPENING_TYPES.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setPlaceKind({ domain: "opening", type: t })}
+                  className={`rounded-lg px-2 py-1.5 text-[11px] font-medium ${
+                    placeKind.type === t ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"
+                  }`}
+                >
+                  {OPENING_LABEL[t]}
+                </button>
+              ))}
             </div>
-          ) : (
+          )}
+
+          {placeKind?.domain === "plumbing" && (
             <div className="grid grid-cols-4 gap-1.5">
-              {PLACE_TYPES.map((t) => {
-                const active =
-                  placeKind?.domain === "electrical" && placeKind.type === t;
-                return (
-                  <button
-                    key={t}
-                    onClick={() => setPlaceKind({ domain: "electrical", type: t })}
-                    className={`rounded-lg px-2 py-1.5 text-[11px] font-medium leading-tight ${
-                      active ? "bg-blueprint text-white" : "bg-paper-sunken text-ink-700"
-                    }`}
-                  >
-                    {ELECTRICAL_LABEL[t]}
-                  </button>
-                );
-              })}
+              {FIXTURE_TYPES.map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setPlaceKind({ domain: "plumbing", fixture: f })}
+                  className={`rounded-lg px-2 py-1.5 text-[11px] font-medium leading-tight ${
+                    placeKind.fixture === f ? "bg-[#0891b2] text-white" : "bg-paper-sunken text-ink-700"
+                  }`}
+                >
+                  {FIXTURE_LABEL[f]}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {placeKind?.domain === "electrical" && (
+            <div className="grid grid-cols-4 gap-1.5">
+              {PLACE_TYPES.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setPlaceKind({ domain: "electrical", type: t })}
+                  className={`rounded-lg px-2 py-1.5 text-[11px] font-medium leading-tight ${
+                    placeKind.type === t ? "bg-blueprint text-white" : "bg-paper-sunken text-ink-700"
+                  }`}
+                >
+                  {ELECTRICAL_LABEL[t]}
+                </button>
+              ))}
             </div>
           )}
         </div>

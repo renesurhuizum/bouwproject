@@ -2,6 +2,7 @@
 
 import type {
   ElectricalType,
+  FixtureKind,
   OpeningType,
   WallMaterial,
   WallStatus,
@@ -237,6 +238,44 @@ export const OPENING_COLOR: Record<OpeningType, string> = {
 
 // Hoe dicht (m) een tik bij een muur moet zijn om er een opening op te plaatsen.
 export const OPENING_SNAP_M = 0.5;
+
+// ── Water & sanitair ─────────────────────────────────────────────────────────
+
+export const FIXTURE_LABEL: Record<FixtureKind, string> = {
+  toilet: "Toilet",
+  sink: "Wastafel",
+  shower: "Douche",
+  bath: "Bad",
+  "kitchen-tap": "Keukenkraan",
+  "washing-machine": "Wasmachine",
+  boiler: "CV-ketel / boiler",
+  "outdoor-tap": "Buitenkraan",
+};
+
+export const FIXTURE_CODE: Record<FixtureKind, string> = {
+  toilet: "WC",
+  sink: "WT",
+  shower: "DO",
+  bath: "BAD",
+  "kitchen-tap": "KK",
+  "washing-machine": "WM",
+  boiler: "CV",
+  "outdoor-tap": "BK",
+};
+
+// Standaard aansluithoogte (m boven vloer).
+export const FIXTURE_DEFAULT_HEIGHT: Record<FixtureKind, number> = {
+  toilet: 0.2,
+  sink: 1.0,
+  shower: 1.1,
+  bath: 0.6,
+  "kitchen-tap": 1.0,
+  "washing-machine": 0.9,
+  boiler: 1.5,
+  "outdoor-tap": 0.5,
+};
+
+export const PLUMBING_COLOR = "#0891b2"; // teal
 
 // ── Materialen ────────────────────────────────────────────────────────────────
 

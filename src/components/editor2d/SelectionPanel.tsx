@@ -17,6 +17,7 @@ import {
   ELECTRICAL_HEIGHT_PRESETS,
   OPENING_LABEL,
   OPENING_COLOR,
+  FIXTURE_LABEL,
 } from "@/lib/domain/constants";
 import type { WallMaterial, WallStatus, OpeningType } from "@/lib/domain/types";
 
@@ -46,6 +47,11 @@ export function SelectionPanel() {
     async () => (selection?.kind === "room" ? await getDB().rooms.get(selection.id) : null),
     [selection?.kind, selection?.id],
   );
+  const plumb = useLiveQuery(
+    async () =>
+      selection?.kind === "plumbing" ? await getDB().plumbing.get(selection.id) : null,
+    [selection?.kind, selection?.id],
+  );
 
   if (!selection) return null;
 
@@ -60,7 +66,9 @@ export function SelectionPanel() {
                 ? "Deur / raam"
                 : selection.kind === "room"
                   ? "Ruimte"
-                  : "Elektra"}
+                  : selection.kind === "plumbing"
+                    ? "Water"
+                    : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -253,13 +261,40 @@ export function SelectionPanel() {
             <DeleteButton onClick={() => removeAnd("rooms", room.id, () => select(null))} />
           </div>
         )}
+
+        {plumb && plumb.fixture && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <span className="text-xs font-medium text-ink-900">
+                {FIXTURE_LABEL[plumb.fixture]}
+              </span>
+            </Row>
+            <Row label="Aansluithoogte">
+              <NumberField
+                value={Math.round((plumb.heightZ ?? 0) * 100)}
+                unit="cm"
+                onChange={(v) => update("plumbing", plumb.id, { heightZ: v / 100 })}
+              />
+            </Row>
+            <Row label="Notitie">
+              <input
+                type="text"
+                defaultValue={plumb.note ?? ""}
+                placeholder="bv. 40mm afvoer"
+                onBlur={(e) => update("plumbing", plumb.id, { note: e.target.value })}
+                className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900 placeholder:text-ink-300"
+              />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("plumbing", plumb.id, () => select(null))} />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 async function removeAnd(
-  table: "walls" | "electrical" | "openings" | "rooms",
+  table: "walls" | "electrical" | "openings" | "rooms" | "plumbing",
   id: string,
   after: () => void,
 ) {

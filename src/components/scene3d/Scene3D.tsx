@@ -7,8 +7,8 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
-import type { Wall, Opening, ElectricalItem, Room } from "@/lib/domain/types";
-import { useWalls, useElectrical, useOpenings, useRooms } from "@/lib/hooks";
+import type { Wall, Opening, ElectricalItem, PlumbingItem, Room } from "@/lib/domain/types";
+import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing } from "@/lib/hooks";
 import { useEditor } from "@/lib/store/editor";
 import { dist, angle, polygonCentroid } from "@/lib/geometry";
 
@@ -112,6 +112,16 @@ function ElectricalMarker({ item }: { item: ElectricalItem }) {
   );
 }
 
+function PlumbingMarker({ item }: { item: PlumbingItem }) {
+  if (!item.position) return null;
+  return (
+    <mesh position={[item.position.x, item.heightZ ?? 0.3, item.position.y]}>
+      <cylinderGeometry args={[0.07, 0.07, 0.14, 16]} />
+      <meshStandardMaterial color="#0891b2" emissive="#0891b2" emissiveIntensity={0.25} />
+    </mesh>
+  );
+}
+
 export function Scene3D() {
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const visibleLayers = useEditor((s) => s.visibleLayers);
@@ -119,6 +129,7 @@ export function Scene3D() {
   const electrical = useElectrical(activeLevelId) ?? [];
   const openings = useOpenings(activeLevelId) ?? [];
   const rooms = useRooms(activeLevelId) ?? [];
+  const plumbing = usePlumbing(activeLevelId) ?? [];
 
   const openingsByWall = new Map<string, Opening[]>();
   for (const op of openings) {
@@ -175,6 +186,9 @@ export function Scene3D() {
 
       {visibleLayers.electrical &&
         electrical.map((it) => <ElectricalMarker key={it.id} item={it} />)}
+
+      {visibleLayers.plumbing &&
+        plumbing.map((it) => <PlumbingMarker key={it.id} item={it} />)}
 
       <OrbitControls
         target={[center.x, 1.2, center.y]}

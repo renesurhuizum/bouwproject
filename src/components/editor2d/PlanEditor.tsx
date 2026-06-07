@@ -8,13 +8,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Line, Circle, Label, Tag, Text } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
-import type { Point, Wall, ElectricalItem, Opening, Room } from "@/lib/domain/types";
+import type {
+  Point,
+  Wall,
+  ElectricalItem,
+  PlumbingItem,
+  Opening,
+  Room,
+} from "@/lib/domain/types";
 import { create, remove, update } from "@/lib/db/repo";
 import { useEditor, type SelKind } from "@/lib/store/editor";
-import { useWalls, useRooms, useElectrical, useOpenings } from "@/lib/hooks";
+import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing } from "@/lib/hooks";
 import {
   GRID_SIZE_M,
   ELECTRICAL_DEFAULT_HEIGHT,
+  FIXTURE_DEFAULT_HEIGHT,
   OPENING_DEFAULTS,
   OPENING_SNAP_M,
 } from "@/lib/domain/constants";
@@ -33,6 +41,7 @@ import { WallsLayer } from "./WallsLayer";
 import { OpeningsLayer } from "./OpeningsLayer";
 import { RoomsLayer } from "./RoomsLayer";
 import { ElectricalLayer } from "./ElectricalLayer";
+import { PlumbingLayer } from "./PlumbingLayer";
 
 export function PlanEditor() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,6 +60,7 @@ export function PlanEditor() {
   const walls = useWalls(activeLevelId) ?? [];
   const rooms = useRooms(activeLevelId) ?? [];
   const electrical = useElectrical(activeLevelId) ?? [];
+  const plumbing = usePlumbing(activeLevelId) ?? [];
   const openings = useOpenings(activeLevelId) ?? [];
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
@@ -165,6 +175,18 @@ export function PlanEditor() {
     select({ kind: "electrical", id: item.id });
   }
 
+  async function placePlumbing(at: Point) {
+    if (!activeLevelId || !placeKind || placeKind.domain !== "plumbing") return;
+    const item = await create<PlumbingItem>("plumbing", {
+      levelId: activeLevelId,
+      type: "fixture",
+      fixture: placeKind.fixture,
+      position: at,
+      heightZ: FIXTURE_DEFAULT_HEIGHT[placeKind.fixture],
+    });
+    select({ kind: "plumbing", id: item.id });
+  }
+
   // Plaats een deur/raam op de dichtstbijzijnde muur (binnen tolerantie).
   async function placeOpening(at: Point) {
     if (!placeKind || placeKind.domain !== "opening") return;
@@ -228,6 +250,7 @@ export function PlanEditor() {
     }
     if (tool === "place") {
       if (placeKind?.domain === "opening") void placeOpening(worldM);
+      else if (placeKind?.domain === "plumbing") void placePlumbing(snapped);
       else void placeElectrical(snapped);
       return;
     }
@@ -366,7 +389,7 @@ export function PlanEditor() {
   }
 
   function onSelectEntity(
-    kind: "wall" | "room" | "electrical" | "opening",
+    kind: "wall" | "room" | "electrical" | "opening" | "plumbing",
     id: string,
   ) {
     if (tool !== "select") return; // bij tekenen niet selecteren
@@ -429,6 +452,15 @@ export function PlanEditor() {
               items={electrical}
               selectedId={selection?.kind === "electrical" ? selection.id : null}
               onSelect={(id) => onSelectEntity("electrical", id)}
+            />
+          )}
+
+          {visibleLayers.plumbing && (
+            <PlumbingLayer
+              view={view}
+              items={plumbing}
+              selectedId={selection?.kind === "plumbing" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("plumbing", id)}
             />
           )}
 
