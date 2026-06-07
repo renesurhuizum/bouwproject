@@ -6,6 +6,7 @@ import type {
   WallMaterial,
   WallStatus,
   PhaseStatus,
+  MaterialStatus,
 } from "./types";
 
 // Standaard montagehoogtes (m boven vloer) — NEN/praktijk in NL.
@@ -236,3 +237,19 @@ export const OPENING_COLOR: Record<OpeningType, string> = {
 
 // Hoe dicht (m) een tik bij een muur moet zijn om er een opening op te plaatsen.
 export const OPENING_SNAP_M = 0.5;
+
+// ── Materialen ────────────────────────────────────────────────────────────────
+
+export const MATERIAL_UNITS = ["st", "m", "m²", "m³", "zak", "rol", "pak", "l", "kg"] as const;
+
+export const MATERIAL_STATUS_LABEL: Record<MaterialStatus, string> = {
+  needed: "Nodig",
+  ordered: "Besteld",
+  delivered: "Geleverd",
+};
+
+export const MATERIAL_STATUS_COLOR: Record<MaterialStatus, string> = {
+  needed: "#b45309",
+  ordered: "#1d4ed8",
+  delivered: "#15803d",
+};
