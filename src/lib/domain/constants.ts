@@ -253,3 +253,82 @@ export const MATERIAL_STATUS_COLOR: Record<MaterialStatus, string> = {
   ordered: "#1d4ed8",
   delivered: "#15803d",
 };
+
+// ── Stappenplannen per fase ──────────────────────────────────────────────────
+// Standaard checklist per fase (op `order`), om automatisch te genereren.
+
+export const PHASE_TASK_TEMPLATES: Record<number, string[]> = {
+  1: [
+    "Bestaande situatie opmeten",
+    "Definitieve indeling vaststellen",
+    "Vergunning checken / aanvragen",
+    "Constructieberekening (indien nodig)",
+    "Offertes aannemers verzamelen",
+    "Planning en budget vastleggen",
+  ],
+  2: [
+    "Asbestinventarisatie laten uitvoeren",
+    "Nutsvoorzieningen afsluiten waar nodig",
+    "Niet-dragende wanden slopen",
+    "Oude vloeren en plafonds verwijderen",
+    "Puin afvoeren (container regelen)",
+  ],
+  3: [
+    "Dragende wijzigingen voorbereiden",
+    "Stalen balken / lateien plaatsen",
+    "Fundering aanpassen of storten",
+    "Constructie laten controleren",
+  ],
+  4: [
+    "Nieuwe muren metselen / lijmen",
+    "Dak herstellen of vervangen",
+    "Kozijnen plaatsen",
+    "Wind- en waterdicht maken",
+  ],
+  5: [
+    "Leidingplan uitwerken",
+    "Elektra bedrading trekken (per groep)",
+    "Waterleidingen aanleggen (aan- en afvoer)",
+    "CV / vloerverwarming leidingen leggen",
+    "Ventilatiekanalen plaatsen",
+    "Inspectie vóór dichtmaken",
+  ],
+  6: [
+    "Vloerisolatie aanbrengen",
+    "Spouw- / wandisolatie aanbrengen",
+    "Dakisolatie aanbrengen",
+    "Dampscherm plaatsen",
+  ],
+  7: [
+    "Metalstud / regelwerk plaatsen",
+    "Gipsplaten monteren",
+    "Naden en hoeken afwerken",
+  ],
+  8: ["Wanden uitvlakken en stucen", "Plafonds afwerken", "Schuren en stofvrij maken"],
+  9: [
+    "Vloerverwarming controleren / afpersen",
+    "Dekvloer storten",
+    "Uithardingstijd afwachten",
+  ],
+  10: [
+    "Stopcontacten en schakelaars monteren",
+    "Verlichting ophangen en aansluiten",
+    "Kranen en sanitair aansluiten",
+    "CV-ketel / warmtepomp in bedrijf stellen",
+    "Groepenkast afmonteren en testen",
+  ],
+  11: [
+    "Tegelwerk badkamer en keuken",
+    "Vloeren leggen",
+    "Binnendeuren plaatsen",
+    "Schilderwerk",
+    "Keuken plaatsen",
+    "Sanitair afmonteren",
+  ],
+  12: [
+    "Restpuntenlijst opstellen",
+    "Restpunten oplossen",
+    "Schoonmaak",
+    "Opleverinspectie",
+  ],
+};

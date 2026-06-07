@@ -3,18 +3,39 @@
 // Fasering: de juiste volgorde met afhankelijkheden + taken per fase.
 
 import { useState } from "react";
-import { Lock, Check, Plus } from "lucide-react";
+import { Lock, Check, Plus, ListPlus } from "lucide-react";
 import { useProject, usePhases, useTasks } from "@/lib/hooks";
 import { analyzePhases, type PhaseStatusInfo } from "@/lib/phases";
 import { create, update, remove } from "@/lib/db/repo";
 import type { Phase, PhaseStatus, TaskItem } from "@/lib/domain/types";
-import { PHASE_STATUS_LABEL } from "@/lib/domain/constants";
+import { PHASE_STATUS_LABEL, PHASE_TASK_TEMPLATES } from "@/lib/domain/constants";
 
 export default function FasesPage() {
   const project = useProject();
   const phases = usePhases(project?.id) ?? [];
   const tasks = useTasks(project?.id) ?? [];
   const analysis = analyzePhases(phases);
+
+  const hasAnyTasks = tasks.length > 0;
+
+  async function generateAll() {
+    if (!project) return;
+    for (const p of phases) {
+      const tmpl = PHASE_TASK_TEMPLATES[p.order] ?? [];
+      const existing = new Set(
+        tasks.filter((t) => t.phaseId === p.id).map((t) => t.title.toLowerCase()),
+      );
+      for (const title of tmpl) {
+        if (existing.has(title.toLowerCase())) continue;
+        await create<TaskItem>("tasks", {
+          projectId: project.id,
+          phaseId: p.id,
+          title,
+          done: false,
+        });
+      }
+    }
+  }
 
   return (
     <div className="h-full overflow-y-auto">
@@ -25,6 +46,15 @@ export default function FasesPage() {
             De juiste volgorde. Een fase opent pas als de voorwaarden klaar zijn.
           </p>
         </header>
+
+        {!hasAnyTasks && (
+          <button
+            onClick={generateAll}
+            className="flex w-full items-center justify-center gap-2 rounded-card border border-accent/40 bg-accent-soft py-3 text-sm font-medium text-accent"
+          >
+            <ListPlus size={18} /> Genereer volledig stappenplan
+          </button>
+        )}
 
         {analysis.map((info) => (
           <PhaseCard
@@ -65,6 +95,18 @@ function PhaseCard({
     setNewTask("");
   }
 
+  const template = PHASE_TASK_TEMPLATES[phase.order] ?? [];
+  const existingTitles = new Set(tasks.map((t) => t.title.toLowerCase()));
+  const missing = template.filter((t) => !existingTitles.has(t.toLowerCase()));
+  const doneCount = tasks.filter((t) => t.done).length;
+
+  async function addTemplate() {
+    if (!projectId) return;
+    for (const title of missing) {
+      await create<TaskItem>("tasks", { projectId, phaseId: phase.id, title, done: false });
+    }
+  }
+
   return (
     <section
       className="rounded-card border bg-paper-raised p-4"
@@ -81,6 +123,11 @@ function PhaseCard({
               {String(phase.order).padStart(2, "0")}
             </span>
             <h2 className="text-base font-semibold text-ink-900">{phase.name}</h2>
+            {tasks.length > 0 && (
+              <span className="tabular ml-auto rounded-full bg-paper-sunken px-2 py-0.5 text-[10px] text-ink-500">
+                {doneCount}/{tasks.length}
+              </span>
+            )}
           </div>
           {phase.note && <p className="mt-0.5 text-xs text-ink-500">{phase.note}</p>}
 
@@ -149,6 +196,16 @@ function PhaseCard({
           </li>
         ))}
       </ul>
+
+      {/* Standaardstappen */}
+      {missing.length > 0 && (
+        <button
+          onClick={addTemplate}
+          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-paper-sunken py-1.5 text-xs font-medium text-ink-700"
+        >
+          <ListPlus size={14} /> Standaardstappen toevoegen ({missing.length})
+        </button>
+      )}
 
       {/* Taak toevoegen */}
       <div className="mt-2 flex gap-2">
