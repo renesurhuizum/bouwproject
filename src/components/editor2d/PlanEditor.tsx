@@ -9,8 +9,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Line, Circle, Label, Tag, Text } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Point, Wall, ElectricalItem, Opening, Room } from "@/lib/domain/types";
-import { create } from "@/lib/db/repo";
-import { useEditor } from "@/lib/store/editor";
+import { create, remove, update } from "@/lib/db/repo";
+import { useEditor, type SelKind } from "@/lib/store/editor";
 import { useWalls, useRooms, useElectrical, useOpenings } from "@/lib/hooks";
 import {
   GRID_SIZE_M,
@@ -56,6 +56,9 @@ export function PlanEditor() {
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
   const [roomDraft, setRoomDraft] = useState<Point[]>([]);
+  const [menu, setMenu] = useState<{ x: number; y: number; kind: SelKind; id: string } | null>(
+    null,
+  );
 
   // Gebaar-refs.
   const pointers = useRef<Map<number, Point>>(new Map());
@@ -81,7 +84,45 @@ export function PlanEditor() {
   useEffect(() => {
     setDraftStart(null);
     setRoomDraft([]);
+    setMenu(null);
   }, [tool, activeLevelId]);
+
+  // Sneltoetsen: Delete = selectie weg, Escape = annuleren/deselecteren.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = document.activeElement;
+      if (el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selection) {
+          e.preventDefault();
+          void deleteEntity(selection.kind, selection.id);
+        }
+      } else if (e.key === "Escape") {
+        setDraftStart(null);
+        setRoomDraft([]);
+        setMenu(null);
+        select(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection]);
+
+  const TABLE_FOR: Record<SelKind, "walls" | "openings" | "electrical" | "rooms" | "plumbing" | "hvac"> = {
+    wall: "walls",
+    opening: "openings",
+    electrical: "electrical",
+    room: "rooms",
+    plumbing: "plumbing",
+    hvac: "hvac",
+  };
+
+  async function deleteEntity(kind: SelKind, id: string) {
+    await remove(TABLE_FOR[kind], id);
+    setMenu(null);
+    if (selection?.id === id) select(null);
+  }
 
   const endpoints = useMemo<Point[]>(
     () => walls.flatMap((w) => [w.start, w.end]),
@@ -201,6 +242,8 @@ export function PlanEditor() {
     const stage = e.target.getStage();
     if (!stage) return;
     const evt = e.evt;
+    if (evt.button === 2) return; // rechtermuisknop = contextmenu, geen tekenen
+    setMenu(null);
     const pos = posFromEvent(evt, stage);
     pointers.current.set(evt.pointerId, pos);
 
@@ -304,6 +347,24 @@ export function PlanEditor() {
     setView((v) => zoomAround(v, pos, factor));
   }
 
+  // Rechtermuisknop op een item → selecteren + contextmenu.
+  function onContextMenu(e: KonvaEventObject<MouseEvent>) {
+    e.evt.preventDefault();
+    const stage = e.target.getStage();
+    if (!stage) return;
+    const node = e.target;
+    const id = node.id();
+    const name = node.name();
+    if (id && name) {
+      const rect = stage.container().getBoundingClientRect();
+      const pos = { x: e.evt.clientX - rect.left, y: e.evt.clientY - rect.top };
+      select({ kind: name as SelKind, id });
+      setMenu({ x: pos.x, y: pos.y, kind: name as SelKind, id });
+    } else {
+      setMenu(null);
+    }
+  }
+
   function onSelectEntity(
     kind: "wall" | "room" | "electrical" | "opening",
     id: string,
@@ -330,6 +391,7 @@ export function PlanEditor() {
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
           onWheel={onWheel}
+          onContextMenu={onContextMenu}
         >
           {showGrid && <GridLayer view={view} width={size.width} height={size.height} />}
 
@@ -481,6 +543,74 @@ export function PlanEditor() {
               Sluiten
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Contextmenu (rechtermuisknop) */}
+      {menu && (
+        <div
+          className="absolute z-30 w-44 overflow-hidden rounded-xl border border-line bg-paper-raised shadow-xl"
+          style={{
+            left: Math.min(menu.x, (size.width || 0) - 184),
+            top: Math.min(menu.y, (size.height || 0) - 160),
+          }}
+        >
+          {menu.kind === "wall" && (
+            <div className="flex gap-1 border-b border-line p-1.5">
+              {(
+                [
+                  ["new", "Nieuw"],
+                  ["existing", "Bestaand"],
+                  ["demolish", "Slopen"],
+                ] as const
+              ).map(([st, label]) => (
+                <button
+                  key={st}
+                  onClick={() => {
+                    void update("walls", menu.id, { status: st });
+                    setMenu(null);
+                  }}
+                  className="flex-1 rounded-md bg-paper-sunken py-1 text-[10px] font-medium text-ink-700"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {menu.kind === "opening" && (
+            <div className="flex gap-1 border-b border-line p-1.5">
+              {(
+                [
+                  ["door", "Deur"],
+                  ["window", "Raam"],
+                  ["passage", "Doorgang"],
+                ] as const
+              ).map(([t, label]) => (
+                <button
+                  key={t}
+                  onClick={() => {
+                    void update("openings", menu.id, { type: t });
+                    setMenu(null);
+                  }}
+                  className="flex-1 rounded-md bg-paper-sunken py-1 text-[10px] font-medium text-ink-700"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => setMenu(null)}
+            className="block w-full px-3 py-2 text-left text-sm text-ink-700 hover:bg-paper-sunken"
+          >
+            Bewerken
+          </button>
+          <button
+            onClick={() => void deleteEntity(menu.kind, menu.id)}
+            className="block w-full px-3 py-2 text-left text-sm font-medium text-danger hover:bg-danger/10"
+          >
+            Verwijderen
+          </button>
         </div>
       )}
     </div>

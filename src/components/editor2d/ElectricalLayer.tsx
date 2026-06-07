@@ -41,6 +41,8 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
             )}
             {it.type === "switch" || it.type === "panel" ? (
               <Rect
+                id={it.id}
+                name="electrical"
                 x={p.x - r}
                 y={p.y - r}
                 width={r * 2}
@@ -52,6 +54,8 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
               />
             ) : (
               <Circle
+                id={it.id}
+                name="electrical"
                 x={p.x}
                 y={p.y}
                 radius={r}

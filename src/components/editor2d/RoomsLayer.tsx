@@ -31,6 +31,8 @@ export function RoomsLayer({ view, rooms, selectedId, onSelect }: Props) {
         return (
           <Fragment key={room.id}>
             <Line
+              id={room.id}
+              name="room"
               points={pts}
               closed
               fill={room.color ?? "rgba(234, 88, 12, 0.07)"}

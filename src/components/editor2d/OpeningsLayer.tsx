@@ -114,6 +114,8 @@ export function OpeningsLayer({ view, walls, openings, selectedId, onSelect }: P
             {symbol}
             {/* Onzichtbaar tikvlak voor selectie */}
             <Line
+              id={op.id}
+              name="opening"
               points={[a.x, a.y, b.x, b.y]}
               stroke="transparent"
               strokeWidth={Math.max(wallW, 22)}

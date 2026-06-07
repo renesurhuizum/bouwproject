@@ -45,6 +45,8 @@ export function WallsLayer({ view, walls, selectedId, onSelect }: Props) {
               />
             )}
             <Line
+              id={w.id}
+              name="wall"
               points={pts}
               stroke={color}
               strokeWidth={widthPx}
