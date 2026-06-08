@@ -8,12 +8,13 @@ import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import { useLiveQuery } from "dexie-react-hooks";
-import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture } from "@/lib/domain/types";
-import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture } from "@/lib/hooks";
+import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem } from "@/lib/domain/types";
+import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { getDB } from "@/lib/db/db";
 import { useEditor } from "@/lib/store/editor";
 import { dist, angle, polygonCentroid } from "@/lib/geometry";
+import type { Point } from "@/lib/domain/types";
 
 const STATUS_3D: Record<Wall["status"], { color: string; opacity: number }> = {
   existing: { color: "#b8b0a2", opacity: 1 },
@@ -76,7 +77,8 @@ function WallMesh({ wall, openings }: { wall: Wall; openings: Opening[] }) {
             color={style.color}
             transparent={style.opacity < 1}
             opacity={style.opacity}
-            roughness={0.85}
+            roughness={wall.material === "concrete" ? 0.95 : wall.material === "brick" ? 0.88 : 0.80}
+            metalness={0}
           />
         </mesh>
       ))}
@@ -196,6 +198,35 @@ function PlumbingMarker({ item }: { item: PlumbingItem }) {
   );
 }
 
+function PipePath3D({ item }: { item: PlumbingItem }) {
+  const path = item.path;
+  if (!path || path.length < 2) return null;
+  const hz = item.heightZ ?? 0.3;
+  const color = item.type === "supply-cold" ? "#3b82f6"
+    : item.type === "supply-hot" ? "#ef4444"
+    : "#9333ea"; // drain
+  const r = item.diameter ? item.diameter / 2000 : 0.018;
+
+  const points = path.map((p) => new THREE.Vector3(p.x, hz, p.y));
+  const curve = new THREE.CatmullRomCurve3(points);
+
+  return (
+    <mesh>
+      <tubeGeometry args={[curve, Math.max(path.length * 3, 8), r, 6, false]} />
+      <meshStandardMaterial color={color} roughness={0.35} metalness={0.45} />
+    </mesh>
+  );
+}
+
+function PipeJunction({ pos, hz, color }: { pos: Point; hz: number; color: string }) {
+  return (
+    <mesh position={[pos.x, hz, pos.y]}>
+      <sphereGeometry args={[0.024, 8, 8]} />
+      <meshStandardMaterial color={color} roughness={0.3} metalness={0.5} />
+    </mesh>
+  );
+}
+
 function FurnitureMesh3D({ item }: { item: Furniture }) {
   const def = FURNITURE_DEFAULTS[item.kind];
   const w = item.width ?? def.w;
@@ -238,6 +269,40 @@ function FurnitureMesh3D({ item }: { item: Furniture }) {
   );
 }
 
+function HvacMesh3D({ item }: { item: HvacItem }) {
+  if (!item.position) return null;
+
+  if (item.type === "radiator") {
+    return (
+      <group position={[item.position.x, 0.55, item.position.y]}>
+        {/* Hoofdlichaam radiator */}
+        <mesh castShadow>
+          <boxGeometry args={[1.0, 0.60, 0.08]} />
+          <meshStandardMaterial color="#e8e4dc" roughness={0.4} metalness={0.2} />
+        </mesh>
+        {/* Ribben */}
+        {Array.from({ length: 8 }, (_, i) => (
+          <mesh key={i} position={[-0.43 + i * 0.124, 0, 0.04]}>
+            <boxGeometry args={[0.06, 0.56, 0.02]} />
+            <meshStandardMaterial color="#ddd8ce" roughness={0.5} metalness={0.15} />
+          </mesh>
+        ))}
+      </group>
+    );
+  }
+
+  if (item.type === "floor-heating") {
+    return (
+      <mesh position={[item.position.x, 0.005, item.position.y]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[1.0, 1.0]} />
+        <meshStandardMaterial color="#e8a060" transparent opacity={0.25} roughness={1} />
+      </mesh>
+    );
+  }
+
+  return null;
+}
+
 function LevelScene({
   level,
   visibleLayers,
@@ -251,6 +316,7 @@ function LevelScene({
   const rooms = useRooms(level.id) ?? [];
   const plumbing = usePlumbing(level.id) ?? [];
   const furniture = useFurniture(level.id) ?? [];
+  const hvac = useHvac(level.id) ?? [];
 
   const openingsByWall = useMemo(() => {
     const m = new Map<string, Opening[]>();
@@ -277,9 +343,31 @@ function LevelScene({
       {visibleLayers.electrical &&
         electrical.map((it) => <ElectricalMarker key={it.id} item={it} />)}
       {visibleLayers.plumbing &&
-        plumbing.map((it) => <PlumbingMarker key={it.id} item={it} />)}
+        plumbing.map((it) =>
+          it.type === "fixture" || !it.path || it.path.length < 2 ? (
+            <PlumbingMarker key={it.id} item={it} />
+          ) : (
+            <group key={it.id}>
+              <PipePath3D item={it} />
+              {it.path.map((p, i) => (
+                <PipeJunction
+                  key={i}
+                  pos={p}
+                  hz={it.heightZ ?? 0.3}
+                  color={
+                    it.type === "supply-cold" ? "#3b82f6"
+                      : it.type === "supply-hot" ? "#ef4444"
+                      : "#9333ea"
+                  }
+                />
+              ))}
+            </group>
+          ),
+        )}
       {visibleLayers.furniture &&
         furniture.map((it) => <FurnitureMesh3D key={it.id} item={it} />)}
+      {visibleLayers.hvac &&
+        hvac.map((it) => <HvacMesh3D key={it.id} item={it} />)}
     </group>
   );
 }
@@ -309,22 +397,28 @@ export function Scene3D() {
     <Canvas
       shadows
       camera={{ position: [center.x + maxElev, maxElev * 0.9, center.y + maxElev], fov: 50 }}
-      gl={{ antialias: true }}
+      gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}
     >
       <color attach="background" args={["#eceadf"]} />
-      <ambientLight intensity={0.8} />
-      <hemisphereLight args={["#ffffff", "#cabfa6", 0.5]} />
+      <ambientLight intensity={0.45} />
+      <hemisphereLight args={["#f0ecd8", "#8a9070", 0.6]} />
       <directionalLight
-        position={[10, 18, 8]}
-        intensity={1.5}
+        position={[12, 20, 8]}
+        intensity={1.8}
         castShadow
-        shadow-mapSize={[1024, 1024]}
+        shadow-mapSize={[2048, 2048]}
+        shadow-camera-far={60}
+        shadow-camera-left={-20}
+        shadow-camera-right={20}
+        shadow-camera-top={20}
+        shadow-camera-bottom={-20}
       />
+      <directionalLight position={[-8, 12, -6]} intensity={0.4} color="#d4e8f0" />
 
       {/* Vloer */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, 0, center.y]} receiveShadow>
         <planeGeometry args={[80, 80]} />
-        <meshStandardMaterial color="#dcd6c8" roughness={1} />
+        <meshStandardMaterial color="#d8d0c0" roughness={0.95} />
       </mesh>
       <Grid
         position={[center.x, 0.01, center.y]}
