@@ -35,6 +35,15 @@ export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint }
         const lenM = dist(w.start, w.end);
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 
+        // Loodrechte offset voor maataanduiding bij geselecteerde muur.
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        // Normaal loodrecht (naar boven/links), 24px offset.
+        const OFFSET = 24;
+        const nx = (-dy / len) * OFFSET;
+        const ny = (dx / len) * OFFSET;
+
         return (
           <Fragment key={w.id}>
             {selected && (
@@ -114,7 +123,7 @@ export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint }
               </>
             )}
 
-            {lenPx >= 34 && (
+            {lenPx >= 34 && !selected && (
               <Label x={mid.x} y={mid.y} listening={false} opacity={0.96}>
                 <Tag fill="#fbfaf6" stroke="#ddd7ca" strokeWidth={1} cornerRadius={3} />
                 <Text
@@ -125,6 +134,71 @@ export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint }
                   padding={3}
                 />
               </Label>
+            )}
+
+            {/* Architecturaal dimensie-label bij geselecteerde muur */}
+            {selected && lenPx >= 20 && (
+              <>
+                {/* Uitsteker bij eindpunt A */}
+                <Line
+                  points={[a.x, a.y, a.x + nx, a.y + ny]}
+                  stroke="#ea580c"
+                  strokeWidth={1}
+                  dash={[3, 3]}
+                  listening={false}
+                />
+                {/* Uitsteker bij eindpunt B */}
+                <Line
+                  points={[b.x, b.y, b.x + nx, b.y + ny]}
+                  stroke="#ea580c"
+                  strokeWidth={1}
+                  dash={[3, 3]}
+                  listening={false}
+                />
+                {/* Maatlijn parallel aan de muur */}
+                <Line
+                  points={[a.x + nx, a.y + ny, b.x + nx, b.y + ny]}
+                  stroke="#ea580c"
+                  strokeWidth={1.5}
+                  listening={false}
+                />
+                {/* Eindtikken */}
+                <Line
+                  points={[
+                    a.x + nx - (dy / len) * 5, a.y + ny + (dx / len) * 5,
+                    a.x + nx + (dy / len) * 5, a.y + ny - (dx / len) * 5,
+                  ]}
+                  stroke="#ea580c"
+                  strokeWidth={1.5}
+                  listening={false}
+                />
+                <Line
+                  points={[
+                    b.x + nx - (dy / len) * 5, b.y + ny + (dx / len) * 5,
+                    b.x + nx + (dy / len) * 5, b.y + ny - (dx / len) * 5,
+                  ]}
+                  stroke="#ea580c"
+                  strokeWidth={1.5}
+                  listening={false}
+                />
+                {/* Maat-label */}
+                <Label
+                  x={mid.x + nx}
+                  y={mid.y + ny}
+                  offsetX={0}
+                  offsetY={10}
+                  listening={false}
+                >
+                  <Tag fill="#ea580c" cornerRadius={3} />
+                  <Text
+                    text={formatLength(lenM)}
+                    fontSize={11}
+                    fontFamily="monospace"
+                    fill="#fff"
+                    padding={3}
+                  />
+                </Label>
+              </>
             )}
           </Fragment>
         );

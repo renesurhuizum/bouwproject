@@ -46,6 +46,7 @@ import { RoomsLayer } from "./RoomsLayer";
 import { ElectricalLayer } from "./ElectricalLayer";
 import { PlumbingLayer } from "./PlumbingLayer";
 import { RoomDivider } from "./RoomDivider";
+import { ElectricalLegend } from "./ElectricalLegend";
 import type { LayoutRect } from "@/lib/roomDivider";
 
 export function PlanEditor() {
@@ -75,6 +76,7 @@ export function PlanEditor() {
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
+  const [snapTarget, setSnapTarget] = useState<Point | null>(null);
   const [roomDraft, setRoomDraft] = useState<Point[]>([]);
   const [menu, setMenu] = useState<{ x: number; y: number; kind: SelKind; id: string } | null>(null);
   const [divideRect, setDivideRect] = useState<LayoutRect | null>(null);
@@ -169,6 +171,7 @@ export function PlanEditor() {
 
   function snapPoint(m: Point): Point {
     const near = snapToPoints(m, endpoints, pxToMeters(SNAP_RADIUS_PX, view));
+    setSnapTarget(near);
     return near ?? snapToGrid(m, GRID_SNAP_M[gridSnap]);
   }
 
@@ -560,6 +563,18 @@ export function PlanEditor() {
                 fill="rgba(234,88,12,0.2)"
               />
             )}
+            {/* Snap-indicator: groene ring als cursor snapt aan bestaand punt */}
+            {(tool === "wall" || tool === "place" || tool === "room") && snapTarget && (
+              <Circle
+                x={metersToScreen(snapTarget, view).x}
+                y={metersToScreen(snapTarget, view).y}
+                radius={10}
+                stroke="#22c55e"
+                strokeWidth={2}
+                fill="transparent"
+                listening={false}
+              />
+            )}
             {tool === "wall" && draftStart && (
               <Circle
                 x={metersToScreen(draftStart, view).x}
@@ -669,6 +684,9 @@ export function PlanEditor() {
       )}
 
       <RoomDivider divideRect={divideRect} onClear={() => setDivideRect(null)} />
+
+      {/* Elektra-legenda: alleen zichtbaar als elektra-laag aan staat */}
+      {visibleLayers.electrical && <ElectricalLegend />}
 
       {/* Contextmenu (rechtermuisknop) */}
       {menu && (

@@ -15,6 +15,27 @@ export function LevelSwitcher() {
   const setActiveLevel = useEditor((s) => s.setActiveLevel);
   const [adding, setAdding] = useState(false);
   const bgInputRef = useRef<HTMLInputElement>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  function startRename(levelId: string, currentName: string) {
+    setRenamingId(levelId);
+    setRenameValue(currentName);
+    setTimeout(() => renameInputRef.current?.select(), 0);
+  }
+
+  async function commitRename() {
+    if (!renamingId) return;
+    const trimmed = renameValue.trim();
+    if (trimmed) await update("levels", renamingId, { name: trimmed });
+    setRenamingId(null);
+  }
+
+  function onRenameKey(e: React.KeyboardEvent) {
+    if (e.key === "Enter") void commitRename();
+    if (e.key === "Escape") setRenamingId(null);
+  }
 
   const activeLevel = useLiveQuery(
     async () => (activeLevelId ? getDB().levels.get(activeLevelId) : null),
@@ -105,17 +126,32 @@ export function LevelSwitcher() {
     <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
       <div className="flex items-center gap-1 rounded-xl border border-line bg-paper-raised/95 p-1 shadow-lg backdrop-blur">
         {levels.map((level) => (
-          <button
-            key={level.id}
-            onClick={() => setActiveLevel(level.id)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              level.id === activeLevelId
-                ? "bg-accent text-white shadow-sm"
-                : "text-ink-600 hover:bg-paper-sunken"
-            }`}
-          >
-            {level.name}
-          </button>
+          <div key={level.id} className="relative">
+            {renamingId === level.id ? (
+              <input
+                ref={renameInputRef}
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onBlur={() => void commitRename()}
+                onKeyDown={onRenameKey}
+                className="w-28 rounded-lg bg-paper-sunken px-2 py-1.5 text-xs font-medium text-ink-800 outline-none ring-1 ring-accent"
+                autoFocus
+              />
+            ) : (
+              <button
+                onClick={() => setActiveLevel(level.id)}
+                onDoubleClick={() => startRename(level.id, level.name)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                  level.id === activeLevelId
+                    ? "bg-accent text-white shadow-sm"
+                    : "text-ink-600 hover:bg-paper-sunken"
+                }`}
+                title="Dubbelklik om te hernoemen"
+              >
+                {level.name}
+              </button>
+            )}
+          </div>
         ))}
 
         <div className="mx-0.5 h-4 w-px bg-line" />
