@@ -3,12 +3,13 @@
 // Zwevende gereedschapsbalk onderin de editor. Mobiel-first, grote tikdoelen.
 
 import { useState } from "react";
-import { MousePointer2, Minus, Pentagon, Plug, Layers, Grid3x3, Plus, LayoutDashboard } from "lucide-react";
+import { MousePointer2, Minus, Pentagon, Plug, Layers, Grid3x3, Plus, LayoutDashboard, Sofa } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import type {
   ElectricalType,
   EditorLayer,
   FixtureKind,
+  FurnitureKind,
   OpeningType,
   WallStatus,
 } from "@/lib/domain/types";
@@ -18,6 +19,7 @@ import {
   FIXTURE_LABEL,
   WALL_STATUS_LABEL,
 } from "@/lib/domain/constants";
+import { FURNITURE_CATEGORIES, FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 
 const PLACE_TYPES: ElectricalType[] = [
   "socket",
@@ -49,6 +51,7 @@ const LAYERS: { key: EditorLayer; label: string }[] = [
   { key: "electrical", label: "Elektra" },
   { key: "plumbing", label: "Water" },
   { key: "hvac", label: "Verwarming" },
+  { key: "furniture", label: "Meubels" },
 ];
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
@@ -66,6 +69,9 @@ export function Toolbar() {
   const toggleGrid = useEditor((s) => s.toggleGrid);
   const gridSnap = useEditor((s) => s.gridSnap);
   const cycleGridSnap = useEditor((s) => s.cycleGridSnap);
+
+  const furniturePaletteKind = useEditor((s) => s.furniturePaletteKind);
+  const setFurniturePaletteKind = useEditor((s) => s.setFurniturePaletteKind);
 
   const SNAP_LABEL = { fine: "10cm", normal: "50cm", coarse: "1m" };
 
@@ -206,6 +212,32 @@ export function Toolbar() {
         </div>
       )}
 
+      {/* Contextueel paneel: meubels */}
+      {tool === "place-furniture" && (
+        <div className="pointer-events-auto flex max-w-sm flex-col gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
+          {FURNITURE_CATEGORIES.map((cat) => (
+            <div key={cat.label}>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-400">{cat.label}</p>
+              <div className="flex flex-wrap gap-1">
+                {cat.kinds.map((kind: FurnitureKind) => (
+                  <button
+                    key={kind}
+                    onClick={() => setFurniturePaletteKind(kind)}
+                    className={`rounded px-2 py-1 text-[10px] transition-colors ${
+                      furniturePaletteKind === kind
+                        ? "bg-accent text-white"
+                        : "bg-paper-sunken text-ink-600 hover:bg-paper-raised"
+                    }`}
+                  >
+                    {FURNITURE_DEFAULTS[kind].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Lagen-paneel */}
       {showLayers && (
         <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
@@ -256,6 +288,19 @@ export function Toolbar() {
         </ToolBtn>
         <ToolBtn active={tool === "divide"} onClick={() => setTool("divide")} label="Verdeel">
           <LayoutDashboard size={20} />
+        </ToolBtn>
+        <ToolBtn
+          active={tool === "place-furniture"}
+          onClick={() => {
+            if (tool === "place-furniture") {
+              setTool("select");
+            } else {
+              setFurniturePaletteKind(furniturePaletteKind ?? "sofa-2");
+            }
+          }}
+          label="Meubels"
+        >
+          <Sofa size={20} />
         </ToolBtn>
         <div className="mx-0.5 h-7 w-px bg-line" />
         <ToolBtn active={showLayers} onClick={() => setShowLayers((v) => !v)} label="Lagen">

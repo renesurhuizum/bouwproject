@@ -15,12 +15,13 @@ import type {
   PlumbingItem,
   Opening,
   Room,
+  Furniture,
 } from "@/lib/domain/types";
 import { create, remove, update } from "@/lib/db/repo";
 import { getDB } from "@/lib/db/db";
 import { useHistory } from "@/lib/history";
 import { useEditor, type SelKind } from "@/lib/store/editor";
-import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing } from "@/lib/hooks";
+import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture } from "@/lib/hooks";
 import {
   ELECTRICAL_DEFAULT_HEIGHT,
   FIXTURE_DEFAULT_HEIGHT,
@@ -45,6 +46,7 @@ import { OpeningsLayer } from "./OpeningsLayer";
 import { RoomsLayer } from "./RoomsLayer";
 import { ElectricalLayer } from "./ElectricalLayer";
 import { PlumbingLayer } from "./PlumbingLayer";
+import { FurnitureLayer } from "./FurnitureLayer";
 import { RoomDivider } from "./RoomDivider";
 import { ElectricalLegend } from "./ElectricalLegend";
 import { Minimap } from "./Minimap";
@@ -61,6 +63,7 @@ export function PlanEditor() {
 
   const tool = useEditor((s) => s.tool);
   const placeKind = useEditor((s) => s.placeKind);
+  const furniturePaletteKind = useEditor((s) => s.furniturePaletteKind);
   const wallDefaults = useEditor((s) => s.wallDefaults);
   const visibleLayers = useEditor((s) => s.visibleLayers);
   const showGrid = useEditor((s) => s.showGrid);
@@ -74,6 +77,7 @@ export function PlanEditor() {
   const electrical = useElectrical(activeLevelId) ?? [];
   const plumbing = usePlumbing(activeLevelId) ?? [];
   const openings = useOpenings(activeLevelId) ?? [];
+  const furniture = useFurniture(activeLevelId) ?? [];
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
@@ -142,13 +146,14 @@ export function PlanEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, undo, redo]);
 
-  const TABLE_FOR: Record<SelKind, "walls" | "openings" | "electrical" | "rooms" | "plumbing" | "hvac"> = {
+  const TABLE_FOR: Record<SelKind, "walls" | "openings" | "electrical" | "rooms" | "plumbing" | "hvac" | "furniture"> = {
     wall: "walls",
     opening: "openings",
     electrical: "electrical",
     room: "rooms",
     plumbing: "plumbing",
     hvac: "hvac",
+    furniture: "furniture",
   };
 
   async function deleteEntity(kind: SelKind, id: string) {
@@ -294,6 +299,18 @@ export function PlanEditor() {
       else void placeElectrical(snapped);
       return;
     }
+    if (tool === "place-furniture" && furniturePaletteKind && activeLevelId) {
+      void (async () => {
+        const item = await create<Furniture>("furniture", {
+          levelId: activeLevelId,
+          kind: furniturePaletteKind,
+          position: snapped,
+          rotation: 0,
+        });
+        select({ kind: "furniture", id: item.id });
+      })();
+      return;
+    }
     // select: tik op leeg vlak = deselecteren
     if (tool === "select" && onStage) {
       select(null);
@@ -337,7 +354,7 @@ export function PlanEditor() {
     const evt = e.evt;
     if (!pointers.current.has(evt.pointerId)) {
       // cursor voor rubber-band tonen ook zonder ingedrukt
-      if (tool === "wall" || tool === "place" || tool === "room") {
+      if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture") {
         setCursor(snapPoint(screenToMeters(posFromEvent(evt, stage), view)));
       }
       return;
@@ -372,7 +389,7 @@ export function PlanEditor() {
     if (tapRef.current && evt.pointerId === tapRef.current.id) {
       if (dist(pos, tapRef.current.start) > 8) tapRef.current.moved = true;
     }
-    if (tool === "wall" || tool === "place" || tool === "room") {
+    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture") {
       setCursor(snapPoint(screenToMeters(pos, view)));
     }
     if (tool === "divide") {
@@ -525,6 +542,18 @@ export function PlanEditor() {
               items={plumbing}
               selectedId={selection?.kind === "plumbing" ? selection.id : null}
               onSelect={(id) => onSelectEntity("plumbing", id)}
+            />
+          )}
+
+          {visibleLayers.furniture && (
+            <FurnitureLayer
+              view={view}
+              furniture={furniture}
+              selectedId={selection?.kind === "furniture" ? selection.id : null}
+              onSelect={(id) => select({ kind: "furniture", id })}
+              onMove={async (id, x, y) => {
+                await update("furniture", id, { position: { x, y } });
+              }}
             />
           )}
 

@@ -6,7 +6,8 @@ import { Camera, Trash2, X } from "lucide-react";
 import { getDB } from "@/lib/db/db";
 import { create, update, remove } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
-import { useProject } from "@/lib/hooks";
+import { useProject, useFurniture } from "@/lib/hooks";
+import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import type { Photo } from "@/lib/domain/types";
 import { dist, polygonArea } from "@/lib/geometry";
 import { formatLength, formatArea } from "@/lib/format";
@@ -29,9 +30,13 @@ const OPENING_TYPES: OpeningType[] = ["door", "window", "passage"];
 export function SelectionPanel() {
   const selection = useEditor((s) => s.selection);
   const select = useEditor((s) => s.select);
+  const activeLevelId = useEditor((s) => s.activeLevelId);
   const project = useProject();
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const furnitureItems = useFurniture(activeLevelId) ?? [];
+  const selectedFurniture = furnitureItems.find((f) => f.id === selection?.id) ?? null;
 
   const photos = useLiveQuery(
     async () => {
@@ -92,7 +97,9 @@ export function SelectionPanel() {
                   ? "Ruimte"
                   : selection.kind === "plumbing"
                     ? "Water"
-                    : "Elektra"}
+                    : selection.kind === "furniture"
+                      ? (selectedFurniture ? FURNITURE_DEFAULTS[selectedFurniture.kind].label : "Meubel")
+                      : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -336,6 +343,49 @@ export function SelectionPanel() {
           <Lightbox photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />
         )}
 
+        {selection?.kind === "furniture" && selectedFurniture && (
+          <div className="space-y-2.5">
+            <Row label="Rotatie">
+              <div className="flex gap-1">
+                {([0, 90, 180, 270] as const).map((deg) => (
+                  <button
+                    key={deg}
+                    onClick={() => void update("furniture", selectedFurniture.id, { rotation: deg })}
+                    className={`rounded-md px-2 py-1 text-[11px] font-medium ${
+                      selectedFurniture.rotation === deg
+                        ? "bg-accent text-white"
+                        : "bg-paper-sunken text-ink-700"
+                    }`}
+                  >
+                    {deg}°
+                  </button>
+                ))}
+              </div>
+            </Row>
+            <Row label="Kleur">
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={selectedFurniture.color ?? FURNITURE_DEFAULTS[selectedFurniture.kind].color}
+                  onChange={(e) => void update("furniture", selectedFurniture.id, { color: e.target.value })}
+                  className="h-7 w-10 cursor-pointer rounded border border-line bg-paper p-0.5"
+                />
+                {selectedFurniture.color && (
+                  <button
+                    onClick={() => void update("furniture", selectedFurniture.id, { color: undefined })}
+                    className="text-[10px] text-ink-400 hover:text-ink-700"
+                  >
+                    Wis
+                  </button>
+                )}
+              </div>
+            </Row>
+            <DeleteButton
+              onClick={() => void removeAnd("furniture", selectedFurniture.id, () => select(null))}
+            />
+          </div>
+        )}
+
         {plumb && plumb.fixture && (
           <div className="space-y-2.5">
             <Row label="Type">
@@ -368,7 +418,7 @@ export function SelectionPanel() {
 }
 
 async function removeAnd(
-  table: "walls" | "electrical" | "openings" | "rooms" | "plumbing",
+  table: "walls" | "electrical" | "openings" | "rooms" | "plumbing" | "furniture",
   id: string,
   after: () => void,
 ) {

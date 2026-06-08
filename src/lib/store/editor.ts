@@ -7,13 +7,14 @@ import type {
   EditorLayer,
   ElectricalType,
   FixtureKind,
+  FurnitureKind,
   HvacType,
   OpeningType,
   WallMaterial,
   WallStatus,
 } from "../domain/types";
 
-export type Tool = "select" | "wall" | "room" | "place" | "divide";
+export type Tool = "select" | "wall" | "room" | "place" | "divide" | "place-furniture";
 
 export type GridSnap = "fine" | "normal" | "coarse";
 // fine = 10 cm, normal = 50 cm, coarse = 100 cm
@@ -35,7 +36,8 @@ export type SelKind =
   | "electrical"
   | "plumbing"
   | "hvac"
-  | "opening";
+  | "opening"
+  | "furniture";
 
 export interface Selection {
   kind: SelKind;
@@ -54,6 +56,7 @@ interface EditorState {
   activeLevelId: string | null;
   tool: Tool;
   placeKind: PlaceKind | null;
+  furniturePaletteKind: FurnitureKind | null;
   selection: Selection | null;
   visibleLayers: Record<EditorLayer, boolean>;
   wallDefaults: WallDefaults;
@@ -63,6 +66,7 @@ interface EditorState {
   setActiveLevel: (id: string) => void;
   setTool: (t: Tool) => void;
   setPlaceKind: (p: PlaceKind | null) => void;
+  setFurniturePaletteKind: (kind: FurnitureKind | null) => void;
   select: (s: Selection | null) => void;
   toggleLayer: (l: EditorLayer) => void;
   setWallDefaults: (d: Partial<WallDefaults>) => void;
@@ -76,6 +80,7 @@ export const useEditor = create<EditorState>()(
       activeLevelId: null,
       tool: "select",
       placeKind: null,
+      furniturePaletteKind: null,
       selection: null,
       visibleLayers: {
         structure: true,
@@ -103,6 +108,8 @@ export const useEditor = create<EditorState>()(
           selection: null,
         })),
       setPlaceKind: (placeKind) => set({ placeKind, tool: "place" }),
+      setFurniturePaletteKind: (kind) =>
+        set({ furniturePaletteKind: kind, tool: kind ? "place-furniture" : "select" }),
       select: (selection) => set({ selection }),
       toggleLayer: (l) =>
         set((s) => ({
