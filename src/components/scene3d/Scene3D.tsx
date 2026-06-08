@@ -7,8 +7,10 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
-import type { Wall, Opening, ElectricalItem, PlumbingItem, Room } from "@/lib/domain/types";
-import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing } from "@/lib/hooks";
+import { useLiveQuery } from "dexie-react-hooks";
+import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level } from "@/lib/domain/types";
+import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject } from "@/lib/hooks";
+import { getDB } from "@/lib/db/db";
 import { useEditor } from "@/lib/store/editor";
 import { dist, angle, polygonCentroid } from "@/lib/geometry";
 
@@ -122,30 +124,74 @@ function PlumbingMarker({ item }: { item: PlumbingItem }) {
   );
 }
 
+function LevelScene({
+  level,
+  visibleLayers,
+}: {
+  level: Level;
+  visibleLayers: Record<string, boolean>;
+}) {
+  const walls = useWalls(level.id) ?? [];
+  const electrical = useElectrical(level.id) ?? [];
+  const openings = useOpenings(level.id) ?? [];
+  const rooms = useRooms(level.id) ?? [];
+  const plumbing = usePlumbing(level.id) ?? [];
+
+  const openingsByWall = useMemo(() => {
+    const m = new Map<string, Opening[]>();
+    for (const op of openings) {
+      const list = m.get(op.wallId) ?? [];
+      list.push(op);
+      m.set(op.wallId, list);
+    }
+    return m;
+  }, [openings]);
+
+  const elev = level.elevation;
+
+  return (
+    <group position={[0, elev, 0]}>
+      {visibleLayers.rooms &&
+        rooms
+          .filter((r) => r.polygon.length >= 3)
+          .map((r) => <RoomFloor3D key={r.id} room={r} />)}
+      {visibleLayers.structure &&
+        walls.map((w) => (
+          <WallMesh key={w.id} wall={w} openings={openingsByWall.get(w.id) ?? []} />
+        ))}
+      {visibleLayers.electrical &&
+        electrical.map((it) => <ElectricalMarker key={it.id} item={it} />)}
+      {visibleLayers.plumbing &&
+        plumbing.map((it) => <PlumbingMarker key={it.id} item={it} />)}
+    </group>
+  );
+}
+
 export function Scene3D() {
-  const activeLevelId = useEditor((s) => s.activeLevelId);
   const visibleLayers = useEditor((s) => s.visibleLayers);
-  const walls = useWalls(activeLevelId) ?? [];
-  const electrical = useElectrical(activeLevelId) ?? [];
-  const openings = useOpenings(activeLevelId) ?? [];
-  const rooms = useRooms(activeLevelId) ?? [];
-  const plumbing = usePlumbing(activeLevelId) ?? [];
+  const project = useProject();
 
-  const openingsByWall = new Map<string, Opening[]>();
-  for (const op of openings) {
-    const list = openingsByWall.get(op.wallId) ?? [];
-    list.push(op);
-    openingsByWall.set(op.wallId, list);
-  }
+  const levels = useLiveQuery(
+    async () => {
+      if (!project?.id) return [];
+      const rows = await getDB().levels.where("projectId").equals(project.id).sortBy("order");
+      return rows.filter((l) => !l.deleted);
+    },
+    [project?.id],
+    [] as Level[],
+  );
 
-  // Camera-doel: midden van de muren.
-  const pts = walls.flatMap((w) => [w.start, w.end]);
+  // Camera-doel: centroid van BG-verdieping (order=1).
+  const groundLevelId = levels[0]?.id ?? null;
+  const groundWalls = useWalls(groundLevelId) ?? [];
+  const pts = groundWalls.flatMap((w) => [w.start, w.end]);
   const center = pts.length ? polygonCentroid(pts) : { x: 0, y: 0 };
+  const maxElev = levels.length ? levels[levels.length - 1].elevation + levels[levels.length - 1].height : 8;
 
   return (
     <Canvas
       shadows
-      camera={{ position: [center.x + 8, 7, center.y + 8], fov: 50 }}
+      camera={{ position: [center.x + maxElev, maxElev * 0.9, center.y + maxElev], fov: 50 }}
       gl={{ antialias: true }}
     >
       <color attach="background" args={["#eceadf"]} />
@@ -174,28 +220,16 @@ export function Scene3D() {
         infiniteGrid
       />
 
-      {visibleLayers.rooms &&
-        rooms
-          .filter((r) => r.polygon.length >= 3)
-          .map((r) => <RoomFloor3D key={r.id} room={r} />)}
-
-      {visibleLayers.structure &&
-        walls.map((w) => (
-          <WallMesh key={w.id} wall={w} openings={openingsByWall.get(w.id) ?? []} />
-        ))}
-
-      {visibleLayers.electrical &&
-        electrical.map((it) => <ElectricalMarker key={it.id} item={it} />)}
-
-      {visibleLayers.plumbing &&
-        plumbing.map((it) => <PlumbingMarker key={it.id} item={it} />)}
+      {levels.map((level) => (
+        <LevelScene key={level.id} level={level} visibleLayers={visibleLayers} />
+      ))}
 
       <OrbitControls
-        target={[center.x, 1.2, center.y]}
+        target={[center.x, maxElev / 2, center.y]}
         enableDamping
         maxPolarAngle={Math.PI / 2.05}
         minDistance={2}
-        maxDistance={50}
+        maxDistance={80}
       />
     </Canvas>
   );
