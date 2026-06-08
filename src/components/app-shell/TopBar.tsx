@@ -16,7 +16,7 @@ export function TopBar() {
   const showLevels = pathname === "/plattegrond" || pathname === "/3d";
 
   return (
-    <header className="safe-top z-20 flex items-center justify-between gap-2 border-b border-line bg-paper-raised px-3 pb-2">
+    <header className="no-print safe-top z-20 flex items-center justify-between gap-2 border-b border-line bg-paper-raised px-3 pb-2">
       <div className="min-w-0">
         <div className="truncate text-[15px] font-semibold leading-tight text-ink-900">
           {project?.name ?? "Bouwproject"}

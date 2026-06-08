@@ -3,7 +3,7 @@
 // Dashboard: overzicht van het project, de fasering en de kosten.
 
 import Link from "next/link";
-import { PencilRuler, Box, ListChecks, ArrowRight } from "lucide-react";
+import { PencilRuler, Box, ListChecks, ArrowRight, Printer } from "lucide-react";
 import { useProject, usePhases, useExpenses, useBudget } from "@/lib/hooks";
 import { analyzePhases, phaseProgress } from "@/lib/phases";
 import { formatEuro } from "@/lib/format";
@@ -86,6 +86,13 @@ export default function Home() {
           <QuickLink href="/3d" label="3D" icon={Box} />
           <QuickLink href="/fases" label="Fases" icon={ListChecks} />
         </section>
+
+        <Link
+          href="/werkblad"
+          className="flex items-center justify-center gap-2 rounded-card border border-line bg-paper-raised py-3 text-sm font-medium text-ink-700 transition-colors hover:border-accent hover:text-accent"
+        >
+          <Printer size={18} /> Werkblad / PDF voor de bouwplaats
+        </Link>
 
         {/* Fasenlijst kort */}
         <section className="rounded-card border border-line bg-paper-raised p-2">

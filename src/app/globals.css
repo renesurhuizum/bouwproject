@@ -78,3 +78,23 @@ body {
   background: var(--color-accent);
   color: #fff;
 }
+
+/* Print / PDF: verberg navigatie en knoppen, alleen het werkblad. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  html,
+  body {
+    background: #fff;
+    height: auto;
+    overflow: visible;
+  }
+  .print-area {
+    position: static !important;
+    overflow: visible !important;
+  }
+  @page {
+    margin: 14mm;
+  }
+}

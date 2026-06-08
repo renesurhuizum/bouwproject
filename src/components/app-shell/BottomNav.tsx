@@ -20,7 +20,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="Hoofdnavigatie"
-      className="safe-bottom z-20 grid grid-cols-5 border-t border-line bg-paper-raised"
+      className="no-print safe-bottom z-20 grid grid-cols-5 border-t border-line bg-paper-raised"
     >
       {ITEMS.map(({ href, label, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
