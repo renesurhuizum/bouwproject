@@ -2,9 +2,11 @@
 
 // Muren-laag. Tekent muren met echte dikte (schaalt mee met zoom), kleur per
 // status, stippellijn bij sloop, en een markering bij dragende muren.
+// Bij geselecteerde muur: draggable eindpunt-handles zodat je muren kunt aanpassen.
 
 import { Fragment } from "react";
 import { Layer, Line, Circle, Label, Tag, Text } from "react-konva";
+import type { KonvaEventObject } from "konva/lib/Node";
 import type { Wall } from "@/lib/domain/types";
 import { WALL_STATUS_COLOR } from "@/lib/domain/constants";
 import { dist } from "@/lib/geometry";
@@ -16,9 +18,10 @@ interface Props {
   walls: Wall[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onMoveEndpoint?: (wallId: string, which: "start" | "end", screenX: number, screenY: number) => void;
 }
 
-export function WallsLayer({ view, walls, selectedId, onSelect }: Props) {
+export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint }: Props) {
   return (
     <Layer>
       {walls.map((w) => {
@@ -69,8 +72,48 @@ export function WallsLayer({ view, walls, selectedId, onSelect }: Props) {
                 listening={false}
               />
             )}
-            <Circle x={a.x} y={a.y} radius={3.2} fill="#1c1917" listening={false} />
-            <Circle x={b.x} y={b.y} radius={3.2} fill="#1c1917" listening={false} />
+
+            {/* Eindpunt-dots (altijd zichtbaar) */}
+            {!selected && (
+              <>
+                <Circle x={a.x} y={a.y} radius={3.2} fill="#1c1917" listening={false} />
+                <Circle x={b.x} y={b.y} radius={3.2} fill="#1c1917" listening={false} />
+              </>
+            )}
+
+            {/* Drag handles bij selectie */}
+            {selected && onMoveEndpoint && (
+              <>
+                <Circle
+                  x={a.x}
+                  y={a.y}
+                  radius={9}
+                  fill="#ea580c"
+                  stroke="#fff"
+                  strokeWidth={2}
+                  draggable
+                  onDragEnd={(e: KonvaEventObject<DragEvent>) => {
+                    onMoveEndpoint(w.id, "start", e.target.x(), e.target.y());
+                    // Zet visuele positie terug; DB-update triggert re-render.
+                    e.target.position({ x: a.x, y: a.y });
+                  }}
+                />
+                <Circle
+                  x={b.x}
+                  y={b.y}
+                  radius={9}
+                  fill="#ea580c"
+                  stroke="#fff"
+                  strokeWidth={2}
+                  draggable
+                  onDragEnd={(e: KonvaEventObject<DragEvent>) => {
+                    onMoveEndpoint(w.id, "end", e.target.x(), e.target.y());
+                    e.target.position({ x: b.x, y: b.y });
+                  }}
+                />
+              </>
+            )}
+
             {lenPx >= 34 && (
               <Label x={mid.x} y={mid.y} listening={false} opacity={0.96}>
                 <Tag fill="#fbfaf6" stroke="#ddd7ca" strokeWidth={1} cornerRadius={3} />

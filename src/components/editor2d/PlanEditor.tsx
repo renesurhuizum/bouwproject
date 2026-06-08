@@ -20,13 +20,13 @@ import { create, remove, update } from "@/lib/db/repo";
 import { useEditor, type SelKind } from "@/lib/store/editor";
 import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing } from "@/lib/hooks";
 import {
-  GRID_SIZE_M,
   ELECTRICAL_DEFAULT_HEIGHT,
   FIXTURE_DEFAULT_HEIGHT,
   OPENING_DEFAULTS,
   OPENING_SNAP_M,
 } from "@/lib/domain/constants";
 import { dist, snapToGrid, snapToPoints, projectOnSegment } from "@/lib/geometry";
+import { GRID_SNAP_M } from "@/lib/store/editor";
 import { formatLength } from "@/lib/format";
 import {
   screenToMeters,
@@ -42,6 +42,8 @@ import { OpeningsLayer } from "./OpeningsLayer";
 import { RoomsLayer } from "./RoomsLayer";
 import { ElectricalLayer } from "./ElectricalLayer";
 import { PlumbingLayer } from "./PlumbingLayer";
+import { RoomDivider } from "./RoomDivider";
+import type { LayoutRect } from "@/lib/roomDivider";
 
 export function PlanEditor() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -53,6 +55,7 @@ export function PlanEditor() {
   const wallDefaults = useEditor((s) => s.wallDefaults);
   const visibleLayers = useEditor((s) => s.visibleLayers);
   const showGrid = useEditor((s) => s.showGrid);
+  const gridSnap = useEditor((s) => s.gridSnap);
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const selection = useEditor((s) => s.selection);
   const select = useEditor((s) => s.select);
@@ -66,9 +69,9 @@ export function PlanEditor() {
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
   const [roomDraft, setRoomDraft] = useState<Point[]>([]);
-  const [menu, setMenu] = useState<{ x: number; y: number; kind: SelKind; id: string } | null>(
-    null,
-  );
+  const [menu, setMenu] = useState<{ x: number; y: number; kind: SelKind; id: string } | null>(null);
+  const [divideRect, setDivideRect] = useState<LayoutRect | null>(null);
+  const divideStartRef = useRef<Point | null>(null);
 
   // Gebaar-refs.
   const pointers = useRef<Map<number, Point>>(new Map());
@@ -95,6 +98,10 @@ export function PlanEditor() {
     setDraftStart(null);
     setRoomDraft([]);
     setMenu(null);
+    if (tool !== "divide") {
+      setDivideRect(null);
+      divideStartRef.current = null;
+    }
   }, [tool, activeLevelId]);
 
   // Sneltoetsen: Delete = selectie weg, Escape = annuleren/deselecteren.
@@ -146,7 +153,13 @@ export function PlanEditor() {
 
   function snapPoint(m: Point): Point {
     const near = snapToPoints(m, endpoints, pxToMeters(SNAP_RADIUS_PX, view));
-    return near ?? snapToGrid(m, GRID_SIZE_M);
+    return near ?? snapToGrid(m, GRID_SNAP_M[gridSnap]);
+  }
+
+  async function handleMoveEndpoint(wallId: string, which: "start" | "end", screenX: number, screenY: number) {
+    const worldM = screenToMeters({ x: screenX, y: screenY }, view);
+    const snapped = snapPoint(worldM);
+    await update("walls", wallId, { [which]: snapped });
   }
 
   async function createWall(start: Point, end: Point) {
@@ -279,6 +292,10 @@ export function PlanEditor() {
         onStage: e.target === stage,
       };
       if (tool === "select") panPointer.current = { id: evt.pointerId, last: pos };
+      if (tool === "divide") {
+        divideStartRef.current = screenToMeters(pos, view);
+        setCursor(screenToMeters(pos, view));
+      }
     } else {
       // tweede vinger: geen tap, geen 1-vinger-pan
       tapRef.current = null;
@@ -331,6 +348,10 @@ export function PlanEditor() {
     if (tool === "wall" || tool === "place" || tool === "room") {
       setCursor(snapPoint(screenToMeters(pos, view)));
     }
+    if (tool === "divide") {
+      setCursor(screenToMeters(pos, view));
+      if (tapRef.current) tapRef.current.moved = true;
+    }
     if (panPointer.current && evt.pointerId === panPointer.current.id && tool === "select") {
       const dx = pos.x - panPointer.current.last.x;
       const dy = pos.y - panPointer.current.last.y;
@@ -358,6 +379,20 @@ export function PlanEditor() {
       panPointer.current = null;
     }
     if (wasTap) handleTap(pos, t!.onStage);
+    // Divide-rechthoek afronden bij loslaten.
+    if (tool === "divide" && divideStartRef.current) {
+      const endM = screenToMeters(pos, view);
+      const s = divideStartRef.current;
+      if (Math.abs(endM.x - s.x) > 0.5 && Math.abs(endM.y - s.y) > 0.5) {
+        setDivideRect({
+          x0: Math.min(s.x, endM.x),
+          y0: Math.min(s.y, endM.y),
+          x1: Math.max(s.x, endM.x),
+          y1: Math.max(s.y, endM.y),
+        });
+      }
+      divideStartRef.current = null;
+    }
     tapRef.current = null;
   }
 
@@ -433,6 +468,7 @@ export function PlanEditor() {
               walls={walls}
               selectedId={selection?.kind === "wall" ? selection.id : null}
               onSelect={(id) => onSelectEntity("wall", id)}
+              onMoveEndpoint={handleMoveEndpoint}
             />
           )}
 
@@ -511,6 +547,38 @@ export function PlanEditor() {
               />
             )}
 
+            {/* Divide-rechthoek preview */}
+            {tool === "divide" && divideStartRef.current && cursor && (() => {
+              const s = metersToScreen(divideStartRef.current, view);
+              const e = metersToScreen(cursor, view);
+              return (
+                <Line
+                  points={[s.x, s.y, e.x, s.y, e.x, e.y, s.x, e.y, s.x, s.y]}
+                  stroke="#7c3aed"
+                  strokeWidth={2}
+                  dash={[8, 5]}
+                  fill="rgba(124,58,237,0.08)"
+                  closed
+                  listening={false}
+                />
+              );
+            })()}
+            {/* Bevestigde divide-rechthoek */}
+            {tool === "divide" && divideRect && (() => {
+              const a = metersToScreen({ x: divideRect.x0, y: divideRect.y0 }, view);
+              const b = metersToScreen({ x: divideRect.x1, y: divideRect.y1 }, view);
+              return (
+                <Line
+                  points={[a.x, a.y, b.x, a.y, b.x, b.y, a.x, b.y]}
+                  stroke="#7c3aed"
+                  strokeWidth={2}
+                  fill="rgba(124,58,237,0.06)"
+                  closed
+                  listening={false}
+                />
+              );
+            })()}
+
             {/* Ruimte in opbouw */}
             {tool === "room" && roomDraft.length > 0 && (
               <>
@@ -577,6 +645,8 @@ export function PlanEditor() {
           </div>
         </div>
       )}
+
+      <RoomDivider divideRect={divideRect} onClear={() => setDivideRect(null)} />
 
       {/* Contextmenu (rechtermuisknop) */}
       {menu && (

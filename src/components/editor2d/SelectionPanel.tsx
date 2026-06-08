@@ -19,7 +19,7 @@ import {
   OPENING_COLOR,
   FIXTURE_LABEL,
 } from "@/lib/domain/constants";
-import type { WallMaterial, WallStatus, OpeningType } from "@/lib/domain/types";
+import type { Wall, WallMaterial, WallStatus, OpeningType } from "@/lib/domain/types";
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
 const MATERIALS = Object.keys(WALL_MATERIAL_LABEL) as WallMaterial[];
@@ -81,12 +81,9 @@ export function SelectionPanel() {
 
         {wall && (
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between text-xs text-ink-500">
-              <span>Lengte</span>
-              <span className="tabular text-ink-900">
-                {formatLength(dist(wall.start, wall.end))}
-              </span>
-            </div>
+            <Row label="Lengte">
+              <WallLengthField wall={wall} />
+            </Row>
 
             <Row label="Status">
               <div className="flex gap-1">
@@ -341,5 +338,38 @@ function DeleteButton({ onClick }: { onClick: () => void }) {
     >
       <Trash2 size={14} /> Verwijderen
     </button>
+  );
+}
+
+function WallLengthField({ wall }: { wall: Wall }) {
+  const currentLenM = dist(wall.start, wall.end);
+  const currentCm = Math.round(currentLenM * 100);
+
+  function applyLength(cm: number) {
+    if (cm < 1) return;
+    const newLenM = cm / 100;
+    const len = dist(wall.start, wall.end);
+    if (len === 0) return;
+    const dx = (wall.end.x - wall.start.x) / len;
+    const dy = (wall.end.y - wall.start.y) / len;
+    void update("walls", wall.id, {
+      end: { x: wall.start.x + dx * newLenM, y: wall.start.y + dy * newLenM },
+    });
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        type="number"
+        defaultValue={currentCm}
+        key={currentCm}
+        onBlur={(e) => applyLength(Number(e.target.value))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") applyLength(Number((e.target as HTMLInputElement).value));
+        }}
+        className="tabular w-20 rounded-md border border-line bg-paper px-2 py-1 text-right text-xs text-ink-900"
+      />
+      <span className="text-[11px] text-ink-500">cm</span>
+    </div>
   );
 }

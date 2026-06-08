@@ -3,7 +3,7 @@
 // Zwevende gereedschapsbalk onderin de editor. Mobiel-first, grote tikdoelen.
 
 import { useState } from "react";
-import { MousePointer2, Minus, Pentagon, Plug, Layers, Grid3x3, Plus } from "lucide-react";
+import { MousePointer2, Minus, Pentagon, Plug, Layers, Grid3x3, Plus, LayoutDashboard } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import type {
   ElectricalType,
@@ -64,6 +64,10 @@ export function Toolbar() {
   const toggleLayer = useEditor((s) => s.toggleLayer);
   const showGrid = useEditor((s) => s.showGrid);
   const toggleGrid = useEditor((s) => s.toggleGrid);
+  const gridSnap = useEditor((s) => s.gridSnap);
+  const cycleGridSnap = useEditor((s) => s.cycleGridSnap);
+
+  const SNAP_LABEL = { fine: "10cm", normal: "50cm", coarse: "1m" };
 
   const [showLayers, setShowLayers] = useState(false);
 
@@ -246,9 +250,12 @@ export function Toolbar() {
             if (!placeKind) setPlaceKind({ domain: "electrical", type: "socket" });
             else setTool("place");
           }}
-          label="Elektra"
+          label="Installatie"
         >
           <Plug size={20} />
+        </ToolBtn>
+        <ToolBtn active={tool === "divide"} onClick={() => setTool("divide")} label="Verdeel">
+          <LayoutDashboard size={20} />
         </ToolBtn>
         <div className="mx-0.5 h-7 w-px bg-line" />
         <ToolBtn active={showLayers} onClick={() => setShowLayers((v) => !v)} label="Lagen">
@@ -257,6 +264,14 @@ export function Toolbar() {
         <ToolBtn active={showGrid} onClick={toggleGrid} label="Raster">
           <Grid3x3 size={20} />
         </ToolBtn>
+        <button
+          onClick={cycleGridSnap}
+          className="flex h-11 w-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-700 hover:bg-paper-sunken"
+          aria-label="Wijzig snap-maat"
+        >
+          <span className="text-[10px] font-bold text-ink-900">{SNAP_LABEL[gridSnap]}</span>
+          <span>Snap</span>
+        </button>
       </div>
     </div>
   );
