@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
-import { Layer, Line, Text, Rect, Group } from "react-konva";
+import { Layer, Line, Text, Rect, Group, Arrow } from "react-konva";
 import type { Room } from "@/lib/domain/types";
 import { polygonArea, polygonCentroid } from "@/lib/geometry";
 import { formatArea } from "@/lib/format";
@@ -24,6 +24,77 @@ function hexToRgba(color: string, alpha: number): string {
   return color;
 }
 
+function isStaircase(name: string): boolean {
+  return /trap\b/i.test(name);
+}
+
+function StaircaseLines({
+  polygon,
+  view,
+}: {
+  polygon: { x: number; y: number }[];
+  view: ViewState;
+}) {
+  const screenPts = polygon.map((p) => metersToScreen(p, view));
+  const xs = screenPts.map((p) => p.x);
+  const ys = screenPts.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const w = maxX - minX;
+  const h = maxY - minY;
+
+  // Trede-hoogte in pixels (~21 cm)
+  const treadPx = Math.max(8, 0.21 * view.scale);
+  const lines: number[][] = [];
+
+  if (h >= w) {
+    // Verticale trap — horizontale tredes
+    for (let y = minY + treadPx; y < maxY - 2; y += treadPx) {
+      lines.push([minX + 2, y, maxX - 2, y]);
+    }
+    // Pijl omhoog
+    return (
+      <Group listening={false}>
+        {lines.map((pts, i) => (
+          <Line key={i} points={pts} stroke="#94a3b8" strokeWidth={0.8} />
+        ))}
+        <Arrow
+          points={[minX + w / 2, maxY - 6, minX + w / 2, minY + 6]}
+          fill="#64748b"
+          stroke="#64748b"
+          strokeWidth={1}
+          pointerLength={6}
+          pointerWidth={5}
+          listening={false}
+        />
+      </Group>
+    );
+  } else {
+    // Horizontale trap — verticale tredes
+    for (let x = minX + treadPx; x < maxX - 2; x += treadPx) {
+      lines.push([x, minY + 2, x, maxY - 2]);
+    }
+    return (
+      <Group listening={false}>
+        {lines.map((pts, i) => (
+          <Line key={i} points={pts} stroke="#94a3b8" strokeWidth={0.8} />
+        ))}
+        <Arrow
+          points={[maxX - 6, minY + h / 2, minX + 6, minY + h / 2]}
+          fill="#64748b"
+          stroke="#64748b"
+          strokeWidth={1}
+          pointerLength={6}
+          pointerWidth={5}
+          listening={false}
+        />
+      </Group>
+    );
+  }
+}
+
 export function RoomsLayer({ view, rooms, selectedId, onSelect }: Props) {
   return (
     <Layer>
@@ -39,6 +110,7 @@ export function RoomsLayer({ view, rooms, selectedId, onSelect }: Props) {
         const areaLabel = formatArea(area);
         const c = metersToScreen(polygonCentroid(room.polygon), view);
         const selected = room.id === selectedId;
+        const staircase = isStaircase(room.name);
 
         const fillColor = room.color
           ? hexToRgba(room.color, selected ? 0.45 : 0.28)
@@ -65,11 +137,8 @@ export function RoomsLayer({ view, rooms, selectedId, onSelect }: Props) {
               onClick={() => onSelect(room.id)}
               onTap={() => onSelect(room.id)}
             />
-            <Group
-              x={c.x - labelW / 2}
-              y={c.y - labelH / 2}
-              listening={false}
-            >
+            {staircase && <StaircaseLines polygon={room.polygon} view={view} />}
+            <Group x={c.x - labelW / 2} y={c.y - labelH / 2} listening={false}>
               <Rect
                 width={labelW}
                 height={labelH}

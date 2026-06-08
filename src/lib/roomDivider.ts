@@ -23,6 +23,10 @@ export interface RoomSpec {
   weight: number; // relatief gewicht voor oppervlakteverdeling
 }
 
+export interface FloorplanOptions {
+  openLiving: boolean; // keuken + woonkamer als één open ruimte
+}
+
 export interface FloorplanPreset {
   label: string;
   description: string;
@@ -82,11 +86,12 @@ export const FLOORPLAN_PRESETS: FloorplanPreset[] = [
   },
   {
     label: "Gezinswoning",
-    description: "Woonkamer · keuken · 3 slaapkamers · badkamer",
+    description: "Woonkamer · keuken · 3 slaapkamers · badkamer · trap",
     rooms: [
       { name: "Woonkamer", weight: 5 },
       { name: "Keuken", weight: 2.5 },
       { name: "Hal", weight: 1.5 },
+      { name: "Trap", weight: 1.5 },
       { name: "Toilet", weight: 0.5 },
       { name: "Slaapkamer 1 (master)", weight: 3 },
       { name: "Slaapkamer 2", weight: 2 },
@@ -96,12 +101,13 @@ export const FLOORPLAN_PRESETS: FloorplanPreset[] = [
   },
   {
     label: "Ruime woning",
-    description: "Woon/eet · keuken · 4 slaapkamers · 2 badkamers",
+    description: "Woon/eet · keuken · 4 slaapkamers · 2 badkamers · trap",
     rooms: [
       { name: "Woonkamer", weight: 5 },
       { name: "Eetkamer", weight: 3 },
       { name: "Keuken", weight: 3 },
       { name: "Hal", weight: 2 },
+      { name: "Trap", weight: 1.5 },
       { name: "Toilet", weight: 0.5 },
       { name: "Slaapkamer 1 (master)", weight: 3.5 },
       { name: "Slaapkamer 2", weight: 2.5 },
@@ -275,7 +281,11 @@ function placeDoors(walls: GeneratedWall[]): GeneratedDoor[] {
 //  │ ZONE │      │ ÉZN  │
 //  └──────┴──────┴──────┘
 
-export function generateFloorplan(boundary: LayoutRect, rooms: RoomSpec[]): GeneratedLayout {
+export function generateFloorplan(
+  boundary: LayoutRect,
+  rooms: RoomSpec[],
+  options: FloorplanOptions = { openLiving: false },
+): GeneratedLayout {
   if (rooms.length === 0) return { walls: [], rooms: [], doors: [] };
 
   const walls: GeneratedWall[] = [];
@@ -290,11 +300,22 @@ export function generateFloorplan(boundary: LayoutRect, rooms: RoomSpec[]): Gene
     { start: { x: x0, y: y1 }, end: { x: x0, y: y0 }, isPerimeter: true },
   );
 
+  // Open keuken/woonkamer: combineer alle living-kamers tot één ruimte.
+  let effectiveRooms = rooms;
+  if (options.openLiving) {
+    const livingRooms = rooms.filter(r => categorize(r.name) === "living");
+    const otherRooms  = rooms.filter(r => categorize(r.name) !== "living");
+    if (livingRooms.length > 1) {
+      const combinedWeight = livingRooms.reduce((s, r) => s + r.weight, 0);
+      effectiveRooms = [{ name: "Woon-/eetruimte", weight: combinedWeight }, ...otherRooms];
+    }
+  }
+
   // Categoriseer.
-  const living   = rooms.filter(r => ["living", "other"].includes(categorize(r.name)));
-  const wet      = rooms.filter(r => categorize(r.name) === "wet");
-  const sleeping = rooms.filter(r => categorize(r.name) === "sleeping");
-  const hall     = rooms.filter(r => categorize(r.name) === "hall");
+  const living   = effectiveRooms.filter(r => ["living", "other"].includes(categorize(r.name)));
+  const wet      = effectiveRooms.filter(r => categorize(r.name) === "wet");
+  const sleeping = effectiveRooms.filter(r => categorize(r.name) === "sleeping");
+  const hall     = effectiveRooms.filter(r => categorize(r.name) === "hall");
 
   const W = x1 - x0;
   const H = y1 - y0;
@@ -302,7 +323,7 @@ export function generateFloorplan(boundary: LayoutRect, rooms: RoomSpec[]): Gene
   // Als er geen zinvolle zonering is, val terug op verbeterde BSP.
   const hasMultipleZones = living.length > 0 && (sleeping.length > 0 || wet.length > 0);
   if (!hasMultipleZones) {
-    splitZone(boundary, rooms, walls, genRooms);
+    splitZone(boundary, effectiveRooms, walls, genRooms);
     return { walls, rooms: genRooms, doors: placeDoors(walls) };
   }
 
