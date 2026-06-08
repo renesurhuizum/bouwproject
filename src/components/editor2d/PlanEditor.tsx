@@ -38,6 +38,7 @@ import {
   SNAP_RADIUS_PX,
   type ViewState,
 } from "./viewport";
+import { BgImageLayer } from "./BgImageLayer";
 import { GridLayer } from "./GridLayer";
 import { WallsLayer } from "./WallsLayer";
 import { OpeningsLayer } from "./OpeningsLayer";
@@ -471,6 +472,7 @@ export function PlanEditor() {
           onWheel={onWheel}
           onContextMenu={onContextMenu}
         >
+          <BgImageLayer levelId={activeLevelId} view={view} />
           {showGrid && <GridLayer view={view} width={size.width} height={size.height} />}
 
           {visibleLayers.rooms && (

@@ -8,6 +8,7 @@ import { LayoutDashboard, Plus, Minus, Wand2, X } from "lucide-react";
 import { create } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
 import { generateFloorplan, FLOORPLAN_PRESETS, type RoomSpec, type LayoutRect } from "@/lib/roomDivider";
+import type { FloorplanOptions } from "@/lib/roomDivider";
 import type { Wall, Room, Opening } from "@/lib/domain/types";
 
 interface Props {
@@ -25,6 +26,7 @@ export function RoomDivider({ divideRect, onClear }: Props) {
   const [rooms, setRooms] = useState<RoomSpec[]>(() => FLOORPLAN_PRESETS[2].rooms);
   const [generating, setGenerating] = useState(false);
   const [showCustom, setShowCustom] = useState(false);
+  const [openLiving, setOpenLiving] = useState(false);
 
   if (tool !== "divide") return null;
 
@@ -58,7 +60,8 @@ export function RoomDivider({ divideRect, onClear }: Props) {
     if (!divideRect || !activeLevelId || rooms.length === 0) return;
     setGenerating(true);
     try {
-      const layout = generateFloorplan(divideRect, rooms);
+      const opts: FloorplanOptions = { openLiving };
+      const layout = generateFloorplan(divideRect, rooms, opts);
 
       // Muren aanmaken — bewaar de DB-IDs voor deurplaatsing.
       const wallIds: string[] = [];
@@ -191,6 +194,17 @@ export function RoomDivider({ divideRect, onClear }: Props) {
               ))}
             </div>
           </div>
+
+          {/* Open keuken/woonkamer */}
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={openLiving}
+              onChange={(e) => setOpenLiving(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-line accent-accent"
+            />
+            <span className="text-[11px] text-ink-700">Open keuken/woonkamer</span>
+          </label>
 
           {/* Begrenzing */}
           <div className="rounded-lg border border-dashed border-line p-2.5 text-center">

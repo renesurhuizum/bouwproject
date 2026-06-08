@@ -27,6 +27,11 @@ export interface Level extends Entity {
   elevation: number; // vloerpeil in m t.o.v. nulpeil
   height: number; // standaard verdiepingshoogte in m
   order: number;
+  bgImageBlob?: Blob; // optionele achtergrondafbeelding als natekenhulp
+  bgImageOpacity?: number; // 0-1, default 0.4
+  bgImageScale?: number; // m/pixel, zodat het op de juiste schaal past
+  bgImageOffsetX?: number; // wereld-x van linkerbovenhoek in m
+  bgImageOffsetY?: number; // wereld-y van linkerbovenhoek in m
 }
 
 export type WallStatus = "existing" | "new" | "demolish";

@@ -279,6 +279,24 @@ export function SelectionPanel() {
                 className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900 placeholder:text-ink-300"
               />
             </Row>
+            <Row label="Kleur">
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={room.color ?? "#fef3c7"}
+                  onChange={(e) => update("rooms", room.id, { color: e.target.value })}
+                  className="h-7 w-10 cursor-pointer rounded border border-line bg-paper p-0.5"
+                />
+                {room.color && (
+                  <button
+                    onClick={() => update("rooms", room.id, { color: undefined })}
+                    className="text-[10px] text-ink-400 hover:text-ink-700"
+                  >
+                    Wis
+                  </button>
+                )}
+              </div>
+            </Row>
             <DeleteButton onClick={() => removeAnd("rooms", room.id, () => select(null))} />
 
             {/* Foto's sectie */}
