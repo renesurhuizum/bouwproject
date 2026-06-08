@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { Sparkles } from "lucide-react";
 import { Toolbar } from "@/components/editor2d/Toolbar";
 import { SelectionPanel } from "@/components/editor2d/SelectionPanel";
+import { LevelSwitcher } from "@/components/editor2d/LevelSwitcher";
 import { IndelingGenerator } from "@/components/indeling/IndelingGenerator";
 
 // Konva heeft window nodig → alleen in de browser laden.
@@ -28,6 +29,7 @@ export default function PlattegrondPage() {
   return (
     <div className="absolute inset-0 overflow-hidden">
       <PlanEditor />
+      <LevelSwitcher />
       <SelectionPanel />
       <Toolbar />
 

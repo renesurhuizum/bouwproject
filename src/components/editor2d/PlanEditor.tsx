@@ -17,6 +17,8 @@ import type {
   Room,
 } from "@/lib/domain/types";
 import { create, remove, update } from "@/lib/db/repo";
+import { getDB } from "@/lib/db/db";
+import { useHistory } from "@/lib/history";
 import { useEditor, type SelKind } from "@/lib/store/editor";
 import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing } from "@/lib/hooks";
 import {
@@ -49,6 +51,10 @@ export function PlanEditor() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [view, setView] = useState<ViewState>({ x: 60, y: 90, scale: 1 });
+
+  const undo = useHistory((s) => s.undo);
+  const redo = useHistory((s) => s.redo);
+  const pushAction = useHistory((s) => s.pushAction);
 
   const tool = useEditor((s) => s.tool);
   const placeKind = useEditor((s) => s.placeKind);
@@ -119,12 +125,18 @@ export function PlanEditor() {
         setRoomDraft([]);
         setMenu(null);
         select(null);
+      } else if (e.key === "z" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        e.preventDefault();
+        void redo();
+      } else if (e.key === "z" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        void undo();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection]);
+  }, [selection, undo, redo]);
 
   const TABLE_FOR: Record<SelKind, "walls" | "openings" | "electrical" | "rooms" | "plumbing" | "hvac"> = {
     wall: "walls",
@@ -136,7 +148,10 @@ export function PlanEditor() {
   };
 
   async function deleteEntity(kind: SelKind, id: string) {
-    await remove(TABLE_FOR[kind], id);
+    const tbl = TABLE_FOR[kind];
+    const snapshot = await (getDB()[tbl] as import("dexie").Table).get(id);
+    if (snapshot) pushAction({ type: "remove", table: tbl, snapshot });
+    await remove(tbl, id);
     setMenu(null);
     if (selection?.id === id) select(null);
   }
@@ -165,7 +180,7 @@ export function PlanEditor() {
   async function createWall(start: Point, end: Point) {
     if (!activeLevelId) return;
     if (dist(start, end) < 0.01) return;
-    await create<Wall>("walls", {
+    const w = await create<Wall>("walls", {
       levelId: activeLevelId,
       start,
       end,
@@ -175,6 +190,7 @@ export function PlanEditor() {
       loadBearing: wallDefaults.loadBearing,
       status: wallDefaults.status,
     });
+    pushAction({ type: "create", table: "walls", id: w.id });
   }
 
   async function placeElectrical(at: Point) {
@@ -185,6 +201,7 @@ export function PlanEditor() {
       position: at,
       heightZ: ELECTRICAL_DEFAULT_HEIGHT[placeKind.type],
     });
+    pushAction({ type: "create", table: "electrical", id: item.id });
     select({ kind: "electrical", id: item.id });
   }
 
@@ -197,6 +214,7 @@ export function PlanEditor() {
       position: at,
       heightZ: FIXTURE_DEFAULT_HEIGHT[placeKind.fixture],
     });
+    pushAction({ type: "create", table: "plumbing", id: item.id });
     select({ kind: "plumbing", id: item.id });
   }
 
@@ -222,6 +240,7 @@ export function PlanEditor() {
       sillHeight: def.sillHeight,
       offset,
     });
+    pushAction({ type: "create", table: "openings", id: op.id });
     select({ kind: "opening", id: op.id });
   }
 
@@ -232,6 +251,7 @@ export function PlanEditor() {
       name: `Ruimte ${rooms.length + 1}`,
       polygon: points,
     });
+    pushAction({ type: "create", table: "rooms", id: room.id });
     setRoomDraft([]);
     select({ kind: "room", id: room.id });
   }
