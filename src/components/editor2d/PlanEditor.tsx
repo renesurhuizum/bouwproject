@@ -47,6 +47,7 @@ import { ElectricalLayer } from "./ElectricalLayer";
 import { PlumbingLayer } from "./PlumbingLayer";
 import { RoomDivider } from "./RoomDivider";
 import { ElectricalLegend } from "./ElectricalLegend";
+import { Minimap } from "./Minimap";
 import type { LayoutRect } from "@/lib/roomDivider";
 
 export function PlanEditor() {
@@ -689,6 +690,23 @@ export function PlanEditor() {
 
       {/* Elektra-legenda: alleen zichtbaar als elektra-laag aan staat */}
       {visibleLayers.electrical && <ElectricalLegend />}
+
+      {/* Minimap */}
+      {walls.length > 0 && (
+        <Minimap
+          walls={walls}
+          view={view}
+          stageWidth={size.width}
+          stageHeight={size.height}
+          onJumpTo={(worldX, worldY) => {
+            setView((v) => ({
+              ...v,
+              x: size.width  / 2 - worldX * 50 * v.scale,
+              y: size.height / 2 - worldY * 50 * v.scale,
+            }));
+          }}
+        />
+      )}
 
       {/* Contextmenu (rechtermuisknop) */}
       {menu && (
