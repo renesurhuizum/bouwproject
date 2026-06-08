@@ -8,7 +8,7 @@ import { LayoutDashboard, Plus, Minus, Wand2, X } from "lucide-react";
 import { create } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
 import { generateFloorplan, FLOORPLAN_PRESETS, type RoomSpec, type LayoutRect } from "@/lib/roomDivider";
-import type { Wall, Room } from "@/lib/domain/types";
+import type { Wall, Room, Opening } from "@/lib/domain/types";
 
 interface Props {
   divideRect: LayoutRect | null;
@@ -60,26 +60,43 @@ export function RoomDivider({ divideRect, onClear }: Props) {
     try {
       const layout = generateFloorplan(divideRect, rooms);
 
-      // Muren aanmaken
+      // Muren aanmaken — bewaar de DB-IDs voor deurplaatsing.
+      const wallIds: string[] = [];
       for (const w of layout.walls) {
-        await create<Wall>("walls", {
+        const created = await create<Wall>("walls", {
           levelId: activeLevelId,
           start: w.start,
           end: w.end,
-          thickness: wallDefaults.thickness,
+          thickness: w.isPerimeter ? wallDefaults.thickness : Math.min(0.1, wallDefaults.thickness),
           height: wallDefaults.height,
           material: wallDefaults.material,
           loadBearing: false,
           status: wallDefaults.status,
         });
+        wallIds.push(created.id);
       }
 
-      // Ruimtes aanmaken
+      // Ruimtes aanmaken met kleur uit het algoritme.
       for (const r of layout.rooms) {
         await create<Room>("rooms", {
           levelId: activeLevelId,
           name: r.name,
           polygon: r.polygon,
+          color: r.color,
+        });
+      }
+
+      // Deuren aanmaken op inwendige muren.
+      for (const door of layout.doors) {
+        const wallId = wallIds[door.wallIndex];
+        if (!wallId) continue;
+        await create<Opening>("openings", {
+          wallId,
+          type: "door",
+          width: door.width,
+          height: 2.1,
+          sillHeight: 0,
+          offset: door.offset,
         });
       }
 
