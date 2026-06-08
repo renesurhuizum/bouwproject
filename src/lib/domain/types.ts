@@ -126,6 +126,23 @@ export interface PlumbingItem extends Entity {
   note?: string;
 }
 
+export type FurnitureKind =
+  | "bed-single" | "bed-double" | "bed-king"
+  | "sofa-2" | "sofa-3" | "sofa-l"
+  | "dining-table" | "dining-chair" | "desk" | "office-chair"
+  | "wardrobe" | "bookshelf" | "tv-unit" | "coffee-table"
+  | "bathtub" | "shower-cabin" | "kitchen-island";
+
+export interface Furniture extends Entity {
+  levelId: string;
+  kind: FurnitureKind;
+  position: Point;
+  rotation: number;      // graden: 0, 90, 180, 270
+  width?: number;        // m (override)
+  depth?: number;        // m (override)
+  color?: string;
+}
+
 export type HvacType =
   | "cv-pipe" // cv-leiding
   | "radiator"
@@ -205,4 +222,4 @@ export interface Photo extends Entity {
 }
 
 // Layer-zichtbaarheid in de editor
-export type EditorLayer = "structure" | "electrical" | "plumbing" | "hvac" | "rooms";
+export type EditorLayer = "structure" | "electrical" | "plumbing" | "hvac" | "rooms" | "furniture";

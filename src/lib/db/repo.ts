@@ -20,7 +20,8 @@ export type TableName =
   | "budget"
   | "expenses"
   | "materials"
-  | "photos";
+  | "photos"
+  | "furniture";
 
 // Eén generieke tabel-handle; we casten naar Entity zodat dynamische tabelkeuze
 // typeveilig blijft zonder per-tabel overloads.

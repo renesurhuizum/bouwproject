@@ -83,6 +83,7 @@ export const useEditor = create<EditorState>()(
         plumbing: true,
         hvac: true,
         rooms: true,
+        furniture: true,
       },
       wallDefaults: {
         thickness: 0.1,

@@ -8,8 +8,9 @@ import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import { useLiveQuery } from "dexie-react-hooks";
-import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level } from "@/lib/domain/types";
-import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject } from "@/lib/hooks";
+import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture } from "@/lib/domain/types";
+import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture } from "@/lib/hooks";
+import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { getDB } from "@/lib/db/db";
 import { useEditor } from "@/lib/store/editor";
 import { dist, angle, polygonCentroid } from "@/lib/geometry";
@@ -106,21 +107,134 @@ function RoomFloor3D({ room }: { room: Room }) {
 }
 
 function ElectricalMarker({ item }: { item: ElectricalItem }) {
+  const isLight = item.type === "light" || item.type === "spot";
+  const isWall = item.type === "socket" || item.type === "socket-double" || item.type === "switch" || item.type === "data";
+  const isSwitch = item.type === "switch";
+
+  if (isLight) {
+    return (
+      <group position={[item.position.x, item.heightZ, item.position.y]}>
+        <mesh>
+          <cylinderGeometry args={[0.08, 0.08, 0.04, 16]} />
+          <meshStandardMaterial color="#f5f0e8" roughness={0.2} metalness={0.3} />
+        </mesh>
+        <pointLight intensity={0.5} distance={4} color="#fffae8" />
+      </group>
+    );
+  }
+
+  if (isWall) {
+    return (
+      <group position={[item.position.x, item.heightZ, item.position.y]}>
+        <mesh>
+          <boxGeometry args={[0.085, 0.085, 0.012]} />
+          <meshStandardMaterial color="#f5f5f0" roughness={0.3} metalness={0.1} />
+        </mesh>
+        {isSwitch ? (
+          <mesh position={[0, 0, 0.012]}>
+            <boxGeometry args={[0.028, 0.045, 0.008]} />
+            <meshStandardMaterial color="#e8e8e0" roughness={0.4} />
+          </mesh>
+        ) : (
+          <>
+            <mesh position={[-0.018, 0, 0.013]}>
+              <cylinderGeometry args={[0.004, 0.004, 0.01, 8]} />
+              <meshStandardMaterial color="#333333" />
+            </mesh>
+            <mesh position={[0.018, 0, 0.013]}>
+              <cylinderGeometry args={[0.004, 0.004, 0.01, 8]} />
+              <meshStandardMaterial color="#333333" />
+            </mesh>
+          </>
+        )}
+      </group>
+    );
+  }
+
   return (
     <mesh position={[item.position.x, item.heightZ, item.position.y]}>
-      <sphereGeometry args={[0.06, 16, 16]} />
-      <meshStandardMaterial color="#1d4ed8" emissive="#1d4ed8" emissiveIntensity={0.3} />
+      <sphereGeometry args={[0.05, 12, 12]} />
+      <meshStandardMaterial color="#1d4ed8" roughness={0.5} />
     </mesh>
   );
 }
 
+function plumbingDims(fixture?: string): { w: number; d: number; h: number; color: string } {
+  switch (fixture) {
+    case "toilet":       return { w: 0.40, d: 0.65, h: 0.40, color: "#f0ede8" };
+    case "sink":         return { w: 0.55, d: 0.45, h: 0.85, color: "#e8f0f4" };
+    case "shower":       return { w: 0.90, d: 0.90, h: 2.20, color: "#d4eaf0" };
+    case "bath":         return { w: 0.75, d: 1.70, h: 0.55, color: "#e8f4f8" };
+    case "kitchen-tap":  return { w: 0.60, d: 0.55, h: 0.90, color: "#e8e4d8" };
+    case "boiler":       return { w: 0.45, d: 0.45, h: 0.80, color: "#d0d8e0" };
+    default:             return { w: 0.40, d: 0.40, h: 0.85, color: "#c8dce8" };
+  }
+}
+
 function PlumbingMarker({ item }: { item: PlumbingItem }) {
   if (!item.position) return null;
+  const dims = plumbingDims(item.fixture);
   return (
-    <mesh position={[item.position.x, item.heightZ ?? 0.3, item.position.y]}>
-      <cylinderGeometry args={[0.07, 0.07, 0.14, 16]} />
-      <meshStandardMaterial color="#0891b2" emissive="#0891b2" emissiveIntensity={0.25} />
-    </mesh>
+    <group position={[item.position.x, dims.h / 2, item.position.y]}>
+      <mesh castShadow>
+        <boxGeometry args={[dims.w, dims.h, dims.d]} />
+        <meshStandardMaterial color={dims.color} roughness={0.25} metalness={0.08} />
+      </mesh>
+      {item.fixture === "toilet" && (
+        <mesh position={[0, dims.h / 2 + 0.04, -dims.d * 0.15]}>
+          <cylinderGeometry args={[dims.w * 0.42, dims.w * 0.42, 0.08, 20]} />
+          <meshStandardMaterial color="#f5f2ee" roughness={0.2} />
+        </mesh>
+      )}
+      {item.fixture === "sink" && (
+        <mesh position={[0, dims.h / 2 - 0.02, 0]}>
+          <boxGeometry args={[dims.w * 0.85, 0.06, dims.d * 0.85]} />
+          <meshStandardMaterial color="#d8edf4" roughness={0.15} metalness={0.1} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+function FurnitureMesh3D({ item }: { item: Furniture }) {
+  const def = FURNITURE_DEFAULTS[item.kind];
+  const w = item.width ?? def.w;
+  const d = item.depth ?? def.d;
+  const h = def.h;
+  const color = item.color ?? def.color;
+  const rotY = -(item.rotation * Math.PI) / 180;
+
+  return (
+    <group position={[item.position.x, h / 2, item.position.y]} rotation={[0, rotY, 0]}>
+      <mesh castShadow receiveShadow>
+        <boxGeometry args={[w, h, d]} />
+        <meshStandardMaterial color={color} roughness={0.82} />
+      </mesh>
+      {(item.kind === "bed-single" || item.kind === "bed-double" || item.kind === "bed-king") && (
+        <>
+          <mesh position={[0, h / 2 + 0.05, -d / 2 + 0.32]}>
+            <boxGeometry args={[w * 0.85, 0.12, 0.50]} />
+            <meshStandardMaterial color="#f8f4ef" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, h / 2 + 0.02, d / 2 - 0.1]}>
+            <boxGeometry args={[w, 0.06, 0.08]} />
+            <meshStandardMaterial color={color} roughness={0.8} />
+          </mesh>
+        </>
+      )}
+      {(item.kind === "sofa-2" || item.kind === "sofa-3" || item.kind === "sofa-l") && (
+        <mesh position={[0, h * 0.35, -d / 2 + 0.08]}>
+          <boxGeometry args={[w, h * 0.55, 0.14]} />
+          <meshStandardMaterial color={color} roughness={0.88} />
+        </mesh>
+      )}
+      {item.kind === "bathtub" && (
+        <mesh position={[0, h / 2 + 0.04, 0]}>
+          <boxGeometry args={[w * 0.88, 0.06, d * 0.80]} />
+          <meshStandardMaterial color="#c8e8f0" roughness={0.12} metalness={0.05} />
+        </mesh>
+      )}
+    </group>
   );
 }
 
@@ -136,6 +250,7 @@ function LevelScene({
   const openings = useOpenings(level.id) ?? [];
   const rooms = useRooms(level.id) ?? [];
   const plumbing = usePlumbing(level.id) ?? [];
+  const furniture = useFurniture(level.id) ?? [];
 
   const openingsByWall = useMemo(() => {
     const m = new Map<string, Opening[]>();
@@ -163,6 +278,8 @@ function LevelScene({
         electrical.map((it) => <ElectricalMarker key={it.id} item={it} />)}
       {visibleLayers.plumbing &&
         plumbing.map((it) => <PlumbingMarker key={it.id} item={it} />)}
+      {visibleLayers.furniture &&
+        furniture.map((it) => <FurnitureMesh3D key={it.id} item={it} />)}
     </group>
   );
 }
