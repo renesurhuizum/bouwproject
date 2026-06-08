@@ -274,11 +274,13 @@ export function PlanEditor() {
       return;
     }
     if (tool === "room") {
-      // Tik dicht bij het beginpunt (en ≥3 punten) = ruimte sluiten.
-      if (
-        roomDraft.length >= 3 &&
-        dist(snapped, roomDraft[0]) < pxToMeters(SNAP_RADIUS_PX * 1.6, view)
-      ) {
+      // Tik dicht bij het beginpunt (≥2 punten) = ruimte automatisch sluiten.
+      // Twee drempelwaarden: pixel-snap-radius of 0.5m absoluut.
+      const closeSnap = roomDraft.length >= 2 && (
+        dist(snapped, roomDraft[0]) < pxToMeters(SNAP_RADIUS_PX * 1.6, view) ||
+        dist(snapped, roomDraft[0]) < 0.5
+      );
+      if (closeSnap) {
         void finalizeRoom(roomDraft);
       } else {
         setRoomDraft((d) => [...d, snapped]);
