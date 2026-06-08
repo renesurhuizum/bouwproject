@@ -8,7 +8,7 @@ import { Sparkles, X, Check } from "lucide-react";
 import { getDB } from "@/lib/db/db";
 import { create, remove } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
-import type { Wall, Room } from "@/lib/domain/types";
+import type { Wall, Room, Opening } from "@/lib/domain/types";
 import {
   generateLayouts,
   outerWalls,
@@ -16,7 +16,10 @@ import {
   type DoorSide,
   type Layout,
 } from "@/lib/layoutGenerator";
-import { polygonArea } from "@/lib/geometry";
+import { dist, polygonArea } from "@/lib/geometry";
+
+// Welke buitenmuur hoort bij de voordeur-zijde (volgorde: top, rechts, onder, links).
+const DOOR_OUTER_INDEX: Record<DoorSide, number> = { achter: 0, rechts: 1, voor: 2, links: 3 };
 import { formatArea } from "@/lib/format";
 
 const DOOR_SIDES: { key: DoorSide; label: string }[] = [
@@ -61,9 +64,12 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
     const allOpenings = (await db.openings.toArray()).filter((o) => !o.deleted);
     for (const o of allOpenings) if (wallIds.has(o.wallId)) await remove("openings", o.id);
 
-    // Buitenmuren (dragend) + interne wanden.
-    for (const seg of outerWalls(layout.outer)) {
-      await create<Wall>("walls", {
+    // Buitenmuren (dragend) + voordeur op de gekozen zijde.
+    const outer = outerWalls(layout.outer);
+    const doorIdx = DOOR_OUTER_INDEX[doorSide];
+    for (let i = 0; i < outer.length; i++) {
+      const seg = outer[i];
+      const wall = await create<Wall>("walls", {
         levelId: activeLevelId,
         start: seg.a,
         end: seg.b,
@@ -73,9 +79,21 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
         loadBearing: true,
         status: "new",
       });
+      if (i === doorIdx) {
+        const len = dist(seg.a, seg.b);
+        await create<Opening>("openings", {
+          wallId: wall.id,
+          type: "door",
+          width: 1.0,
+          height: 2.1,
+          sillHeight: 0,
+          offset: len / 2,
+        });
+      }
     }
+    // Interne wanden + doorgang tussen de kamers.
     for (const seg of layout.cuts) {
-      await create<Wall>("walls", {
+      const wall = await create<Wall>("walls", {
         levelId: activeLevelId,
         start: seg.a,
         end: seg.b,
@@ -85,6 +103,17 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
         loadBearing: false,
         status: "new",
       });
+      const len = dist(seg.a, seg.b);
+      if (len > 0.8) {
+        await create<Opening>("openings", {
+          wallId: wall.id,
+          type: "passage",
+          width: Math.min(0.9, len * 0.6),
+          height: 2.1,
+          sillHeight: 0,
+          offset: len / 2,
+        });
+      }
     }
     for (const r of layout.rooms) {
       await create<Room>("rooms", {
