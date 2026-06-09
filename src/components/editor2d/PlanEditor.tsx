@@ -85,6 +85,7 @@ export function PlanEditor() {
   const [cursor, setCursor] = useState<Point | null>(null);
   const [snapTarget, setSnapTarget] = useState<Point | null>(null);
   const [roomDraft, setRoomDraft] = useState<Point[]>([]);
+  const [pipePoints, setPipePoints] = useState<Point[]>([]);
   const [menu, setMenu] = useState<{ x: number; y: number; kind: SelKind; id: string } | null>(null);
   const [divideRect, setDivideRect] = useState<LayoutRect | null>(null);
   const divideStartRef = useRef<Point | null>(null);
@@ -113,6 +114,7 @@ export function PlanEditor() {
   useEffect(() => {
     setDraftStart(null);
     setRoomDraft([]);
+    setPipePoints([]);
     setMenu(null);
     if (tool !== "divide") {
       setDivideRect(null);
@@ -130,9 +132,22 @@ export function PlanEditor() {
           e.preventDefault();
           void deleteEntity(selection.kind, selection.id);
         }
+      } else if (e.key === "Enter" && tool === "draw-pipe" && pipePoints.length >= 2 && activeLevelId) {
+        e.preventDefault();
+        void (async () => {
+          await create<import("@/lib/domain/types").PlumbingItem>("plumbing", {
+            levelId: activeLevelId,
+            type: pipeType as import("@/lib/domain/types").PlumbingType,
+            path: pipePoints,
+            diameter: pipeType === "drain" ? 50 : 22,
+            heightZ: pipeType === "drain" ? 0.05 : 1.0,
+          });
+          setPipePoints([]);
+        })();
       } else if (e.key === "Escape") {
         setDraftStart(null);
         setRoomDraft([]);
+        setPipePoints([]);
         setMenu(null);
         select(null);
       } else if (e.key === "z" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
@@ -311,6 +326,10 @@ export function PlanEditor() {
         });
         select({ kind: "furniture", id: item.id });
       })();
+      return;
+    }
+    if (tool === "draw-pipe" && activeLevelId) {
+      setPipePoints((prev) => [...prev, snapped]);
       return;
     }
     // select: tik op leeg vlak = deselecteren
@@ -544,6 +563,11 @@ export function PlanEditor() {
               items={plumbing}
               selectedId={selection?.kind === "plumbing" ? selection.id : null}
               onSelect={(id) => onSelectEntity("plumbing", id)}
+              previewPath={
+                tool === "draw-pipe" && pipePoints.length >= 1 && cursor
+                  ? { points: [...pipePoints, cursor], type: pipeType }
+                  : null
+              }
             />
           )}
 

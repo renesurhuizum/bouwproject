@@ -3,7 +3,7 @@
 // Zwevende gereedschapsbalk onderin de editor. Mobiel-first, grote tikdoelen.
 
 import { useState } from "react";
-import { MousePointer2, Minus, Pentagon, Plug, Layers, Grid3x3, Plus, LayoutDashboard, Sofa } from "lucide-react";
+import { MousePointer2, Minus, Pentagon, Plug, Layers, Grid3x3, Plus, LayoutDashboard, Sofa, Pipette } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import type {
   ElectricalType,
@@ -301,6 +301,13 @@ export function Toolbar() {
           label="Meubels"
         >
           <Sofa size={20} />
+        </ToolBtn>
+        <ToolBtn
+          active={tool === "draw-pipe"}
+          onClick={() => setTool(tool === "draw-pipe" ? "select" : "draw-pipe")}
+          label="Leiding"
+        >
+          <Pipette size={20} />
         </ToolBtn>
         <div className="mx-0.5 h-7 w-px bg-line" />
         <ToolBtn active={showLayers} onClick={() => setShowLayers((v) => !v)} label="Lagen">
