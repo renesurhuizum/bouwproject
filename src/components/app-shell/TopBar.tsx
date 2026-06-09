@@ -18,11 +18,16 @@ export function TopBar() {
   return (
     <header className="no-print safe-top z-20 flex items-center justify-between gap-2 border-b border-line bg-paper-raised px-3 pb-2">
       <div className="min-w-0">
-        <div className="truncate text-[15px] font-semibold leading-tight text-ink-900">
+        <div className="truncate text-[15px] font-bold leading-tight text-ink-900">
           {project?.name ?? "Bouwproject"}
         </div>
-        <div className="text-[11px] uppercase tracking-wider text-ink-500">
-          Digital twin
+        <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-ink-400">
+          <span
+            aria-hidden
+            className="inline-block h-1.5 w-1.5 rounded-full bg-ok"
+            title="Opgeslagen"
+          />
+          Opgeslagen
         </div>
       </div>
 
@@ -34,7 +39,7 @@ export function TopBar() {
               <button
                 key={lvl.id}
                 onClick={() => setActiveLevel(lvl.id)}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
                   active
                     ? "bg-ink-900 text-paper-raised"
                     : "text-ink-500 hover:text-ink-900"

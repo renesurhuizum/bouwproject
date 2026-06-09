@@ -111,6 +111,23 @@ function RoomFloor3D({ room }: { room: Room }) {
   );
 }
 
+const ELECTRICAL_LABELS: Record<string, string> = {
+  socket: "Stopcontact", "socket-double": "Dubbel stop.", switch: "Schakelaar",
+  light: "Lichtpunt", spot: "Inbouwspot", data: "Data/UTP",
+  panel: "Meterkast", "wall-light": "Wandlamp", outdoor: "Buitenpunt",
+};
+
+function handleElectricalClick(e: ThreeEvent<MouseEvent>, item: ElectricalItem) {
+  e.stopPropagation();
+  use3DEdit.getState().setSelectedItem({
+    kind: "electrical",
+    id: item.id,
+    label: ELECTRICAL_LABELS[item.type] ?? item.type,
+    screenX: e.nativeEvent.clientX,
+    screenY: e.nativeEvent.clientY,
+  });
+}
+
 function ElectricalMarker({ item }: { item: ElectricalItem }) {
   const isLight = item.type === "light" || item.type === "spot";
   const isWall = item.type === "socket" || item.type === "socket-double" || item.type === "switch" || item.type === "data";
@@ -118,7 +135,7 @@ function ElectricalMarker({ item }: { item: ElectricalItem }) {
 
   if (isLight) {
     return (
-      <group position={[item.position.x, item.heightZ, item.position.y]}>
+      <group position={[item.position.x, item.heightZ, item.position.y]} onClick={(e) => handleElectricalClick(e, item)}>
         <mesh>
           <cylinderGeometry args={[0.08, 0.08, 0.04, 16]} />
           <meshStandardMaterial color="#f5f0e8" roughness={0.2} metalness={0.3} />
@@ -130,7 +147,7 @@ function ElectricalMarker({ item }: { item: ElectricalItem }) {
 
   if (isWall) {
     return (
-      <group position={[item.position.x, item.heightZ, item.position.y]}>
+      <group position={[item.position.x, item.heightZ, item.position.y]} onClick={(e) => handleElectricalClick(e, item)}>
         <mesh>
           <boxGeometry args={[0.085, 0.085, 0.012]} />
           <meshStandardMaterial color="#f5f5f0" roughness={0.3} metalness={0.1} />
@@ -157,7 +174,7 @@ function ElectricalMarker({ item }: { item: ElectricalItem }) {
   }
 
   return (
-    <mesh position={[item.position.x, item.heightZ, item.position.y]}>
+    <mesh position={[item.position.x, item.heightZ, item.position.y]} onClick={(e) => handleElectricalClick(e, item)}>
       <sphereGeometry args={[0.05, 12, 12]} />
       <meshStandardMaterial color="#1d4ed8" roughness={0.5} />
     </mesh>
@@ -239,7 +256,20 @@ function FurnitureMesh3D({ item }: { item: Furniture }) {
   const rotY = -(item.rotation * Math.PI) / 180;
 
   return (
-    <group position={[item.position.x, h / 2, item.position.y]} rotation={[0, rotY, 0]}>
+    <group
+      position={[item.position.x, h / 2, item.position.y]}
+      rotation={[0, rotY, 0]}
+      onClick={(e: ThreeEvent<MouseEvent>) => {
+        e.stopPropagation();
+        use3DEdit.getState().setSelectedItem({
+          kind: "furniture",
+          id: item.id,
+          label: def.label,
+          screenX: e.nativeEvent.clientX,
+          screenY: e.nativeEvent.clientY,
+        });
+      }}
+    >
       <mesh castShadow receiveShadow>
         <boxGeometry args={[w, h, d]} />
         <meshStandardMaterial color={color} roughness={0.82} />

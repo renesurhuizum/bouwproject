@@ -97,6 +97,7 @@ export interface ElectricalItem extends Entity {
   wallId?: string;
   label?: string;
   note?: string;
+  path?: Point[]; // kabeltraject (optioneel)
 }
 
 export type PlumbingType =
