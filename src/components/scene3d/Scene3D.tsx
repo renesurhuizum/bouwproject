@@ -337,7 +337,7 @@ function HvacMesh3D({ item }: { item: HvacItem }) {
 }
 
 function FloorPlane({ levelId, elevation }: { levelId: string; elevation: number }) {
-  const { mode, furnitureKind, electricalType, reset } = use3DEdit();
+  const { mode, furnitureKind, electricalType, plumbingFixture, hvacType, reset } = use3DEdit();
   const active = mode !== "none";
 
   async function handleClick(e: ThreeEvent<MouseEvent>) {
@@ -360,6 +360,21 @@ function FloorPlane({ levelId, elevation }: { levelId: string; elevation: number
         type: electricalType,
         position: { x, y: z },
         heightZ: isLight ? 2.4 : 0.3,
+      });
+    } else if (mode === "place-plumbing" && plumbingFixture) {
+      await dbCreate<PlumbingItem>("plumbing", {
+        levelId,
+        type: "fixture",
+        fixture: plumbingFixture,
+        position: { x, y: z },
+        heightZ: 0.9,
+      });
+    } else if (mode === "place-hvac" && hvacType) {
+      await dbCreate<HvacItem>("hvac", {
+        levelId,
+        type: hvacType,
+        position: { x, y: z },
+        heightZ: hvacType === "radiator" ? 0.3 : hvacType === "ventilation" ? 2.3 : 0,
       });
     }
 

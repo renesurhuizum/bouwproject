@@ -22,7 +22,7 @@ import { create, remove, update } from "@/lib/db/repo";
 import { getDB } from "@/lib/db/db";
 import { useHistory } from "@/lib/history";
 import { useEditor, type SelKind } from "@/lib/store/editor";
-import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture } from "@/lib/hooks";
+import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac } from "@/lib/hooks";
 import {
   ELECTRICAL_DEFAULT_HEIGHT,
   FIXTURE_DEFAULT_HEIGHT,
@@ -48,6 +48,7 @@ import { RoomsLayer } from "./RoomsLayer";
 import { ElectricalLayer } from "./ElectricalLayer";
 import { PlumbingLayer } from "./PlumbingLayer";
 import { FurnitureLayer } from "./FurnitureLayer";
+import { HvacLayer } from "./HvacLayer";
 import { RoomDivider } from "./RoomDivider";
 import { ElectricalLegend } from "./ElectricalLegend";
 import { Minimap } from "./Minimap";
@@ -80,6 +81,7 @@ export function PlanEditor() {
   const plumbing = usePlumbing(activeLevelId) ?? [];
   const openings = useOpenings(activeLevelId) ?? [];
   const furniture = useFurniture(activeLevelId) ?? [];
+  const hvac = useHvac(activeLevelId) ?? [];
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
@@ -245,6 +247,19 @@ export function PlanEditor() {
     select({ kind: "plumbing", id: item.id });
   }
 
+  async function placeHvac(at: Point) {
+    if (!activeLevelId || !placeKind || placeKind.domain !== "hvac") return;
+    const heights: Record<string, number> = { radiator: 0.3, "floor-heating": 0, ventilation: 2.3, wtw: 0.5 };
+    const item = await create<import("@/lib/domain/types").HvacItem>("hvac", {
+      levelId: activeLevelId,
+      type: placeKind.type,
+      position: at,
+      heightZ: heights[placeKind.type] ?? 0.3,
+    });
+    pushAction({ type: "create", table: "hvac", id: item.id });
+    select({ kind: "hvac", id: item.id });
+  }
+
   // Plaats een deur/raam op de dichtstbijzijnde muur (binnen tolerantie).
   async function placeOpening(at: Point) {
     if (!placeKind || placeKind.domain !== "opening") return;
@@ -313,6 +328,7 @@ export function PlanEditor() {
     if (tool === "place") {
       if (placeKind?.domain === "opening") void placeOpening(worldM);
       else if (placeKind?.domain === "plumbing") void placePlumbing(snapped);
+      else if (placeKind?.domain === "hvac") void placeHvac(snapped);
       else void placeElectrical(snapped);
       return;
     }
@@ -568,6 +584,15 @@ export function PlanEditor() {
                   ? { points: [...pipePoints, cursor], type: pipeType }
                   : null
               }
+            />
+          )}
+
+          {visibleLayers.hvac && (
+            <HvacLayer
+              view={view}
+              items={hvac}
+              selectedId={selection?.kind === "hvac" ? selection.id : null}
+              onSelect={(id) => select({ kind: "hvac", id })}
             />
           )}
 

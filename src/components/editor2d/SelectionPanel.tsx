@@ -20,6 +20,7 @@ import {
   OPENING_LABEL,
   OPENING_COLOR,
   FIXTURE_LABEL,
+  HVAC_LABEL,
 } from "@/lib/domain/constants";
 import type { Wall, WallMaterial, WallStatus, OpeningType } from "@/lib/domain/types";
 
@@ -81,6 +82,11 @@ export function SelectionPanel() {
       selection?.kind === "plumbing" ? await getDB().plumbing.get(selection.id) : null,
     [selection?.kind, selection?.id],
   );
+  const hvacItem = useLiveQuery(
+    async () =>
+      selection?.kind === "hvac" ? await getDB().hvac.get(selection.id) : null,
+    [selection?.kind, selection?.id],
+  );
 
   if (!selection) return null;
 
@@ -99,7 +105,9 @@ export function SelectionPanel() {
                     ? "Water"
                     : selection.kind === "furniture"
                       ? (selectedFurniture ? FURNITURE_DEFAULTS[selectedFurniture.kind].label : "Meubel")
-                      : "Elektra"}
+                      : selection.kind === "hvac"
+                        ? "Verwarming"
+                        : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -339,6 +347,31 @@ export function SelectionPanel() {
           </div>
         )}
 
+        {hvacItem && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <span className="text-xs font-medium text-ink-900">{HVAC_LABEL[hvacItem.type]}</span>
+            </Row>
+            <Row label="Hoogte">
+              <NumberField
+                value={Math.round((hvacItem.heightZ ?? 0) * 100)}
+                unit="cm"
+                onChange={(v) => update("hvac", hvacItem.id, { heightZ: v / 100 })}
+              />
+            </Row>
+            <Row label="Notitie">
+              <input
+                type="text"
+                defaultValue={hvacItem.note ?? ""}
+                placeholder="bv. 1000W radiator"
+                onBlur={(e) => update("hvac", hvacItem.id, { note: e.target.value })}
+                className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900 placeholder:text-ink-300"
+              />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("hvac", hvacItem.id, () => select(null))} />
+          </div>
+        )}
+
         {lightboxPhoto && (
           <Lightbox photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />
         )}
@@ -389,9 +422,7 @@ export function SelectionPanel() {
         {plumb && plumb.fixture && (
           <div className="space-y-2.5">
             <Row label="Type">
-              <span className="text-xs font-medium text-ink-900">
-                {FIXTURE_LABEL[plumb.fixture]}
-              </span>
+              <span className="text-xs font-medium text-ink-900">{FIXTURE_LABEL[plumb.fixture]}</span>
             </Row>
             <Row label="Aansluithoogte">
               <NumberField
@@ -412,13 +443,38 @@ export function SelectionPanel() {
             <DeleteButton onClick={() => removeAnd("plumbing", plumb.id, () => select(null))} />
           </div>
         )}
+
+        {plumb && !plumb.fixture && plumb.path && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <span className="text-xs font-medium text-ink-900">
+                {plumb.type === "supply-cold" ? "Koud water"
+                  : plumb.type === "supply-hot" ? "Warm water"
+                  : plumb.type === "drain" ? "Afvoer"
+                  : plumb.type === "cv-pipe" ? "CV-leiding"
+                  : plumb.type}
+              </span>
+            </Row>
+            <Row label="Punten">
+              <span className="text-xs text-ink-900">{plumb.path.length}</span>
+            </Row>
+            <Row label="Hoogte">
+              <NumberField
+                value={Math.round((plumb.heightZ ?? 0) * 100)}
+                unit="cm"
+                onChange={(v) => update("plumbing", plumb.id, { heightZ: v / 100 })}
+              />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("plumbing", plumb.id, () => select(null))} />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 async function removeAnd(
-  table: "walls" | "electrical" | "openings" | "rooms" | "plumbing" | "furniture",
+  table: "walls" | "electrical" | "openings" | "rooms" | "plumbing" | "furniture" | "hvac",
   id: string,
   after: () => void,
 ) {
