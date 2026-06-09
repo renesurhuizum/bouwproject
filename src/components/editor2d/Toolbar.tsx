@@ -72,6 +72,15 @@ export function Toolbar() {
 
   const furniturePaletteKind = useEditor((s) => s.furniturePaletteKind);
   const setFurniturePaletteKind = useEditor((s) => s.setFurniturePaletteKind);
+  const pipeType = useEditor((s) => s.pipeType);
+  const setPipeType = useEditor((s) => s.setPipeType);
+
+  const PIPE_OPTIONS = [
+    { key: "supply-cold" as const, label: "Koud water", color: "#3b82f6" },
+    { key: "supply-hot"  as const, label: "Warm water",  color: "#ef4444" },
+    { key: "drain"       as const, label: "Afvoer",       color: "#8b5cf6" },
+    { key: "cv-pipe"     as const, label: "CV-leiding",  color: "#f97316" },
+  ];
 
   const SNAP_LABEL = { fine: "10cm", normal: "50cm", coarse: "1m" };
 
@@ -235,6 +244,25 @@ export function Toolbar() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Contextueel paneel: leiding-type */}
+      {tool === "draw-pipe" && (
+        <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-line bg-paper-raised/95 px-3 py-2 shadow-lg backdrop-blur">
+          {PIPE_OPTIONS.map(({ key, label, color }) => (
+            <button
+              key={key}
+              onClick={() => setPipeType(key)}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+                pipeType === key ? "bg-accent text-white" : "bg-paper-sunken text-ink-600 hover:bg-paper-raised"
+              }`}
+            >
+              <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+              {label}
+            </button>
+          ))}
+          <span className="ml-1 text-[10px] text-ink-400">· Enter = opslaan · Esc = annuleren</span>
         </div>
       )}
 
