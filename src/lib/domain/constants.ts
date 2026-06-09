@@ -14,6 +14,7 @@ import type {
 // ── Verwarming / HVAC ─────────────────────────────────────────────────────────
 
 export const HVAC_LABEL: Record<HvacType, string> = {
+  "cv-pipe": "CV-leiding",
   radiator: "Radiator",
   "floor-heating": "Vloerverwarming",
   ventilation: "Ventilatie",
@@ -21,6 +22,7 @@ export const HVAC_LABEL: Record<HvacType, string> = {
 };
 
 export const HVAC_CODE: Record<HvacType, string> = {
+  "cv-pipe": "CV",
   radiator: "RAD",
   "floor-heating": "VV",
   ventilation: "VEN",
@@ -28,14 +30,15 @@ export const HVAC_CODE: Record<HvacType, string> = {
 };
 
 export const HVAC_COLOR: Record<HvacType, string> = {
-  radiator: "#f97316",       // oranje
-  "floor-heating": "#fb923c", // licht oranje
-  ventilation: "#6b7280",    // grijs
-  wtw: "#9333ea",            // paars
+  "cv-pipe": "#f97316",
+  radiator: "#f97316",
+  "floor-heating": "#fb923c",
+  ventilation: "#6b7280",
+  wtw: "#9333ea",
 };
 
-// Standaard montagehoogte (m boven vloer).
 export const HVAC_DEFAULT_HEIGHT: Record<HvacType, number> = {
+  "cv-pipe": 0.3,
   radiator: 0.3,
   "floor-heating": 0,
   ventilation: 2.3,

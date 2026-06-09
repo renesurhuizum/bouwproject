@@ -157,6 +157,7 @@ export interface HvacItem extends Entity {
   type: HvacType;
   path?: Point[];
   position?: Point;
+  heightZ?: number;
   note?: string;
 }
 
