@@ -64,8 +64,11 @@ export function PlanEditor() {
   const pushAction = useHistory((s) => s.pushAction);
 
   const tool = useEditor((s) => s.tool);
+  const setTool = useEditor((s) => s.setTool);
   const placeKind = useEditor((s) => s.placeKind);
+  const setPlaceKind = useEditor((s) => s.setPlaceKind);
   const furniturePaletteKind = useEditor((s) => s.furniturePaletteKind);
+  const setFurniturePaletteKind = useEditor((s) => s.setFurniturePaletteKind);
   const pipeType = useEditor((s) => s.pipeType);
   const wallDefaults = useEditor((s) => s.wallDefaults);
   const visibleLayers = useEditor((s) => s.visibleLayers);
@@ -158,6 +161,18 @@ export function PlanEditor() {
       } else if (e.key === "z" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         void undo();
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        switch (e.key.toLowerCase()) {
+          case "w": setTool("wall"); break;
+          case "v": setTool("select"); break;
+          case "r": setTool("room"); break;
+          case "e": setPlaceKind({ domain: "electrical", type: "socket" }); break;
+          case "f":
+            setTool("place-furniture");
+            if (!furniturePaletteKind) setFurniturePaletteKind("sofa-2");
+            break;
+          case "d": setTool("divide"); break;
+        }
       }
     }
     window.addEventListener("keydown", onKey);
