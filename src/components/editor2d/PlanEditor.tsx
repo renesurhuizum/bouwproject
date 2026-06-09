@@ -15,18 +15,22 @@ import type {
   PlumbingItem,
   Opening,
   Room,
+  Furniture,
+  PlumbingType,
 } from "@/lib/domain/types";
 import { create, remove, update } from "@/lib/db/repo";
+import { getDB } from "@/lib/db/db";
+import { useHistory } from "@/lib/history";
 import { useEditor, type SelKind } from "@/lib/store/editor";
-import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing } from "@/lib/hooks";
+import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac } from "@/lib/hooks";
 import {
-  GRID_SIZE_M,
   ELECTRICAL_DEFAULT_HEIGHT,
   FIXTURE_DEFAULT_HEIGHT,
   OPENING_DEFAULTS,
   OPENING_SNAP_M,
 } from "@/lib/domain/constants";
 import { dist, snapToGrid, snapToPoints, projectOnSegment } from "@/lib/geometry";
+import { GRID_SNAP_M } from "@/lib/store/editor";
 import { formatLength } from "@/lib/format";
 import {
   screenToMeters,
@@ -36,23 +40,40 @@ import {
   SNAP_RADIUS_PX,
   type ViewState,
 } from "./viewport";
+import { BgImageLayer } from "./BgImageLayer";
 import { GridLayer } from "./GridLayer";
 import { WallsLayer } from "./WallsLayer";
 import { OpeningsLayer } from "./OpeningsLayer";
 import { RoomsLayer } from "./RoomsLayer";
 import { ElectricalLayer } from "./ElectricalLayer";
 import { PlumbingLayer } from "./PlumbingLayer";
+import { FurnitureLayer } from "./FurnitureLayer";
+import { HvacLayer } from "./HvacLayer";
+import { RoomDivider } from "./RoomDivider";
+import { ElectricalLegend } from "./ElectricalLegend";
+import { Minimap } from "./Minimap";
+import type { LayoutRect } from "@/lib/roomDivider";
 
 export function PlanEditor() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [view, setView] = useState<ViewState>({ x: 60, y: 90, scale: 1 });
 
+  const undo = useHistory((s) => s.undo);
+  const redo = useHistory((s) => s.redo);
+  const pushAction = useHistory((s) => s.pushAction);
+
   const tool = useEditor((s) => s.tool);
+  const setTool = useEditor((s) => s.setTool);
   const placeKind = useEditor((s) => s.placeKind);
+  const setPlaceKind = useEditor((s) => s.setPlaceKind);
+  const furniturePaletteKind = useEditor((s) => s.furniturePaletteKind);
+  const setFurniturePaletteKind = useEditor((s) => s.setFurniturePaletteKind);
+  const pipeType = useEditor((s) => s.pipeType);
   const wallDefaults = useEditor((s) => s.wallDefaults);
   const visibleLayers = useEditor((s) => s.visibleLayers);
   const showGrid = useEditor((s) => s.showGrid);
+  const gridSnap = useEditor((s) => s.gridSnap);
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const selection = useEditor((s) => s.selection);
   const select = useEditor((s) => s.select);
@@ -62,13 +83,17 @@ export function PlanEditor() {
   const electrical = useElectrical(activeLevelId) ?? [];
   const plumbing = usePlumbing(activeLevelId) ?? [];
   const openings = useOpenings(activeLevelId) ?? [];
+  const furniture = useFurniture(activeLevelId) ?? [];
+  const hvac = useHvac(activeLevelId) ?? [];
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
+  const [snapTarget, setSnapTarget] = useState<Point | null>(null);
   const [roomDraft, setRoomDraft] = useState<Point[]>([]);
-  const [menu, setMenu] = useState<{ x: number; y: number; kind: SelKind; id: string } | null>(
-    null,
-  );
+  const [pipePoints, setPipePoints] = useState<Point[]>([]);
+  const [menu, setMenu] = useState<{ x: number; y: number; kind: SelKind; id: string } | null>(null);
+  const [divideRect, setDivideRect] = useState<LayoutRect | null>(null);
+  const divideStartRef = useRef<Point | null>(null);
 
   // Gebaar-refs.
   const pointers = useRef<Map<number, Point>>(new Map());
@@ -94,7 +119,12 @@ export function PlanEditor() {
   useEffect(() => {
     setDraftStart(null);
     setRoomDraft([]);
+    setPipePoints([]);
     setMenu(null);
+    if (tool !== "divide") {
+      setDivideRect(null);
+      divideStartRef.current = null;
+    }
   }, [tool, activeLevelId]);
 
   // Sneltoetsen: Delete = selectie weg, Escape = annuleren/deselecteren.
@@ -107,29 +137,64 @@ export function PlanEditor() {
           e.preventDefault();
           void deleteEntity(selection.kind, selection.id);
         }
+      } else if (e.key === "Enter" && tool === "draw-pipe" && pipePoints.length >= 2 && activeLevelId) {
+        e.preventDefault();
+        void (async () => {
+          await create<import("@/lib/domain/types").PlumbingItem>("plumbing", {
+            levelId: activeLevelId,
+            type: pipeType as import("@/lib/domain/types").PlumbingType,
+            path: pipePoints,
+            diameter: pipeType === "drain" ? 50 : 22,
+            heightZ: pipeType === "drain" ? 0.05 : 1.0,
+          });
+          setPipePoints([]);
+        })();
       } else if (e.key === "Escape") {
         setDraftStart(null);
         setRoomDraft([]);
+        setPipePoints([]);
         setMenu(null);
         select(null);
+      } else if (e.key === "z" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        e.preventDefault();
+        void redo();
+      } else if (e.key === "z" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        void undo();
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        switch (e.key.toLowerCase()) {
+          case "w": setTool("wall"); break;
+          case "v": setTool("select"); break;
+          case "r": setTool("room"); break;
+          case "e": setPlaceKind({ domain: "electrical", type: "socket" }); break;
+          case "f":
+            setTool("place-furniture");
+            if (!furniturePaletteKind) setFurniturePaletteKind("sofa-2");
+            break;
+          case "d": setTool("divide"); break;
+        }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection]);
+  }, [selection, undo, redo]);
 
-  const TABLE_FOR: Record<SelKind, "walls" | "openings" | "electrical" | "rooms" | "plumbing" | "hvac"> = {
+  const TABLE_FOR: Record<SelKind, "walls" | "openings" | "electrical" | "rooms" | "plumbing" | "hvac" | "furniture"> = {
     wall: "walls",
     opening: "openings",
     electrical: "electrical",
     room: "rooms",
     plumbing: "plumbing",
     hvac: "hvac",
+    furniture: "furniture",
   };
 
   async function deleteEntity(kind: SelKind, id: string) {
-    await remove(TABLE_FOR[kind], id);
+    const tbl = TABLE_FOR[kind];
+    const snapshot = await (getDB()[tbl] as import("dexie").Table).get(id);
+    if (snapshot) pushAction({ type: "remove", table: tbl, snapshot });
+    await remove(tbl, id);
     setMenu(null);
     if (selection?.id === id) select(null);
   }
@@ -146,13 +211,20 @@ export function PlanEditor() {
 
   function snapPoint(m: Point): Point {
     const near = snapToPoints(m, endpoints, pxToMeters(SNAP_RADIUS_PX, view));
-    return near ?? snapToGrid(m, GRID_SIZE_M);
+    setSnapTarget(near);
+    return near ?? snapToGrid(m, GRID_SNAP_M[gridSnap]);
+  }
+
+  async function handleMoveEndpoint(wallId: string, which: "start" | "end", screenX: number, screenY: number) {
+    const worldM = screenToMeters({ x: screenX, y: screenY }, view);
+    const snapped = snapPoint(worldM);
+    await update("walls", wallId, { [which]: snapped });
   }
 
   async function createWall(start: Point, end: Point) {
     if (!activeLevelId) return;
     if (dist(start, end) < 0.01) return;
-    await create<Wall>("walls", {
+    const w = await create<Wall>("walls", {
       levelId: activeLevelId,
       start,
       end,
@@ -162,6 +234,7 @@ export function PlanEditor() {
       loadBearing: wallDefaults.loadBearing,
       status: wallDefaults.status,
     });
+    pushAction({ type: "create", table: "walls", id: w.id });
   }
 
   async function placeElectrical(at: Point) {
@@ -172,6 +245,7 @@ export function PlanEditor() {
       position: at,
       heightZ: ELECTRICAL_DEFAULT_HEIGHT[placeKind.type],
     });
+    pushAction({ type: "create", table: "electrical", id: item.id });
     select({ kind: "electrical", id: item.id });
   }
 
@@ -184,7 +258,21 @@ export function PlanEditor() {
       position: at,
       heightZ: FIXTURE_DEFAULT_HEIGHT[placeKind.fixture],
     });
+    pushAction({ type: "create", table: "plumbing", id: item.id });
     select({ kind: "plumbing", id: item.id });
+  }
+
+  async function placeHvac(at: Point) {
+    if (!activeLevelId || !placeKind || placeKind.domain !== "hvac") return;
+    const heights: Record<string, number> = { radiator: 0.3, "floor-heating": 0, ventilation: 2.3, wtw: 0.5 };
+    const item = await create<import("@/lib/domain/types").HvacItem>("hvac", {
+      levelId: activeLevelId,
+      type: placeKind.type,
+      position: at,
+      heightZ: heights[placeKind.type] ?? 0.3,
+    });
+    pushAction({ type: "create", table: "hvac", id: item.id });
+    select({ kind: "hvac", id: item.id });
   }
 
   // Plaats een deur/raam op de dichtstbijzijnde muur (binnen tolerantie).
@@ -209,6 +297,7 @@ export function PlanEditor() {
       sillHeight: def.sillHeight,
       offset,
     });
+    pushAction({ type: "create", table: "openings", id: op.id });
     select({ kind: "opening", id: op.id });
   }
 
@@ -219,6 +308,7 @@ export function PlanEditor() {
       name: `Ruimte ${rooms.length + 1}`,
       polygon: points,
     });
+    pushAction({ type: "create", table: "rooms", id: room.id });
     setRoomDraft([]);
     select({ kind: "room", id: room.id });
   }
@@ -237,11 +327,13 @@ export function PlanEditor() {
       return;
     }
     if (tool === "room") {
-      // Tik dicht bij het beginpunt (en ≥3 punten) = ruimte sluiten.
-      if (
-        roomDraft.length >= 3 &&
-        dist(snapped, roomDraft[0]) < pxToMeters(SNAP_RADIUS_PX * 1.6, view)
-      ) {
+      // Tik dicht bij het beginpunt (≥2 punten) = ruimte automatisch sluiten.
+      // Twee drempelwaarden: pixel-snap-radius of 0.5m absoluut.
+      const closeSnap = roomDraft.length >= 2 && (
+        dist(snapped, roomDraft[0]) < pxToMeters(SNAP_RADIUS_PX * 1.6, view) ||
+        dist(snapped, roomDraft[0]) < 0.5
+      );
+      if (closeSnap) {
         void finalizeRoom(roomDraft);
       } else {
         setRoomDraft((d) => [...d, snapped]);
@@ -251,7 +343,24 @@ export function PlanEditor() {
     if (tool === "place") {
       if (placeKind?.domain === "opening") void placeOpening(worldM);
       else if (placeKind?.domain === "plumbing") void placePlumbing(snapped);
+      else if (placeKind?.domain === "hvac") void placeHvac(snapped);
       else void placeElectrical(snapped);
+      return;
+    }
+    if (tool === "place-furniture" && furniturePaletteKind && activeLevelId) {
+      void (async () => {
+        const item = await create<Furniture>("furniture", {
+          levelId: activeLevelId,
+          kind: furniturePaletteKind,
+          position: snapped,
+          rotation: 0,
+        });
+        select({ kind: "furniture", id: item.id });
+      })();
+      return;
+    }
+    if (tool === "draw-pipe" && activeLevelId) {
+      setPipePoints((prev) => [...prev, snapped]);
       return;
     }
     // select: tik op leeg vlak = deselecteren
@@ -279,6 +388,10 @@ export function PlanEditor() {
         onStage: e.target === stage,
       };
       if (tool === "select") panPointer.current = { id: evt.pointerId, last: pos };
+      if (tool === "divide") {
+        divideStartRef.current = screenToMeters(pos, view);
+        setCursor(screenToMeters(pos, view));
+      }
     } else {
       // tweede vinger: geen tap, geen 1-vinger-pan
       tapRef.current = null;
@@ -293,7 +406,7 @@ export function PlanEditor() {
     const evt = e.evt;
     if (!pointers.current.has(evt.pointerId)) {
       // cursor voor rubber-band tonen ook zonder ingedrukt
-      if (tool === "wall" || tool === "place" || tool === "room") {
+      if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture") {
         setCursor(snapPoint(screenToMeters(posFromEvent(evt, stage), view)));
       }
       return;
@@ -328,8 +441,12 @@ export function PlanEditor() {
     if (tapRef.current && evt.pointerId === tapRef.current.id) {
       if (dist(pos, tapRef.current.start) > 8) tapRef.current.moved = true;
     }
-    if (tool === "wall" || tool === "place" || tool === "room") {
+    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture") {
       setCursor(snapPoint(screenToMeters(pos, view)));
+    }
+    if (tool === "divide") {
+      setCursor(screenToMeters(pos, view));
+      if (tapRef.current) tapRef.current.moved = true;
     }
     if (panPointer.current && evt.pointerId === panPointer.current.id && tool === "select") {
       const dx = pos.x - panPointer.current.last.x;
@@ -358,6 +475,20 @@ export function PlanEditor() {
       panPointer.current = null;
     }
     if (wasTap) handleTap(pos, t!.onStage);
+    // Divide-rechthoek afronden bij loslaten.
+    if (tool === "divide" && divideStartRef.current) {
+      const endM = screenToMeters(pos, view);
+      const s = divideStartRef.current;
+      if (Math.abs(endM.x - s.x) > 0.5 && Math.abs(endM.y - s.y) > 0.5) {
+        setDivideRect({
+          x0: Math.min(s.x, endM.x),
+          y0: Math.min(s.y, endM.y),
+          x1: Math.max(s.x, endM.x),
+          y1: Math.max(s.y, endM.y),
+        });
+      }
+      divideStartRef.current = null;
+    }
     tapRef.current = null;
   }
 
@@ -416,6 +547,7 @@ export function PlanEditor() {
           onWheel={onWheel}
           onContextMenu={onContextMenu}
         >
+          <BgImageLayer levelId={activeLevelId} view={view} />
           {showGrid && <GridLayer view={view} width={size.width} height={size.height} />}
 
           {visibleLayers.rooms && (
@@ -433,6 +565,7 @@ export function PlanEditor() {
               walls={walls}
               selectedId={selection?.kind === "wall" ? selection.id : null}
               onSelect={(id) => onSelectEntity("wall", id)}
+              onMoveEndpoint={handleMoveEndpoint}
             />
           )}
 
@@ -461,6 +594,32 @@ export function PlanEditor() {
               items={plumbing}
               selectedId={selection?.kind === "plumbing" ? selection.id : null}
               onSelect={(id) => onSelectEntity("plumbing", id)}
+              previewPath={
+                tool === "draw-pipe" && pipePoints.length >= 1 && cursor
+                  ? { points: [...pipePoints, cursor], type: pipeType }
+                  : null
+              }
+            />
+          )}
+
+          {visibleLayers.hvac && (
+            <HvacLayer
+              view={view}
+              items={hvac}
+              selectedId={selection?.kind === "hvac" ? selection.id : null}
+              onSelect={(id) => select({ kind: "hvac", id })}
+            />
+          )}
+
+          {visibleLayers.furniture && (
+            <FurnitureLayer
+              view={view}
+              furniture={furniture}
+              selectedId={selection?.kind === "furniture" ? selection.id : null}
+              onSelect={(id) => select({ kind: "furniture", id })}
+              onMove={async (id, x, y) => {
+                await update("furniture", id, { position: { x, y } });
+              }}
             />
           )}
 
@@ -502,6 +661,18 @@ export function PlanEditor() {
                 fill="rgba(234,88,12,0.2)"
               />
             )}
+            {/* Snap-indicator: groene ring als cursor snapt aan bestaand punt */}
+            {(tool === "wall" || tool === "place" || tool === "room") && snapTarget && (
+              <Circle
+                x={metersToScreen(snapTarget, view).x}
+                y={metersToScreen(snapTarget, view).y}
+                radius={10}
+                stroke="#22c55e"
+                strokeWidth={2}
+                fill="transparent"
+                listening={false}
+              />
+            )}
             {tool === "wall" && draftStart && (
               <Circle
                 x={metersToScreen(draftStart, view).x}
@@ -510,6 +681,38 @@ export function PlanEditor() {
                 fill="#ea580c"
               />
             )}
+
+            {/* Divide-rechthoek preview */}
+            {tool === "divide" && divideStartRef.current && cursor && (() => {
+              const s = metersToScreen(divideStartRef.current, view);
+              const e = metersToScreen(cursor, view);
+              return (
+                <Line
+                  points={[s.x, s.y, e.x, s.y, e.x, e.y, s.x, e.y, s.x, s.y]}
+                  stroke="#7c3aed"
+                  strokeWidth={2}
+                  dash={[8, 5]}
+                  fill="rgba(124,58,237,0.08)"
+                  closed
+                  listening={false}
+                />
+              );
+            })()}
+            {/* Bevestigde divide-rechthoek */}
+            {tool === "divide" && divideRect && (() => {
+              const a = metersToScreen({ x: divideRect.x0, y: divideRect.y0 }, view);
+              const b = metersToScreen({ x: divideRect.x1, y: divideRect.y1 }, view);
+              return (
+                <Line
+                  points={[a.x, a.y, b.x, a.y, b.x, b.y, a.x, b.y]}
+                  stroke="#7c3aed"
+                  strokeWidth={2}
+                  fill="rgba(124,58,237,0.06)"
+                  closed
+                  listening={false}
+                />
+              );
+            })()}
 
             {/* Ruimte in opbouw */}
             {tool === "room" && roomDraft.length > 0 && (
@@ -544,6 +747,52 @@ export function PlanEditor() {
         </Stage>
       )}
 
+      {/* Leiding-tekenhulp */}
+      {tool === "draw-pipe" && (
+        <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
+          <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 px-2 py-1.5 shadow-lg backdrop-blur">
+            <span className="px-1 text-[11px] text-ink-500">
+              {pipePoints.length === 0
+                ? "Tik om beginpunt te zetten"
+                : `${pipePoints.length} ${pipePoints.length === 1 ? "punt" : "punten"}`}
+            </span>
+            <button
+              onClick={() => setPipePoints((d) => d.slice(0, -1))}
+              disabled={pipePoints.length === 0}
+              className="rounded-lg bg-paper-sunken px-2.5 py-1 text-xs font-medium text-ink-700 disabled:opacity-40"
+            >
+              Wis punt
+            </button>
+            <button
+              onClick={() => setPipePoints([])}
+              disabled={pipePoints.length === 0}
+              className="rounded-lg bg-paper-sunken px-2.5 py-1 text-xs font-medium text-ink-700 disabled:opacity-40"
+            >
+              Annuleer
+            </button>
+            <button
+              disabled={pipePoints.length < 2}
+              onClick={() => {
+                if (!activeLevelId || pipePoints.length < 2) return;
+                void (async () => {
+                  await create<import("@/lib/domain/types").PlumbingItem>("plumbing", {
+                    levelId: activeLevelId,
+                    type: pipeType as import("@/lib/domain/types").PlumbingType,
+                    path: pipePoints,
+                    diameter: pipeType === "drain" ? 50 : 22,
+                    heightZ: pipeType === "drain" ? 0.05 : 1.0,
+                  });
+                  setPipePoints([]);
+                })();
+              }}
+              className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
+            >
+              Opslaan
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Ruimte-tekenhulp */}
       {tool === "room" && (
         <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
@@ -576,6 +825,28 @@ export function PlanEditor() {
             </button>
           </div>
         </div>
+      )}
+
+      <RoomDivider divideRect={divideRect} onClear={() => setDivideRect(null)} />
+
+      {/* Elektra-legenda: alleen zichtbaar als elektra-laag aan staat */}
+      {visibleLayers.electrical && <ElectricalLegend />}
+
+      {/* Minimap */}
+      {walls.length > 0 && (
+        <Minimap
+          walls={walls}
+          view={view}
+          stageWidth={size.width}
+          stageHeight={size.height}
+          onJumpTo={(worldX, worldY) => {
+            setView((v) => ({
+              ...v,
+              x: size.width  / 2 - worldX * 50 * v.scale,
+              y: size.height / 2 - worldY * 50 * v.scale,
+            }));
+          }}
+        />
       )}
 
       {/* Contextmenu (rechtermuisknop) */}

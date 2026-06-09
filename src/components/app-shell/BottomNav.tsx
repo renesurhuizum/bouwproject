@@ -4,14 +4,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, PencilRuler, Box, ListChecks, Euro } from "lucide-react";
+import { LayoutDashboard, LayoutTemplate, Box, ListChecks, Receipt } from "lucide-react";
 
 const ITEMS = [
   { href: "/", label: "Start", icon: LayoutDashboard },
-  { href: "/plattegrond", label: "Plattegrond", icon: PencilRuler },
+  { href: "/plattegrond", label: "Plattegrond", icon: LayoutTemplate },
   { href: "/3d", label: "3D", icon: Box },
   { href: "/fases", label: "Fases", icon: ListChecks },
-  { href: "/kosten", label: "Kosten", icon: Euro },
+  { href: "/kosten", label: "Kosten", icon: Receipt },
 ] as const;
 
 export function BottomNav() {
@@ -28,16 +28,24 @@ export function BottomNav() {
           <Link
             key={href}
             href={href}
-            className={`flex flex-col items-center gap-1 py-2 text-[10px] font-medium transition-colors ${
-              active ? "text-accent" : "text-ink-500"
-            }`}
+            className="relative flex flex-col items-center gap-1 pb-2 pt-2.5 text-[10px] font-semibold transition-colors"
+            style={{ color: active ? "var(--color-accent)" : "var(--color-ink-400)" }}
           >
+            {/* Actieve indicator pill bovenaan */}
+            <span
+              aria-hidden
+              className="absolute left-1/2 top-0 h-0.5 w-6 -translate-x-1/2 rounded-full transition-all duration-200"
+              style={{
+                background: active ? "var(--color-accent)" : "transparent",
+              }}
+            />
+
             <Icon
               size={22}
-              strokeWidth={active ? 2.4 : 1.8}
-              className={active ? "text-accent" : "text-ink-500"}
+              strokeWidth={active ? 2.5 : 1.7}
+              aria-hidden
             />
-            {label}
+            <span>{label}</span>
           </Link>
         );
       })}

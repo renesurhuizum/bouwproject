@@ -3,12 +3,47 @@
 import type {
   ElectricalType,
   FixtureKind,
+  HvacType,
   OpeningType,
   WallMaterial,
   WallStatus,
   PhaseStatus,
   MaterialStatus,
 } from "./types";
+
+// ── Verwarming / HVAC ─────────────────────────────────────────────────────────
+
+export const HVAC_LABEL: Record<HvacType, string> = {
+  "cv-pipe": "CV-leiding",
+  radiator: "Radiator",
+  "floor-heating": "Vloerverwarming",
+  ventilation: "Ventilatie",
+  wtw: "WTW-unit",
+};
+
+export const HVAC_CODE: Record<HvacType, string> = {
+  "cv-pipe": "CV",
+  radiator: "RAD",
+  "floor-heating": "VV",
+  ventilation: "VEN",
+  wtw: "WTW",
+};
+
+export const HVAC_COLOR: Record<HvacType, string> = {
+  "cv-pipe": "#f97316",
+  radiator: "#f97316",
+  "floor-heating": "#fb923c",
+  ventilation: "#6b7280",
+  wtw: "#9333ea",
+};
+
+export const HVAC_DEFAULT_HEIGHT: Record<HvacType, number> = {
+  "cv-pipe": 0.3,
+  radiator: 0.3,
+  "floor-heating": 0,
+  ventilation: 2.3,
+  wtw: 0.5,
+};
 
 // Standaard montagehoogtes (m boven vloer) — NEN/praktijk in NL.
 export const ELECTRICAL_DEFAULT_HEIGHT: Record<ElectricalType, number> = {

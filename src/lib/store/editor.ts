@@ -7,13 +7,22 @@ import type {
   EditorLayer,
   ElectricalType,
   FixtureKind,
+  FurnitureKind,
   HvacType,
   OpeningType,
   WallMaterial,
   WallStatus,
 } from "../domain/types";
 
-export type Tool = "select" | "wall" | "room" | "place";
+export type Tool = "select" | "wall" | "room" | "place" | "divide" | "place-furniture" | "draw-pipe";
+
+export type GridSnap = "fine" | "normal" | "coarse";
+// fine = 10 cm, normal = 50 cm, coarse = 100 cm
+export const GRID_SNAP_M: Record<GridSnap, number> = {
+  fine: 0.1,
+  normal: 0.5,
+  coarse: 1.0,
+};
 
 export type PlaceKind =
   | { domain: "electrical"; type: ElectricalType }
@@ -27,7 +36,8 @@ export type SelKind =
   | "electrical"
   | "plumbing"
   | "hvac"
-  | "opening";
+  | "opening"
+  | "furniture";
 
 export interface Selection {
   kind: SelKind;
@@ -46,18 +56,24 @@ interface EditorState {
   activeLevelId: string | null;
   tool: Tool;
   placeKind: PlaceKind | null;
+  furniturePaletteKind: FurnitureKind | null;
+  pipeType: "supply-cold" | "supply-hot" | "drain" | "cv-pipe";
   selection: Selection | null;
   visibleLayers: Record<EditorLayer, boolean>;
   wallDefaults: WallDefaults;
   showGrid: boolean;
+  gridSnap: GridSnap;
 
   setActiveLevel: (id: string) => void;
   setTool: (t: Tool) => void;
   setPlaceKind: (p: PlaceKind | null) => void;
+  setFurniturePaletteKind: (kind: FurnitureKind | null) => void;
+  setPipeType: (t: "supply-cold" | "supply-hot" | "drain" | "cv-pipe") => void;
   select: (s: Selection | null) => void;
   toggleLayer: (l: EditorLayer) => void;
   setWallDefaults: (d: Partial<WallDefaults>) => void;
   toggleGrid: () => void;
+  cycleGridSnap: () => void;
 }
 
 export const useEditor = create<EditorState>()(
@@ -66,6 +82,8 @@ export const useEditor = create<EditorState>()(
       activeLevelId: null,
       tool: "select",
       placeKind: null,
+      furniturePaletteKind: null,
+      pipeType: "supply-cold",
       selection: null,
       visibleLayers: {
         structure: true,
@@ -73,6 +91,7 @@ export const useEditor = create<EditorState>()(
         plumbing: true,
         hvac: true,
         rooms: true,
+        furniture: true,
       },
       wallDefaults: {
         thickness: 0.1,
@@ -82,6 +101,7 @@ export const useEditor = create<EditorState>()(
         status: "new",
       },
       showGrid: true,
+      gridSnap: "fine",
 
       setActiveLevel: (id) => set({ activeLevelId: id, selection: null }),
       setTool: (tool) =>
@@ -91,6 +111,9 @@ export const useEditor = create<EditorState>()(
           selection: null,
         })),
       setPlaceKind: (placeKind) => set({ placeKind, tool: "place" }),
+      setFurniturePaletteKind: (kind) =>
+        set({ furniturePaletteKind: kind, tool: kind ? "place-furniture" : "select" }),
+      setPipeType: (pipeType) => set({ pipeType }),
       select: (selection) => set({ selection }),
       toggleLayer: (l) =>
         set((s) => ({
@@ -99,6 +122,12 @@ export const useEditor = create<EditorState>()(
       setWallDefaults: (d) =>
         set((s) => ({ wallDefaults: { ...s.wallDefaults, ...d } })),
       toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+      cycleGridSnap: () =>
+        set((s) => {
+          const order: GridSnap[] = ["fine", "normal", "coarse"];
+          const next = order[(order.indexOf(s.gridSnap) + 1) % order.length];
+          return { gridSnap: next };
+        }),
     }),
     {
       name: "bouw-editor",
@@ -107,6 +136,7 @@ export const useEditor = create<EditorState>()(
         visibleLayers: s.visibleLayers,
         wallDefaults: s.wallDefaults,
         showGrid: s.showGrid,
+        gridSnap: s.gridSnap,
       }),
     },
   ),

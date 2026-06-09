@@ -4,6 +4,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { getDB } from "./db/db";
+import type { Furniture, HvacItem } from "./domain/types";
 
 function notDeleted<T extends { deleted?: boolean }>(rows: T[] | undefined): T[] {
   return (rows ?? []).filter((r) => !r.deleted);
@@ -140,5 +141,29 @@ export function useMaterials(projectId?: string | null) {
     },
     [projectId],
     [],
+  );
+}
+
+export function useFurniture(levelId: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      const rows = await getDB().furniture.where("levelId").equals(levelId).toArray();
+      return rows.filter((f) => !f.deleted);
+    },
+    [levelId],
+    [] as Furniture[],
+  );
+}
+
+export function useHvac(levelId: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      const rows = await getDB().hvac.where("levelId").equals(levelId).toArray();
+      return rows.filter((h) => !h.deleted);
+    },
+    [levelId],
+    [] as HvacItem[],
   );
 }

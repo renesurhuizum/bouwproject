@@ -27,6 +27,11 @@ export interface Level extends Entity {
   elevation: number; // vloerpeil in m t.o.v. nulpeil
   height: number; // standaard verdiepingshoogte in m
   order: number;
+  bgImageBlob?: Blob; // optionele achtergrondafbeelding als natekenhulp
+  bgImageOpacity?: number; // 0-1, default 0.4
+  bgImageScale?: number; // m/pixel, zodat het op de juiste schaal past
+  bgImageOffsetX?: number; // wereld-x van linkerbovenhoek in m
+  bgImageOffsetY?: number; // wereld-y van linkerbovenhoek in m
 }
 
 export type WallStatus = "existing" | "new" | "demolish";
@@ -92,12 +97,14 @@ export interface ElectricalItem extends Entity {
   wallId?: string;
   label?: string;
   note?: string;
+  path?: Point[]; // kabeltraject (optioneel)
 }
 
 export type PlumbingType =
   | "supply-cold" // koud water aanvoer (leiding)
   | "supply-hot" // warm water aanvoer (leiding)
   | "drain" // afvoer (leiding)
+  | "cv-pipe" // cv-leiding (leiding)
   | "fixture"; // tappunt/sanitair
 
 export type FixtureKind =
@@ -121,6 +128,23 @@ export interface PlumbingItem extends Entity {
   note?: string;
 }
 
+export type FurnitureKind =
+  | "bed-single" | "bed-double" | "bed-king"
+  | "sofa-2" | "sofa-3" | "sofa-l"
+  | "dining-table" | "dining-chair" | "desk" | "office-chair"
+  | "wardrobe" | "bookshelf" | "tv-unit" | "coffee-table"
+  | "bathtub" | "shower-cabin" | "kitchen-island";
+
+export interface Furniture extends Entity {
+  levelId: string;
+  kind: FurnitureKind;
+  position: Point;
+  rotation: number;      // graden: 0, 90, 180, 270
+  width?: number;        // m (override)
+  depth?: number;        // m (override)
+  color?: string;
+}
+
 export type HvacType =
   | "cv-pipe" // cv-leiding
   | "radiator"
@@ -133,6 +157,7 @@ export interface HvacItem extends Entity {
   type: HvacType;
   path?: Point[];
   position?: Point;
+  heightZ?: number;
   note?: string;
 }
 
@@ -200,4 +225,4 @@ export interface Photo extends Entity {
 }
 
 // Layer-zichtbaarheid in de editor
-export type EditorLayer = "structure" | "electrical" | "plumbing" | "hvac" | "rooms";
+export type EditorLayer = "structure" | "electrical" | "plumbing" | "hvac" | "rooms" | "furniture";

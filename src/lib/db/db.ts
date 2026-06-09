@@ -18,6 +18,7 @@ import type {
   Expense,
   MaterialItem,
   Photo,
+  Furniture,
 } from "../domain/types";
 
 export class BouwDB extends Dexie {
@@ -35,10 +36,11 @@ export class BouwDB extends Dexie {
   expenses!: Table<Expense, string>;
   materials!: Table<MaterialItem, string>;
   photos!: Table<Photo, string>;
+  furniture!: Table<Furniture, string>;
 
   constructor() {
     super("bouwproject");
-    this.version(1).stores({
+    this.version(2).stores({
       projects: "id, updatedAt, deleted",
       levels: "id, projectId, order, updatedAt, deleted",
       walls: "id, levelId, updatedAt, deleted",
@@ -53,6 +55,7 @@ export class BouwDB extends Dexie {
       expenses: "id, projectId, phaseId, date, updatedAt, deleted",
       materials: "id, projectId, status, updatedAt, deleted",
       photos: "id, projectId, updatedAt, deleted",
+      furniture: "id, levelId, updatedAt, deleted",
     });
   }
 }

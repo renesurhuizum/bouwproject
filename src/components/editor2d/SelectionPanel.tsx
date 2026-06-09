@@ -1,12 +1,14 @@
 "use client";
 
-// Eigenschappen-paneel (onder, boven de tool-dock) voor de huidige selectie.
-
+import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Trash2, X } from "lucide-react";
+import { Camera, Trash2, X } from "lucide-react";
 import { getDB } from "@/lib/db/db";
-import { update, remove } from "@/lib/db/repo";
+import { create, update, remove } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
+import { useProject, useFurniture } from "@/lib/hooks";
+import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
+import type { Photo } from "@/lib/domain/types";
 import { dist, polygonArea } from "@/lib/geometry";
 import { formatLength, formatArea } from "@/lib/format";
 import {
@@ -18,8 +20,9 @@ import {
   OPENING_LABEL,
   OPENING_COLOR,
   FIXTURE_LABEL,
+  HVAC_LABEL,
 } from "@/lib/domain/constants";
-import type { WallMaterial, WallStatus, OpeningType } from "@/lib/domain/types";
+import type { Wall, WallMaterial, WallStatus, OpeningType } from "@/lib/domain/types";
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
 const MATERIALS = Object.keys(WALL_MATERIAL_LABEL) as WallMaterial[];
@@ -28,6 +31,33 @@ const OPENING_TYPES: OpeningType[] = ["door", "window", "passage"];
 export function SelectionPanel() {
   const selection = useEditor((s) => s.selection);
   const select = useEditor((s) => s.select);
+  const activeLevelId = useEditor((s) => s.activeLevelId);
+  const project = useProject();
+  const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const furnitureItems = useFurniture(activeLevelId) ?? [];
+  const selectedFurniture = furnitureItems.find((f) => f.id === selection?.id) ?? null;
+
+  const photos = useLiveQuery(
+    async () => {
+      if (selection?.kind !== "room") return [];
+      const rows = await getDB().photos.where("roomId").equals(selection.id).toArray();
+      return rows.filter((p) => !p.deleted);
+    },
+    [selection?.kind, selection?.id],
+    [] as Photo[],
+  );
+
+  async function addPhoto(file: File) {
+    if (!project?.id || !selection?.id) return;
+    await create<Photo>("photos", {
+      projectId: project.id,
+      roomId: selection.id,
+      blob: file,
+      caption: file.name,
+    });
+  }
 
   const wall = useLiveQuery(
     async () => (selection?.kind === "wall" ? await getDB().walls.get(selection.id) : null),
@@ -52,8 +82,16 @@ export function SelectionPanel() {
       selection?.kind === "plumbing" ? await getDB().plumbing.get(selection.id) : null,
     [selection?.kind, selection?.id],
   );
+  const hvacItem = useLiveQuery(
+    async () =>
+      selection?.kind === "hvac" ? await getDB().hvac.get(selection.id) : null,
+    [selection?.kind, selection?.id],
+  );
 
-  if (!selection) return null;
+  const tool = useEditor((s) => s.tool);
+  const isPlacementMode = tool === "place" || tool === "draw-pipe";
+
+  if (!selection || isPlacementMode) return null;
 
   return (
     <div className="pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3">
@@ -68,7 +106,11 @@ export function SelectionPanel() {
                   ? "Ruimte"
                   : selection.kind === "plumbing"
                     ? "Water"
-                    : "Elektra"}
+                    : selection.kind === "furniture"
+                      ? (selectedFurniture ? FURNITURE_DEFAULTS[selectedFurniture.kind].label : "Meubel")
+                      : selection.kind === "hvac"
+                        ? "Verwarming"
+                        : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -81,12 +123,9 @@ export function SelectionPanel() {
 
         {wall && (
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between text-xs text-ink-500">
-              <span>Lengte</span>
-              <span className="tabular text-ink-900">
-                {formatLength(dist(wall.start, wall.end))}
-              </span>
-            </div>
+            <Row label="Lengte">
+              <WallLengthField wall={wall} />
+            </Row>
 
             <Row label="Status">
               <div className="flex gap-1">
@@ -258,16 +297,135 @@ export function SelectionPanel() {
                 className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900 placeholder:text-ink-300"
               />
             </Row>
+            <Row label="Kleur">
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={room.color ?? "#fef3c7"}
+                  onChange={(e) => update("rooms", room.id, { color: e.target.value })}
+                  className="h-7 w-10 cursor-pointer rounded border border-line bg-paper p-0.5"
+                />
+                {room.color && (
+                  <button
+                    onClick={() => update("rooms", room.id, { color: undefined })}
+                    className="text-[10px] text-ink-400 hover:text-ink-700"
+                  >
+                    Wis
+                  </button>
+                )}
+              </div>
+            </Row>
             <DeleteButton onClick={() => removeAnd("rooms", room.id, () => select(null))} />
+
+            {/* Foto's sectie */}
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-xs text-ink-500">Foto&apos;s</span>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1 rounded-md bg-paper-sunken px-2 py-1 text-[11px] text-ink-700 hover:bg-line"
+                >
+                  <Camera size={11} /> Toevoegen
+                </button>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void addPhoto(file);
+                  e.target.value = "";
+                }}
+              />
+              {photos && photos.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {photos.map((ph) => (
+                    <PhotoThumb key={ph.id} photo={ph} onClick={() => setLightboxPhoto(ph)} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {hvacItem && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <span className="text-xs font-medium text-ink-900">{HVAC_LABEL[hvacItem.type]}</span>
+            </Row>
+            <Row label="Hoogte">
+              <NumberField
+                value={Math.round((hvacItem.heightZ ?? 0) * 100)}
+                unit="cm"
+                onChange={(v) => update("hvac", hvacItem.id, { heightZ: v / 100 })}
+              />
+            </Row>
+            <Row label="Notitie">
+              <input
+                type="text"
+                defaultValue={hvacItem.note ?? ""}
+                placeholder="bv. 1000W radiator"
+                onBlur={(e) => update("hvac", hvacItem.id, { note: e.target.value })}
+                className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900 placeholder:text-ink-300"
+              />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("hvac", hvacItem.id, () => select(null))} />
+          </div>
+        )}
+
+        {lightboxPhoto && (
+          <Lightbox photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />
+        )}
+
+        {selection?.kind === "furniture" && selectedFurniture && (
+          <div className="space-y-2.5">
+            <Row label="Rotatie">
+              <div className="flex gap-1">
+                {([0, 90, 180, 270] as const).map((deg) => (
+                  <button
+                    key={deg}
+                    onClick={() => void update("furniture", selectedFurniture.id, { rotation: deg })}
+                    className={`rounded-md px-2 py-1 text-[11px] font-medium ${
+                      selectedFurniture.rotation === deg
+                        ? "bg-accent text-white"
+                        : "bg-paper-sunken text-ink-700"
+                    }`}
+                  >
+                    {deg}°
+                  </button>
+                ))}
+              </div>
+            </Row>
+            <Row label="Kleur">
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={selectedFurniture.color ?? FURNITURE_DEFAULTS[selectedFurniture.kind].color}
+                  onChange={(e) => void update("furniture", selectedFurniture.id, { color: e.target.value })}
+                  className="h-7 w-10 cursor-pointer rounded border border-line bg-paper p-0.5"
+                />
+                {selectedFurniture.color && (
+                  <button
+                    onClick={() => void update("furniture", selectedFurniture.id, { color: undefined })}
+                    className="text-[10px] text-ink-400 hover:text-ink-700"
+                  >
+                    Wis
+                  </button>
+                )}
+              </div>
+            </Row>
+            <DeleteButton
+              onClick={() => void removeAnd("furniture", selectedFurniture.id, () => select(null))}
+            />
           </div>
         )}
 
         {plumb && plumb.fixture && (
           <div className="space-y-2.5">
             <Row label="Type">
-              <span className="text-xs font-medium text-ink-900">
-                {FIXTURE_LABEL[plumb.fixture]}
-              </span>
+              <span className="text-xs font-medium text-ink-900">{FIXTURE_LABEL[plumb.fixture]}</span>
             </Row>
             <Row label="Aansluithoogte">
               <NumberField
@@ -288,13 +446,38 @@ export function SelectionPanel() {
             <DeleteButton onClick={() => removeAnd("plumbing", plumb.id, () => select(null))} />
           </div>
         )}
+
+        {plumb && !plumb.fixture && plumb.path && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <span className="text-xs font-medium text-ink-900">
+                {plumb.type === "supply-cold" ? "Koud water"
+                  : plumb.type === "supply-hot" ? "Warm water"
+                  : plumb.type === "drain" ? "Afvoer"
+                  : plumb.type === "cv-pipe" ? "CV-leiding"
+                  : plumb.type}
+              </span>
+            </Row>
+            <Row label="Punten">
+              <span className="text-xs text-ink-900">{plumb.path.length}</span>
+            </Row>
+            <Row label="Hoogte">
+              <NumberField
+                value={Math.round((plumb.heightZ ?? 0) * 100)}
+                unit="cm"
+                onChange={(v) => update("plumbing", plumb.id, { heightZ: v / 100 })}
+              />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("plumbing", plumb.id, () => select(null))} />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 async function removeAnd(
-  table: "walls" | "electrical" | "openings" | "rooms" | "plumbing",
+  table: "walls" | "electrical" | "openings" | "rooms" | "plumbing" | "furniture" | "hvac",
   id: string,
   after: () => void,
 ) {
@@ -341,5 +524,83 @@ function DeleteButton({ onClick }: { onClick: () => void }) {
     >
       <Trash2 size={14} /> Verwijderen
     </button>
+  );
+}
+
+function WallLengthField({ wall }: { wall: Wall }) {
+  const currentLenM = dist(wall.start, wall.end);
+  const currentCm = Math.round(currentLenM * 100);
+
+  function applyLength(cm: number) {
+    if (cm < 1) return;
+    const newLenM = cm / 100;
+    const len = dist(wall.start, wall.end);
+    if (len === 0) return;
+    const dx = (wall.end.x - wall.start.x) / len;
+    const dy = (wall.end.y - wall.start.y) / len;
+    void update("walls", wall.id, {
+      end: { x: wall.start.x + dx * newLenM, y: wall.start.y + dy * newLenM },
+    });
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        type="number"
+        defaultValue={currentCm}
+        key={currentCm}
+        onBlur={(e) => applyLength(Number(e.target.value))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") applyLength(Number((e.target as HTMLInputElement).value));
+        }}
+        className="tabular w-20 rounded-md border border-line bg-paper px-2 py-1 text-right text-xs text-ink-900"
+      />
+      <span className="text-[11px] text-ink-500">cm</span>
+    </div>
+  );
+}
+
+function PhotoThumb({ photo, onClick }: { photo: Photo; onClick: () => void }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!photo.blob) return;
+    const url = URL.createObjectURL(photo.blob);
+    setSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [photo.blob]);
+  if (!src) return null;
+  return (
+    <button
+      onClick={onClick}
+      className="h-14 w-14 overflow-hidden rounded-lg border border-line bg-paper-sunken"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={photo.caption ?? ""} className="h-full w-full object-cover" />
+    </button>
+  );
+}
+
+function Lightbox({ photo, onClose }: { photo: Photo; onClose: () => void }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!photo.blob) return;
+    const url = URL.createObjectURL(photo.blob);
+    setSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [photo.blob]);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+      onClick={onClose}
+    >
+      {src && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={photo.caption ?? ""}
+          className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+        />
+      )}
+    </div>
   );
 }

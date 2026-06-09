@@ -18,6 +18,11 @@ const Scene3D = dynamic(
   },
 );
 
+const Edit3DToolbar = dynamic(
+  () => import("@/components/scene3d/Edit3DToolbar").then((m) => m.Edit3DToolbar),
+  { ssr: false },
+);
+
 export default function ThreeDPage() {
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const walls = useWalls(activeLevelId) ?? [];
@@ -33,6 +38,7 @@ export default function ThreeDPage() {
           </div>
         </div>
       )}
+      <Edit3DToolbar />
       <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
         <div className="rounded-full bg-ink-900/80 px-3 py-1 text-[11px] text-paper-raised backdrop-blur">
           Sleep om te draaien · knijp/scroll om te zoomen
