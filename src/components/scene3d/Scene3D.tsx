@@ -6,13 +6,16 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
+import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import { useLiveQuery } from "dexie-react-hooks";
 import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem } from "@/lib/domain/types";
 import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { getDB } from "@/lib/db/db";
+import { create as dbCreate } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
+import { use3DEdit } from "./use3DEdit";
 import { dist, angle, polygonCentroid } from "@/lib/geometry";
 import type { Point } from "@/lib/domain/types";
 
@@ -303,6 +306,48 @@ function HvacMesh3D({ item }: { item: HvacItem }) {
   return null;
 }
 
+function FloorPlane({ levelId, elevation }: { levelId: string; elevation: number }) {
+  const { mode, furnitureKind, electricalType, reset } = use3DEdit();
+  const active = mode !== "none";
+
+  async function handleClick(e: ThreeEvent<MouseEvent>) {
+    if (!active) return;
+    e.stopPropagation();
+    const x = e.point.x;
+    const z = e.point.z;
+
+    if (mode === "place-furniture" && furnitureKind) {
+      await dbCreate<Furniture>("furniture", {
+        levelId,
+        kind: furnitureKind,
+        position: { x, y: z },
+        rotation: 0,
+      });
+    } else if (mode === "place-electrical" && electricalType) {
+      const isLight = electricalType === "light" || electricalType === "spot";
+      await dbCreate<ElectricalItem>("electrical", {
+        levelId,
+        type: electricalType,
+        position: { x, y: z },
+        heightZ: isLight ? 2.4 : 0.3,
+      });
+    }
+
+    if (!e.nativeEvent.shiftKey) reset();
+  }
+
+  return (
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, elevation + 0.001, 0]}
+      onClick={handleClick}
+    >
+      <planeGeometry args={[200, 200]} />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+    </mesh>
+  );
+}
+
 function LevelScene({
   level,
   visibleLayers,
@@ -368,6 +413,7 @@ function LevelScene({
         furniture.map((it) => <FurnitureMesh3D key={it.id} item={it} />)}
       {visibleLayers.hvac &&
         hvac.map((it) => <HvacMesh3D key={it.id} item={it} />)}
+      <FloorPlane levelId={level.id} elevation={level.elevation} />
     </group>
   );
 }
@@ -375,6 +421,7 @@ function LevelScene({
 export function Scene3D() {
   const visibleLayers = useEditor((s) => s.visibleLayers);
   const project = useProject();
+  const editMode = use3DEdit((s) => s.mode);
 
   const levels = useLiveQuery(
     async () => {
@@ -398,6 +445,7 @@ export function Scene3D() {
       shadows
       camera={{ position: [center.x + maxElev, maxElev * 0.9, center.y + maxElev], fov: 50 }}
       gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}
+      style={{ cursor: editMode !== "none" ? "crosshair" : "grab" }}
     >
       <color attach="background" args={["#eceadf"]} />
       <ambientLight intensity={0.45} />

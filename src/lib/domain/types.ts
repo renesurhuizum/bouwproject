@@ -103,6 +103,7 @@ export type PlumbingType =
   | "supply-cold" // koud water aanvoer (leiding)
   | "supply-hot" // warm water aanvoer (leiding)
   | "drain" // afvoer (leiding)
+  | "cv-pipe" // cv-leiding (leiding)
   | "fixture"; // tappunt/sanitair
 
 export type FixtureKind =

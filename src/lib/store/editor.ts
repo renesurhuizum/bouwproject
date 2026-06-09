@@ -14,7 +14,7 @@ import type {
   WallStatus,
 } from "../domain/types";
 
-export type Tool = "select" | "wall" | "room" | "place" | "divide" | "place-furniture";
+export type Tool = "select" | "wall" | "room" | "place" | "divide" | "place-furniture" | "draw-pipe";
 
 export type GridSnap = "fine" | "normal" | "coarse";
 // fine = 10 cm, normal = 50 cm, coarse = 100 cm
@@ -57,6 +57,7 @@ interface EditorState {
   tool: Tool;
   placeKind: PlaceKind | null;
   furniturePaletteKind: FurnitureKind | null;
+  pipeType: "supply-cold" | "supply-hot" | "drain" | "cv-pipe";
   selection: Selection | null;
   visibleLayers: Record<EditorLayer, boolean>;
   wallDefaults: WallDefaults;
@@ -67,6 +68,7 @@ interface EditorState {
   setTool: (t: Tool) => void;
   setPlaceKind: (p: PlaceKind | null) => void;
   setFurniturePaletteKind: (kind: FurnitureKind | null) => void;
+  setPipeType: (t: "supply-cold" | "supply-hot" | "drain" | "cv-pipe") => void;
   select: (s: Selection | null) => void;
   toggleLayer: (l: EditorLayer) => void;
   setWallDefaults: (d: Partial<WallDefaults>) => void;
@@ -81,6 +83,7 @@ export const useEditor = create<EditorState>()(
       tool: "select",
       placeKind: null,
       furniturePaletteKind: null,
+      pipeType: "supply-cold",
       selection: null,
       visibleLayers: {
         structure: true,
@@ -110,6 +113,7 @@ export const useEditor = create<EditorState>()(
       setPlaceKind: (placeKind) => set({ placeKind, tool: "place" }),
       setFurniturePaletteKind: (kind) =>
         set({ furniturePaletteKind: kind, tool: kind ? "place-furniture" : "select" }),
+      setPipeType: (pipeType) => set({ pipeType }),
       select: (selection) => set({ selection }),
       toggleLayer: (l) =>
         set((s) => ({

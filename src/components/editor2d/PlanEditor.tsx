@@ -16,6 +16,7 @@ import type {
   Opening,
   Room,
   Furniture,
+  PlumbingType,
 } from "@/lib/domain/types";
 import { create, remove, update } from "@/lib/db/repo";
 import { getDB } from "@/lib/db/db";
@@ -64,6 +65,7 @@ export function PlanEditor() {
   const tool = useEditor((s) => s.tool);
   const placeKind = useEditor((s) => s.placeKind);
   const furniturePaletteKind = useEditor((s) => s.furniturePaletteKind);
+  const pipeType = useEditor((s) => s.pipeType);
   const wallDefaults = useEditor((s) => s.wallDefaults);
   const visibleLayers = useEditor((s) => s.visibleLayers);
   const showGrid = useEditor((s) => s.showGrid);
