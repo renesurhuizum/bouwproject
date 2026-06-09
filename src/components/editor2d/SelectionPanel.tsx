@@ -88,7 +88,10 @@ export function SelectionPanel() {
     [selection?.kind, selection?.id],
   );
 
-  if (!selection) return null;
+  const tool = useEditor((s) => s.tool);
+  const isPlacementMode = tool === "place" || tool === "draw-pipe";
+
+  if (!selection || isPlacementMode) return null;
 
   return (
     <div className="pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3">

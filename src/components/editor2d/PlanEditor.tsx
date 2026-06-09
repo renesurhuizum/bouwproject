@@ -732,6 +732,52 @@ export function PlanEditor() {
         </Stage>
       )}
 
+      {/* Leiding-tekenhulp */}
+      {tool === "draw-pipe" && (
+        <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
+          <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 px-2 py-1.5 shadow-lg backdrop-blur">
+            <span className="px-1 text-[11px] text-ink-500">
+              {pipePoints.length === 0
+                ? "Tik om beginpunt te zetten"
+                : `${pipePoints.length} ${pipePoints.length === 1 ? "punt" : "punten"}`}
+            </span>
+            <button
+              onClick={() => setPipePoints((d) => d.slice(0, -1))}
+              disabled={pipePoints.length === 0}
+              className="rounded-lg bg-paper-sunken px-2.5 py-1 text-xs font-medium text-ink-700 disabled:opacity-40"
+            >
+              Wis punt
+            </button>
+            <button
+              onClick={() => setPipePoints([])}
+              disabled={pipePoints.length === 0}
+              className="rounded-lg bg-paper-sunken px-2.5 py-1 text-xs font-medium text-ink-700 disabled:opacity-40"
+            >
+              Annuleer
+            </button>
+            <button
+              disabled={pipePoints.length < 2}
+              onClick={() => {
+                if (!activeLevelId || pipePoints.length < 2) return;
+                void (async () => {
+                  await create<import("@/lib/domain/types").PlumbingItem>("plumbing", {
+                    levelId: activeLevelId,
+                    type: pipeType as import("@/lib/domain/types").PlumbingType,
+                    path: pipePoints,
+                    diameter: pipeType === "drain" ? 50 : 22,
+                    heightZ: pipeType === "drain" ? 0.05 : 1.0,
+                  });
+                  setPipePoints([]);
+                })();
+              }}
+              className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
+            >
+              Opslaan
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Ruimte-tekenhulp */}
       {tool === "room" && (
         <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">

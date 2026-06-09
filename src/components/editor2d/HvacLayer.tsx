@@ -16,10 +16,53 @@ interface Props {
   onSelect: (id: string) => void;
 }
 
+function toFlat(pts: { x: number; y: number }[], view: ViewState): number[] {
+  return pts.flatMap((p) => {
+    const s = metersToScreen(p, view);
+    return [s.x, s.y];
+  });
+}
+
 export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
+  const pathItems = items.filter((it) => it.path && it.path.length >= 2);
+  const pointItems = items.filter((it) => it.position);
+
   return (
     <Layer>
-      {items.map((item) => {
+      {/* CV-leidingen als pad (type cv-pipe met path) */}
+      {pathItems.map((item) => {
+        const color = HVAC_COLOR[item.type];
+        const selected = item.id === selectedId;
+        return (
+          <Group
+            key={item.id}
+            onClick={() => onSelect(item.id)}
+            onTap={() => onSelect(item.id)}
+          >
+            <Line
+              id={item.id}
+              name="hvac"
+              points={toFlat(item.path!, view)}
+              stroke={selected ? "#ea580c" : color}
+              strokeWidth={selected ? 4 : 3}
+              lineCap="round"
+              lineJoin="round"
+            />
+            <Text
+              x={(() => { const p = metersToScreen(item.path![Math.floor(item.path!.length / 2)], view); return p.x - 8; })()}
+              y={(() => { const p = metersToScreen(item.path![Math.floor(item.path!.length / 2)], view); return p.y - 10; })()}
+              text={HVAC_CODE[item.type]}
+              fontSize={9}
+              fontStyle="bold"
+              fontFamily="monospace"
+              fill={color}
+              listening={false}
+            />
+          </Group>
+        );
+      })}
+
+      {pointItems.map((item) => {
         if (!item.position) return null;
         const p = metersToScreen(item.position, view);
         const selected = item.id === selectedId;

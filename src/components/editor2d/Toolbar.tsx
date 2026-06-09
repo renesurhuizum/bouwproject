@@ -14,8 +14,11 @@ import {
   Plus,
   LayoutDashboard,
   Sofa,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
+import { useHistory } from "@/lib/history";
 import type {
   ElectricalType,
   EditorLayer,
@@ -95,6 +98,9 @@ export function Toolbar() {
   const setFurniturePaletteKind = useEditor((s) => s.setFurniturePaletteKind);
   const pipeType = useEditor((s) => s.pipeType);
   const setPipeType = useEditor((s) => s.setPipeType);
+
+  const undo = useHistory((s) => s.undo);
+  const redo = useHistory((s) => s.redo);
 
   const SNAP_LABEL = { fine: "10cm", normal: "50cm", coarse: "1m" };
   const [showLayers, setShowLayers] = useState(false);
@@ -371,6 +377,23 @@ export function Toolbar() {
 
       {/* Hoofd-dock */}
       <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-line bg-paper-raised/95 p-1.5 shadow-xl backdrop-blur">
+        <button
+          onClick={() => void undo()}
+          aria-label="Ongedaan maken"
+          className="flex h-11 w-10 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
+        >
+          <Undo2 size={17} />
+          <span>Undo</span>
+        </button>
+        <button
+          onClick={() => void redo()}
+          aria-label="Opnieuw"
+          className="flex h-11 w-10 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
+        >
+          <Redo2 size={17} />
+          <span>Redo</span>
+        </button>
+        <div className="mx-0.5 h-7 w-px bg-line" />
         <ToolBtn active={tool === "select"} onClick={() => setTool("select")} label="Kies">
           <MousePointer2 size={20} />
         </ToolBtn>
