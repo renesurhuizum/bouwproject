@@ -44,7 +44,7 @@ export function ComplianceBanner() {
         : { bg: "bg-blueprint/10", border: "border-blueprint/40", text: "text-blueprint" };
 
   return (
-    <div className="no-print pointer-events-auto absolute bottom-[76px] left-3 z-10 w-[min(20rem,calc(100vw-1.5rem))]">
+    <div className="no-print pointer-events-auto absolute left-3 top-[60px] z-10 w-[min(18rem,calc(100vw-1.5rem))]">
       <div className={`rounded-xl border ${tone.border} ${tone.bg} shadow-lg backdrop-blur`}>
         <button
           onClick={() => setOpen((v) => !v)}
@@ -57,7 +57,7 @@ export function ComplianceBanner() {
               : `${infos} tip${infos > 1 ? "s" : ""}`}
           </span>
           <span className="ml-auto text-ink-500">
-            {open ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+            {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </span>
         </button>
         {open && (

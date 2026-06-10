@@ -518,13 +518,13 @@ function LevelScene({
         furniture.map((it) => <FurnitureMesh3D key={it.id} item={it} />)}
       {visibleLayers.hvac &&
         hvac.map((it) => <HvacMesh3D key={it.id} item={it} />)}
-      <FloorPlane levelId={level.id} elevation={level.elevation} />
     </group>
   );
 }
 
 export function Scene3D() {
   const visibleLayers = useEditor((s) => s.visibleLayers);
+  const activeLevelId = useEditor((s) => s.activeLevelId);
   const project = useProject();
   const editMode = use3DEdit((s) => s.mode);
   const [walkMode, setWalkMode] = useState(false);
@@ -539,6 +539,10 @@ export function Scene3D() {
     [project?.id],
     [] as Level[],
   );
+
+  // Klik-vlak voor 3D-plaatsing hoort bij de actieve verdieping. Eén vlak —
+  // niet één per laag — anders vangt het bovenste vlak alle kliks op.
+  const activeLevel = levels.find((l) => l.id === activeLevelId) ?? levels[0] ?? null;
 
   // Camera-doel: centroid van BG-verdieping (order=1).
   const groundLevelId = levels[0]?.id ?? null;
@@ -602,6 +606,11 @@ export function Scene3D() {
         {levels.map((level) => (
           <LevelScene key={level.id} level={level} visibleLayers={visibleLayers} />
         ))}
+
+        {/* Eén klik-vlak voor de actieve verdieping, alleen tijdens plaatsen */}
+        {activeLevel && editMode !== "none" && !walkMode && (
+          <FloorPlane levelId={activeLevel.id} elevation={activeLevel.elevation} />
+        )}
 
         {walkMode ? (
           <WalkthroughMode
