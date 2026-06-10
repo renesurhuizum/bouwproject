@@ -142,7 +142,7 @@ function RoomCeiling3D({ room, height }: { room: Room; height: number }) {
 const ELECTRICAL_LABELS: Record<string, string> = {
   socket: "Stopcontact", "socket-double": "Dubbel stop.", switch: "Schakelaar",
   light: "Lichtpunt", spot: "Inbouwspot", data: "Data/UTP",
-  panel: "Meterkast", "wall-light": "Wandlamp", outdoor: "Buitenpunt",
+  panel: "Meterkast", "wall-light": "Wandlamp", perilex: "Perilex (kookgroep)", outdoor: "Buitenpunt",
 };
 
 function handleElectricalClick(e: ThreeEvent<MouseEvent>, item: ElectricalItem) {
@@ -158,7 +158,7 @@ function handleElectricalClick(e: ThreeEvent<MouseEvent>, item: ElectricalItem) 
 
 function ElectricalMarker({ item }: { item: ElectricalItem }) {
   const isLight = item.type === "light" || item.type === "spot";
-  const isWall = item.type === "socket" || item.type === "socket-double" || item.type === "switch" || item.type === "data";
+  const isWall = item.type === "socket" || item.type === "socket-double" || item.type === "switch" || item.type === "data" || item.type === "perilex";
   const isSwitch = item.type === "switch";
 
   if (isLight) {

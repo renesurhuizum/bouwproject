@@ -14,7 +14,7 @@ import {
 
 const ELEC_CODE: Record<string, string> = {
   socket: "S", "socket-double": "S²", switch: "W", light: "L",
-  spot: "·", "wall-light": "WL", data: "D", panel: "▣", outdoor: "B",
+  spot: "·", "wall-light": "WL", data: "D", panel: "▣", perilex: "P", outdoor: "B",
 };
 const ELEC_COLOR = "#1d4ed8";
 const PLUMB_COLOR = "#0891b2";

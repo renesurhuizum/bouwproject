@@ -1,8 +1,15 @@
 // NEN 1010, NEN 2580 en Bouwbesluit 2012 validatie-regels.
 // Geeft waarschuwingen + fouten terug als leesbare meldingen.
 
-import type { ElectricalItem, Room, Wall, Level } from "./domain/types";
-import { polygonArea, projectOnSegment } from "./geometry";
+import type {
+  ElectricalItem,
+  HvacItem,
+  PlumbingItem,
+  Room,
+  Wall,
+  Level,
+} from "./domain/types";
+import { pointInPolygon, polygonArea, projectOnSegment } from "./geometry";
 import { roomWalls } from "./roomWalls";
 
 export interface ValidationIssue {
@@ -131,6 +138,184 @@ export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[]
         severity: "warn",
         message: `Verdieping "${level.name}": hoogte ${(level.height * 100).toFixed(0)} cm — Bouwbesluit vereist 260 cm voor woonruimtes`,
         entityId: level.id,
+      });
+    }
+  }
+
+  return issues;
+}
+
+// ── Aansluitingen per ruimte ─────────────────────────────────────────────────
+// Controleert per ruimtefunctie of de benodigde water-, afvoer-, elektra- en
+// ventilatie-aansluitingen aanwezig zijn (keuken → warm/koud + kookgroep, etc.).
+
+const FUNC_KEUKEN = ["keuken", "kitchen"];
+const FUNC_WASRUIMTE = ["wasruimte", "washok", "bijkeuken"];
+
+export function validateRoomServices(
+  rooms: Room[],
+  plumbing: PlumbingItem[],
+  electrical: ElectricalItem[],
+  hvac: HvacItem[],
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  const inRoom = (room: Room, p?: { x: number; y: number }) =>
+    !!p && pointInPolygon(p, room.polygon);
+
+  for (const room of rooms) {
+    if (room.polygon.length < 3) continue;
+
+    const fixtures = plumbing.filter((it) => it.type === "fixture" && inRoom(room, it.position));
+    const hasFixture = (kind: string) => fixtures.some((f) => f.fixture === kind);
+    // Leiding "raakt" de ruimte als een traject-punt binnen de polygon ligt.
+    const hasPipe = (type: string) =>
+      plumbing.some((it) => it.type === type && it.path?.some((p) => pointInPolygon(p, room.polygon)));
+    const elec = electrical.filter((it) => inRoom(room, it.position));
+    const hasVent = hvac.some(
+      (it) =>
+        (it.type === "ventilation" || it.type === "wtw") &&
+        (inRoom(room, it.position) || it.path?.some((p) => pointInPolygon(p, room.polygon))),
+    );
+
+    // Keuken: warm + koud water, afvoer en kookgroep (Perilex 2-fase).
+    if (isFuncMatch(room, FUNC_KEUKEN)) {
+      if (!hasFixture("kitchen-tap") && !hasFixture("sink")) {
+        issues.push({
+          severity: "warn",
+          message: `"${room.name}": nog geen kraan/tappunt — keuken heeft warm én koud water nodig`,
+          entityId: room.id,
+        });
+      } else {
+        if (!hasPipe("supply-hot")) {
+          issues.push({
+            severity: "info",
+            message: `"${room.name}": teken de warmwater-aanvoer (rode leiding) naar de keukenkraan`,
+            entityId: room.id,
+          });
+        }
+        if (!hasPipe("supply-cold")) {
+          issues.push({
+            severity: "info",
+            message: `"${room.name}": teken de koudwater-aanvoer (blauwe leiding) naar de keukenkraan`,
+            entityId: room.id,
+          });
+        }
+        if (!hasPipe("drain")) {
+          issues.push({
+            severity: "warn",
+            message: `"${room.name}": afvoer ontbreekt nog (spoelbak/vaatwasser)`,
+            entityId: room.id,
+          });
+        }
+      }
+      if (!elec.some((e) => e.type === "perilex")) {
+        issues.push({
+          severity: "warn",
+          message: `"${room.name}": elektrisch koken vereist een Perilex-aansluiting (2-fase kookgroep) — plaats deze via Installatie → Elektra`,
+          entityId: room.id,
+        });
+      }
+      if (elec.filter((e) => e.type === "socket" || e.type === "socket-double").length < 2) {
+        issues.push({
+          severity: "info",
+          message: `"${room.name}": reken op aparte groepen voor vaatwasser, oven en combimagnetron (NEN 1010)`,
+          entityId: room.id,
+        });
+      }
+    }
+
+    // Badkamer: warm + koud water, afvoer, ventilatie, elektra-zones.
+    if (isFuncMatch(room, FUNC_BADKAMER)) {
+      const wetFixtures = fixtures.filter((f) =>
+        ["shower", "bath", "sink"].includes(f.fixture ?? ""),
+      );
+      if (wetFixtures.length > 0) {
+        if (!hasPipe("supply-hot")) {
+          issues.push({
+            severity: "info",
+            message: `"${room.name}": warmwater-aanvoer naar douche/bad/wastafel nog niet getekend`,
+            entityId: room.id,
+          });
+        }
+        if (!hasPipe("drain")) {
+          issues.push({
+            severity: "warn",
+            message: `"${room.name}": afvoerleiding ontbreekt nog`,
+            entityId: room.id,
+          });
+        }
+      }
+      if (!hasVent) {
+        issues.push({
+          severity: "warn",
+          message: `"${room.name}": badkamer vereist mechanische ventilatie (Bouwbesluit, min. 14 dm³/s)`,
+          entityId: room.id,
+        });
+      }
+      if (elec.some((e) => e.type === "socket" || e.type === "socket-double")) {
+        issues.push({
+          severity: "info",
+          message: `"${room.name}": stopcontacten in badkamer — let op zone-indeling NEN 1010 (min. 60 cm van bad/douche, 30 mA aardlek)`,
+          entityId: room.id,
+        });
+      }
+    }
+
+    // Toilet: koud water, afvoer, ventilatie.
+    if (isFuncMatch(room, FUNC_TOILET)) {
+      if (hasFixture("toilet")) {
+        if (!hasPipe("supply-cold")) {
+          issues.push({
+            severity: "info",
+            message: `"${room.name}": koudwater-aanvoer naar het toilet nog niet getekend`,
+            entityId: room.id,
+          });
+        }
+        if (!hasPipe("drain")) {
+          issues.push({
+            severity: "warn",
+            message: `"${room.name}": afvoer (110 mm standleiding) ontbreekt nog`,
+            entityId: room.id,
+          });
+        }
+      }
+      if (!hasVent) {
+        issues.push({
+          severity: "info",
+          message: `"${room.name}": toiletruimte heeft ventilatie nodig (Bouwbesluit, min. 7 dm³/s)`,
+          entityId: room.id,
+        });
+      }
+    }
+
+    // Wasruimte / wasmachine-opstelplaats.
+    const wm = fixtures.find((f) => f.fixture === "washing-machine");
+    if (wm || isFuncMatch(room, FUNC_WASRUIMTE)) {
+      if (wm) {
+        if (!hasPipe("drain")) {
+          issues.push({
+            severity: "warn",
+            message: `"${room.name}": wasmachine heeft een afvoer nodig`,
+            entityId: room.id,
+          });
+        }
+        if (!elec.some((e) => e.type === "socket" || e.type === "socket-double")) {
+          issues.push({
+            severity: "info",
+            message: `"${room.name}": wasmachine vereist een eigen eindgroep met stopcontact (NEN 1010)`,
+            entityId: room.id,
+          });
+        }
+      }
+    }
+
+    // CV-ketel / boiler: condensafvoer.
+    if (fixtures.some((f) => f.fixture === "boiler") && !hasPipe("drain")) {
+      issues.push({
+        severity: "info",
+        message: `"${room.name}": CV-ketel heeft een condensafvoer nodig`,
+        entityId: room.id,
       });
     }
   }

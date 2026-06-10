@@ -17,6 +17,7 @@ const CODE: Record<ElectricalType, string> = {
   "wall-light": "WL",
   data: "D",
   panel: "▣",
+  perilex: "P",
   outdoor: "B",
 };
 

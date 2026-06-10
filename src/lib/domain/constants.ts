@@ -55,6 +55,7 @@ export const ELECTRICAL_DEFAULT_HEIGHT: Record<ElectricalType, number> = {
   "wall-light": 1.9,
   data: 0.3,
   panel: 1.5,
+  perilex: 0.6, // achter/onder kooktoestel
   outdoor: 0.6,
 };
 
@@ -67,6 +68,7 @@ export const ELECTRICAL_LABEL: Record<ElectricalType, string> = {
   "wall-light": "Wandlamp",
   data: "Data / UTP",
   panel: "Groepenkast",
+  perilex: "Perilex (kookgroep)",
   outdoor: "Buitenpunt",
 };
 
