@@ -2,7 +2,8 @@
 // Geeft waarschuwingen + fouten terug als leesbare meldingen.
 
 import type { ElectricalItem, Room, Wall, Level } from "./domain/types";
-import { polygonArea } from "./geometry";
+import { polygonArea, projectOnSegment } from "./geometry";
+import { roomWalls } from "./roomWalls";
 
 export interface ValidationIssue {
   severity: "error" | "warn" | "info";
@@ -138,11 +139,30 @@ export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[]
 }
 
 // ── NEN 2580: netto vloeroppervlak ────────────────────────────────────────────
-// Eenvoudige benadering: bruto polygoon-oppervlak verminderd met muurdikte-correctie.
+// Benadering: bruto polygoon-oppervlak min de halve dikte van de werkelijk
+// aangrenzende muren langs de omtrek (polygon ligt op de muur-hartlijnen).
 
 export function nvoArea(room: Room, walls: Wall[]): number {
   const bruto = polygonArea(room.polygon);
-  // Vind muren die de kamer omhullen (snelle benadering: muren op hetzelfde niveau)
-  const wallInset = walls.reduce((sum, w) => sum + w.thickness * 0.1, 0);
-  return Math.max(0, bruto - wallInset);
+  if (room.polygon.length < 3) return bruto;
+
+  const adjacent = roomWalls(room.polygon, walls);
+  let inset = 0;
+  for (let i = 0; i < room.polygon.length; i++) {
+    const a = room.polygon[i];
+    const b = room.polygon[(i + 1) % room.polygon.length];
+    const edgeLen = Math.hypot(b.x - a.x, b.y - a.y);
+    // Dikte van de muur op deze zijde; val terug op 10 cm binnenwand.
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    let thickness = 0.1;
+    for (const w of adjacent) {
+      const { dist: d } = projectOnSegment(mid, w.start, w.end);
+      if (d < 0.8) {
+        thickness = w.thickness;
+        break;
+      }
+    }
+    inset += edgeLen * (thickness / 2);
+  }
+  return Math.max(0, bruto - inset);
 }

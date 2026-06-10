@@ -22,11 +22,16 @@ export function BgImageLayer({ levelId, view }: Props) {
   useEffect(() => {
     // Geen blob → cleanup van de vorige run heeft img al op null gezet.
     if (!level?.bgImageBlob) return;
+    let cancelled = false;
     const url = URL.createObjectURL(level.bgImageBlob);
     const image = new window.Image();
-    image.onload = () => setImg(image);
+    // Guard tegen late onload van een inmiddels vervangen afbeelding.
+    image.onload = () => {
+      if (!cancelled) setImg(image);
+    };
     image.src = url;
     return () => {
+      cancelled = true;
       URL.revokeObjectURL(url);
       setImg(null);
     };

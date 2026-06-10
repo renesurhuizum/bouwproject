@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { Layer, Line, Text, Rect, Group, Arrow } from "react-konva";
 import type { Room, Wall, Level } from "@/lib/domain/types";
 import { polygonArea, polygonCentroid } from "@/lib/geometry";
@@ -119,9 +119,12 @@ function StaircaseLines({
 }
 
 export function RoomsLayer({ view, rooms, selectedId, onSelect, walls = [], levels = [], phaseStatusByRoom = null }: Props) {
-  // Bouwbesluit validatie — set van problematische room ids
-  const issues = validateRooms(rooms, levels);
-  const warnRoomIds = new Set(issues.filter((i) => i.entityId).map((i) => i.entityId!));
+  // Bouwbesluit validatie — gememoïseerd zodat pannen/zoomen (view-changes)
+  // niet elke frame alle ruimtes opnieuw valideert.
+  const warnRoomIds = useMemo(() => {
+    const issues = validateRooms(rooms, levels);
+    return new Set(issues.filter((i) => i.entityId).map((i) => i.entityId!));
+  }, [rooms, levels]);
 
   return (
     <Layer>

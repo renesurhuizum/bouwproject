@@ -59,22 +59,24 @@ const WALL_STROKE: Record<string, string> = {
 
 // Compute corner fill polygons for all junction points.
 function buildCornerFills(walls: Wall[], view: ViewState): React.ReactNode[] {
-  const byEndpoint = new Map<string, Wall[]>();
+  // Bewaar het werkelijke kruispunt naast de muren, zodat we niet hoeven te
+  // raden welk uiteinde van de eerste muur op de junction ligt.
+  const byEndpoint = new Map<string, { point: { x: number; y: number }; walls: Wall[] }>();
   const key = (p: { x: number; y: number }) =>
     `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`;
   for (const w of walls) {
-    const sk = key(w.start);
-    const ek = key(w.end);
-    byEndpoint.set(sk, [...(byEndpoint.get(sk) ?? []), w]);
-    byEndpoint.set(ek, [...(byEndpoint.get(ek) ?? []), w]);
+    for (const p of [w.start, w.end]) {
+      const k = key(p);
+      const entry = byEndpoint.get(k) ?? { point: p, walls: [] };
+      entry.walls.push(w);
+      byEndpoint.set(k, entry);
+    }
   }
   const fills: React.ReactNode[] = [];
   let idx = 0;
-  for (const [, connected] of byEndpoint) {
+  for (const [, { point, walls: connected }] of byEndpoint) {
     if (connected.length < 2) continue;
-    // Use first wall's endpoint that matches (start or end)
-    const ep = connected[0].start;
-    const pts = getCornerFillPoints(ep, connected);
+    const pts = getCornerFillPoints(point, connected);
     if (pts.length < 3) continue;
     const screenPts = pts.flatMap((p) => {
       const s = metersToScreen(p, view);

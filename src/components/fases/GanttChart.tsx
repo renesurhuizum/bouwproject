@@ -46,8 +46,13 @@ export function GanttChart({ phases, projectStartDate }: Props) {
     const starts = new Map<string, Date>();
     const ends = new Map<string, Date>();
 
+    const visiting = new Set<string>();
+
     function computeEnd(phase: Phase): Date {
       if (ends.has(phase.id)) return ends.get(phase.id)!;
+      // Cyclus in dependsOn → afhankelijkheid negeren i.p.v. oneindig recursen.
+      if (visiting.has(phase.id)) return startBase;
+      visiting.add(phase.id);
       let depEnd = startBase;
       for (const depId of phase.dependsOn) {
         const dep = byId.get(depId);
@@ -61,6 +66,7 @@ export function GanttChart({ phases, projectStartDate }: Props) {
       const dur = phase.durationDays ?? 14;
       const end = addDays(start, dur);
       ends.set(phase.id, end);
+      visiting.delete(phase.id);
       return end;
     }
 
