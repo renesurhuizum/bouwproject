@@ -65,6 +65,22 @@ export function useRooms(levelId?: string | null) {
   );
 }
 
+// Alle ruimtes van het project (over alle verdiepingen) — voor taak↔ruimte-koppeling.
+export function useProjectRooms(projectId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!projectId) return [];
+      const db = getDB();
+      const levels = notDeleted(await db.levels.where("projectId").equals(projectId).toArray());
+      const levelIds = new Set(levels.map((l) => l.id));
+      const all = notDeleted(await db.rooms.toArray());
+      return all.filter((r) => levelIds.has(r.levelId));
+    },
+    [projectId],
+    [],
+  );
+}
+
 export function useElectrical(levelId?: string | null) {
   return useLiveQuery(
     async () => {

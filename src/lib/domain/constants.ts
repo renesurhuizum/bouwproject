@@ -233,6 +233,7 @@ export const KOSTEN_CATEGORIEEN = [
   "Schilderwerk",
   "Vergunningen",
   "Gereedschap",
+  "Onvoorzien",
   "Overig",
 ] as const;
 

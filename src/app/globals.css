@@ -79,10 +79,18 @@ body {
   color: #fff;
 }
 
+/* Alleen zichtbaar tijdens printen (bv. volledige aanzicht-set). */
+.print-only {
+  display: none;
+}
+
 /* Print / PDF: verberg navigatie en knoppen, alleen het werkblad. */
 @media print {
   .no-print {
     display: none !important;
+  }
+  .print-only {
+    display: block !important;
   }
   html,
   body {

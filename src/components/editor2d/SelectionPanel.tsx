@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Camera, Trash2, X } from "lucide-react";
 import { getDB } from "@/lib/db/db";
@@ -22,7 +22,9 @@ import {
   FIXTURE_LABEL,
   HVAC_LABEL,
 } from "@/lib/domain/constants";
-import type { Wall, WallMaterial, WallStatus, OpeningType } from "@/lib/domain/types";
+import type { Wall, WallMaterial, WallStatus, OpeningType, FloorMaterial } from "@/lib/domain/types";
+import { polygonArea as polyArea } from "@/lib/geometry";
+import { nvoArea } from "@/lib/validation";
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
 const MATERIALS = Object.keys(WALL_MATERIAL_LABEL) as WallMaterial[];
@@ -38,6 +40,14 @@ export function SelectionPanel() {
 
   const furnitureItems = useFurniture(activeLevelId) ?? [];
   const selectedFurniture = furnitureItems.find((f) => f.id === selection?.id) ?? null;
+  const walls = useLiveQuery(
+    async () => {
+      if (!activeLevelId) return [];
+      return (await getDB().walls.where("levelId").equals(activeLevelId).toArray()).filter((w) => !w.deleted);
+    },
+    [activeLevelId],
+    [],
+  );
 
   const photos = useLiveQuery(
     async () => {
@@ -67,6 +77,17 @@ export function SelectionPanel() {
     async () =>
       selection?.kind === "electrical" ? await getDB().electrical.get(selection.id) : null,
     [selection?.kind, selection?.id],
+  );
+  // Alle elektra op de verdieping — voor het koppelen van schakelaar → lichtpunt.
+  const allElec = useLiveQuery(
+    async () => {
+      if (!activeLevelId) return [];
+      return (await getDB().electrical.where("levelId").equals(activeLevelId).toArray()).filter(
+        (e) => !e.deleted,
+      );
+    },
+    [activeLevelId],
+    [],
   );
   const opening = useLiveQuery(
     async () =>
@@ -188,6 +209,14 @@ export function SelectionPanel() {
               </button>
             </Row>
 
+            {wall.loadBearing && wall.status === "demolish" && (
+              <div className="rounded-lg border border-danger/40 bg-danger/10 px-2.5 py-2 text-[11px] leading-snug text-danger">
+                <strong>Let op:</strong> dragende muur slopen vereist een constructeursberekening
+                (staalbalk of portaal) en is vaak vergunningsplichtig. Check het Omgevingsloket
+                vóór je begint.
+              </div>
+            )}
+
             <DeleteButton onClick={() => removeAnd("walls", wall.id, () => select(null))} />
           </div>
         )}
@@ -226,6 +255,48 @@ export function SelectionPanel() {
                 className="w-20 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
               />
             </Row>
+
+            {/* Schakelaar → lichtpunt koppelen */}
+            {(elec.type === "switch" || elec.type === "data") && (
+              <div>
+                <span className="mb-1.5 block text-xs text-ink-500">
+                  Bedient (tik om te koppelen)
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {(allElec ?? [])
+                    .filter((c) => ["light", "spot", "wall-light", "outdoor"].includes(c.type))
+                    .map((c) => {
+                      const linked = (elec.linkedIds ?? []).includes(c.id);
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() => {
+                            const cur = elec.linkedIds ?? [];
+                            const next = linked
+                              ? cur.filter((x) => x !== c.id)
+                              : [...cur, c.id];
+                            void update("electrical", elec.id, { linkedIds: next });
+                          }}
+                          className={`rounded-md px-2 py-1 text-[10px] font-medium ${
+                            linked ? "bg-blueprint text-white" : "bg-paper-sunken text-ink-700"
+                          }`}
+                        >
+                          {ELECTRICAL_LABEL[c.type]}
+                          {c.group ? ` ·${c.group}` : ""}
+                        </button>
+                      );
+                    })}
+                  {(allElec ?? []).filter((c) =>
+                    ["light", "spot", "wall-light", "outdoor"].includes(c.type),
+                  ).length === 0 && (
+                    <span className="text-[10px] text-ink-400">
+                      Nog geen lichtpunten geplaatst.
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             <DeleteButton onClick={() => removeAnd("electrical", elec.id, () => select(null))} />
           </div>
         )}
@@ -277,8 +348,12 @@ export function SelectionPanel() {
         {room && (
           <div className="space-y-2.5">
             <div className="flex items-center justify-between text-xs text-ink-500">
-              <span>Oppervlak</span>
+              <span>Oppervlak (bruto)</span>
               <span className="tabular text-ink-900">{formatArea(polygonArea(room.polygon))}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-ink-500">
+              <span>NVO (NEN 2580)</span>
+              <span className="tabular text-ink-900">{formatArea(nvoArea(room, walls ?? []))}</span>
             </div>
             <Row label="Naam">
               <input
@@ -297,7 +372,7 @@ export function SelectionPanel() {
                 className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900 placeholder:text-ink-300"
               />
             </Row>
-            <Row label="Kleur">
+            <Row label="Kleur (plan)">
               <div className="flex items-center gap-2">
                 <input
                   type="color"
@@ -314,6 +389,42 @@ export function SelectionPanel() {
                   </button>
                 )}
               </div>
+            </Row>
+            <Row label="Wandkleur (3D)">
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={room.wallColor ?? "#f5f0e8"}
+                  onChange={(e) => update("rooms", room.id, { wallColor: e.target.value })}
+                  className="h-7 w-10 cursor-pointer rounded border border-line bg-paper p-0.5"
+                />
+                {room.wallColor && (
+                  <button
+                    onClick={() => update("rooms", room.id, { wallColor: undefined })}
+                    className="text-[10px] text-ink-400 hover:text-ink-700"
+                  >
+                    Wis
+                  </button>
+                )}
+              </div>
+            </Row>
+            <Row label="Vloer (3D)">
+              <select
+                value={room.floorMaterial ?? ""}
+                onChange={(e) =>
+                  update("rooms", room.id, {
+                    floorMaterial: e.target.value ? (e.target.value as FloorMaterial) : undefined,
+                  })
+                }
+                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              >
+                <option value="">Standaard</option>
+                <option value="tile">Tegels</option>
+                <option value="wood">Hout</option>
+                <option value="carpet">Tapijt</option>
+                <option value="stone">Steen</option>
+                <option value="concrete">Beton</option>
+              </select>
             </Row>
             <DeleteButton onClick={() => removeAnd("rooms", room.id, () => select(null))} />
 
@@ -561,13 +672,16 @@ function WallLengthField({ wall }: { wall: Wall }) {
 }
 
 function PhotoThumb({ photo, onClick }: { photo: Photo; onClick: () => void }) {
-  const [src, setSrc] = useState<string | null>(null);
+  // Object-URL tijdens render aanmaken; cleanup via effect (geen setState-cascade).
+  const src = useMemo(
+    () => (photo.blob ? URL.createObjectURL(photo.blob) : null),
+    [photo.blob],
+  );
   useEffect(() => {
-    if (!photo.blob) return;
-    const url = URL.createObjectURL(photo.blob);
-    setSrc(url);
-    return () => URL.revokeObjectURL(url);
-  }, [photo.blob]);
+    return () => {
+      if (src) URL.revokeObjectURL(src);
+    };
+  }, [src]);
   if (!src) return null;
   return (
     <button
@@ -581,13 +695,15 @@ function PhotoThumb({ photo, onClick }: { photo: Photo; onClick: () => void }) {
 }
 
 function Lightbox({ photo, onClose }: { photo: Photo; onClose: () => void }) {
-  const [src, setSrc] = useState<string | null>(null);
+  const src = useMemo(
+    () => (photo.blob ? URL.createObjectURL(photo.blob) : null),
+    [photo.blob],
+  );
   useEffect(() => {
-    if (!photo.blob) return;
-    const url = URL.createObjectURL(photo.blob);
-    setSrc(url);
-    return () => URL.revokeObjectURL(url);
-  }, [photo.blob]);
+    return () => {
+      if (src) URL.revokeObjectURL(src);
+    };
+  }, [src]);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"

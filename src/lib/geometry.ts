@@ -78,6 +78,42 @@ export function projectOnSegment(
   return { t, point, dist: dist(p, point) };
 }
 
+// Constrain cursor to nearest angle multiple (45° default) from origin.
+// Used for Shift-ortho drawing.
+export function constrainToAngle(cursor: Point, origin: Point, stepDeg = 45): Point {
+  const dx = cursor.x - origin.x;
+  const dy = cursor.y - origin.y;
+  const d = Math.hypot(dx, dy);
+  if (d < 0.0001) return cursor;
+  const a = Math.atan2(dy, dx);
+  const step = (stepDeg * Math.PI) / 180;
+  const snapped = Math.round(a / step) * step;
+  return { x: origin.x + d * Math.cos(snapped), y: origin.y + d * Math.sin(snapped) };
+}
+
+// Compute a convex-hull fill polygon for a wall junction point.
+// Returns flat [x, y, x, y, …] screen-coord array ready for Konva.
+// Each wall contributes its two near-corner points at `endpoint`.
+export function getCornerFillPoints(endpoint: Point, walls: Array<{ start: Point; end: Point; thickness: number }>): Point[] {
+  if (walls.length < 2) return [];
+  const pts: Point[] = [];
+  for (const w of walls) {
+    const len = dist(w.start, w.end);
+    if (len < 0.001) continue;
+    const dx = (w.end.x - w.start.x) / len;
+    const dy = (w.end.y - w.start.y) / len;
+    const ht = w.thickness / 2;
+    pts.push({ x: endpoint.x - dy * ht, y: endpoint.y + dx * ht });
+    pts.push({ x: endpoint.x + dy * ht, y: endpoint.y - dx * ht });
+  }
+  if (pts.length < 3) return pts;
+  // Sort by angle from centroid → gives convex hull for these near-perpendicular points.
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  pts.sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+  return pts;
+}
+
 // Bounding box van een set punten.
 export function bounds(points: Point[]): { min: Point; max: Point } {
   if (points.length === 0) {

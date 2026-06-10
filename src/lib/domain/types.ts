@@ -19,6 +19,8 @@ export interface Point {
 export interface Project extends Entity {
   name: string;
   description?: string;
+  northDegrees?: number;  // voor noordpijl op werkblad (0 = omhoog = Noord)
+  startDate?: string;     // ISO yyyy-mm-dd voor Gantt
 }
 
 export interface Level extends Entity {
@@ -67,12 +69,16 @@ export interface Opening extends Entity {
   offset: number; // m vanaf wall.start langs de muur
 }
 
+export type FloorMaterial = "tile" | "wood" | "carpet" | "stone" | "concrete";
+
 export interface Room extends Entity {
   levelId: string;
   name: string;
   func?: string; // functie: woonkamer, badkamer...
   polygon: Point[]; // gesloten contour
   color?: string;
+  wallColor?: string;      // wandverf-kleur voor 3D
+  floorMaterial?: FloorMaterial;
 }
 
 // ── Installaties ──────────────────────────────────────────────────────────────
@@ -98,6 +104,7 @@ export interface ElectricalItem extends Entity {
   label?: string;
   note?: string;
   path?: Point[]; // kabeltraject (optioneel)
+  linkedIds?: string[]; // gekoppelde elementen (schakelaar → lichtpunt)
 }
 
 export type PlumbingType =
@@ -173,6 +180,8 @@ export interface Phase extends Entity {
   dependsOn: string[]; // phase ids die eerst klaar moeten zijn
   color?: string;
   note?: string;
+  startDate?: string;    // ISO yyyy-mm-dd
+  durationDays?: number;
 }
 
 export interface TaskItem extends Entity {

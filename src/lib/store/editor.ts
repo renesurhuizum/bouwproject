@@ -63,6 +63,7 @@ interface EditorState {
   wallDefaults: WallDefaults;
   showGrid: boolean;
   gridSnap: GridSnap;
+  phaseOverlay: boolean;
 
   setActiveLevel: (id: string) => void;
   setTool: (t: Tool) => void;
@@ -74,6 +75,7 @@ interface EditorState {
   setWallDefaults: (d: Partial<WallDefaults>) => void;
   toggleGrid: () => void;
   cycleGridSnap: () => void;
+  togglePhaseOverlay: () => void;
 }
 
 export const useEditor = create<EditorState>()(
@@ -102,6 +104,7 @@ export const useEditor = create<EditorState>()(
       },
       showGrid: true,
       gridSnap: "fine",
+      phaseOverlay: false,
 
       setActiveLevel: (id) => set({ activeLevelId: id, selection: null }),
       setTool: (tool) =>
@@ -122,6 +125,7 @@ export const useEditor = create<EditorState>()(
       setWallDefaults: (d) =>
         set((s) => ({ wallDefaults: { ...s.wallDefaults, ...d } })),
       toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+      togglePhaseOverlay: () => set((s) => ({ phaseOverlay: !s.phaseOverlay })),
       cycleGridSnap: () =>
         set((s) => {
           const order: GridSnap[] = ["fine", "normal", "coarse"];

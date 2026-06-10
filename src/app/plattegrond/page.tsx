@@ -4,9 +4,11 @@
 
 import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Pencil, Sparkles } from "lucide-react";
+import { Pencil, Sparkles, ListChecks } from "lucide-react";
+import { useEditor } from "@/lib/store/editor";
 import { Toolbar } from "@/components/editor2d/Toolbar";
 import { SelectionPanel } from "@/components/editor2d/SelectionPanel";
+import { ComplianceBanner } from "@/components/editor2d/ComplianceBanner";
 import { LevelSwitcher } from "@/components/editor2d/LevelSwitcher";
 import { IndelingGenerator } from "@/components/indeling/IndelingGenerator";
 import { useProject } from "@/lib/hooks";
@@ -31,6 +33,8 @@ export default function PlattegrondPage() {
   const [nameValue, setNameValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const project = useProject();
+  const phaseOverlay = useEditor((s) => s.phaseOverlay);
+  const togglePhaseOverlay = useEditor((s) => s.togglePhaseOverlay);
 
   function startEdit() {
     if (!project) return;
@@ -58,6 +62,7 @@ export default function PlattegrondPage() {
       <PlanEditor />
       <LevelSwitcher />
       <SelectionPanel />
+      <ComplianceBanner />
       <Toolbar />
 
       {/* Projectnaam — klikbaar om te bewerken */}
@@ -86,13 +91,26 @@ export default function PlattegrondPage() {
         </div>
       )}
 
-      {/* Indeling-generator starten */}
-      <button
-        onClick={() => setShowGen(true)}
-        className="absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-xl border border-accent/40 bg-paper-raised/95 px-3 py-2 text-xs font-semibold text-accent shadow-lg backdrop-blur"
-      >
-        <Sparkles size={15} /> Indeling
-      </button>
+      {/* Indeling-generator + fase-overlay */}
+      <div className="absolute left-3 top-3 z-10 flex gap-2">
+        <button
+          onClick={() => setShowGen(true)}
+          className="flex items-center gap-1.5 rounded-xl border border-accent/40 bg-paper-raised/95 px-3 py-2 text-xs font-semibold text-accent shadow-lg backdrop-blur"
+        >
+          <Sparkles size={15} /> Indeling
+        </button>
+        <button
+          onClick={togglePhaseOverlay}
+          className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur ${
+            phaseOverlay
+              ? "border-ink-900 bg-ink-900 text-paper-raised"
+              : "border-line bg-paper-raised/95 text-ink-700"
+          }`}
+          title="Kleur ruimtes op werkvoortgang (taken per ruimte)"
+        >
+          <ListChecks size={15} /> Voortgang
+        </button>
+      </div>
 
       {showGen && <IndelingGenerator onClose={() => setShowGen(false)} />}
     </div>
