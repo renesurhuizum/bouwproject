@@ -1,18 +1,41 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { Layer, Line, Text, Rect, Group, Arrow } from "react-konva";
-import type { Room } from "@/lib/domain/types";
+import type { Room, Wall, Level } from "@/lib/domain/types";
 import { polygonArea, polygonCentroid } from "@/lib/geometry";
 import { formatArea } from "@/lib/format";
+import { validateRooms } from "@/lib/validation";
 import { metersToScreen, type ViewState } from "./viewport";
+
+export type RoomPhaseStatus = "todo" | "in-progress" | "done";
 
 interface Props {
   view: ViewState;
   rooms: Room[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  walls?: Wall[];
+  levels?: Level[];
+  // Fase-overlay: kleurt ruimtes op werkvoortgang (grijs/oranje/groen).
+  phaseStatusByRoom?: Map<string, RoomPhaseStatus> | null;
 }
+
+const PHASE_FILL: Record<RoomPhaseStatus, string> = {
+  todo: "rgba(120, 113, 108, 0.25)",
+  "in-progress": "rgba(234, 88, 12, 0.30)",
+  done: "rgba(21, 128, 61, 0.30)",
+};
+const PHASE_STROKE: Record<RoomPhaseStatus, string> = {
+  todo: "rgba(120, 113, 108, 0.6)",
+  "in-progress": "rgba(234, 88, 12, 0.8)",
+  done: "rgba(21, 128, 61, 0.8)",
+};
+const PHASE_BADGE: Record<RoomPhaseStatus, string> = {
+  todo: "Nog niet gestart",
+  "in-progress": "Bezig",
+  done: "Klaar",
+};
 
 function hexToRgba(color: string, alpha: number): string {
   if (color.startsWith("#") && color.length === 7) {
@@ -95,7 +118,14 @@ function StaircaseLines({
   }
 }
 
-export function RoomsLayer({ view, rooms, selectedId, onSelect }: Props) {
+export function RoomsLayer({ view, rooms, selectedId, onSelect, walls = [], levels = [], phaseStatusByRoom = null }: Props) {
+  // Bouwbesluit validatie — gememoïseerd zodat pannen/zoomen (view-changes)
+  // niet elke frame alle ruimtes opnieuw valideert.
+  const warnRoomIds = useMemo(() => {
+    const issues = validateRooms(rooms, levels);
+    return new Set(issues.filter((i) => i.entityId).map((i) => i.entityId!));
+  }, [rooms, levels]);
+
   return (
     <Layer>
       {rooms.map((room) => {
@@ -111,15 +141,31 @@ export function RoomsLayer({ view, rooms, selectedId, onSelect }: Props) {
         const c = metersToScreen(polygonCentroid(room.polygon), view);
         const selected = room.id === selectedId;
         const staircase = isStaircase(room.name);
+        const hasWarning = warnRoomIds.has(room.id);
+        const phaseStatus = phaseStatusByRoom?.get(room.id) ?? null;
+        const overlayActive = phaseStatusByRoom !== null;
 
-        const fillColor = room.color
-          ? hexToRgba(room.color, selected ? 0.45 : 0.28)
-          : `rgba(234, 88, 12, ${selected ? 0.14 : 0.07})`;
-        const strokeColor = room.color
-          ? hexToRgba(room.color, selected ? 0.9 : 0.55)
-          : selected
-            ? "rgba(234, 88, 12, 0.9)"
-            : "rgba(234, 88, 12, 0.35)";
+        // Fase-overlay heeft voorrang; daarna Bouwbesluit-warning; daarna eigen kleur.
+        const fillColor = overlayActive
+          ? phaseStatus
+            ? PHASE_FILL[phaseStatus]
+            : "rgba(168, 162, 158, 0.10)"
+          : hasWarning
+            ? `rgba(234, 88, 12, ${selected ? 0.35 : 0.18})`
+            : room.color
+              ? hexToRgba(room.color, selected ? 0.45 : 0.28)
+              : `rgba(234, 88, 12, ${selected ? 0.14 : 0.07})`;
+        const strokeColor = overlayActive
+          ? phaseStatus
+            ? PHASE_STROKE[phaseStatus]
+            : "rgba(168, 162, 158, 0.4)"
+          : hasWarning
+            ? `rgba(234, 88, 12, ${selected ? 1.0 : 0.7})`
+            : room.color
+              ? hexToRgba(room.color, selected ? 0.9 : 0.55)
+              : selected
+                ? "rgba(234, 88, 12, 0.9)"
+                : "rgba(234, 88, 12, 0.35)";
 
         const labelW = Math.max(room.name.length * 6.5 + 16, 80);
         const labelH = 34;
@@ -142,28 +188,42 @@ export function RoomsLayer({ view, rooms, selectedId, onSelect }: Props) {
               <Rect
                 width={labelW}
                 height={labelH}
-                fill="rgba(255,255,255,0.88)"
-                stroke="rgba(0,0,0,0.08)"
+                fill={hasWarning ? "rgba(254,243,199,0.95)" : "rgba(255,255,255,0.88)"}
+                stroke={hasWarning ? "rgba(217,119,6,0.5)" : "rgba(0,0,0,0.08)"}
                 strokeWidth={1}
                 cornerRadius={5}
               />
               <Text
-                text={room.name}
+                text={hasWarning ? `⚠ ${room.name}` : room.name}
                 width={labelW}
                 y={5}
                 fontSize={11}
                 fontStyle="600"
                 fontFamily="system-ui, sans-serif"
-                fill="#1c1917"
+                fill={hasWarning ? "#92400e" : "#1c1917"}
                 align="center"
               />
               <Text
-                text={areaLabel}
+                text={
+                  overlayActive
+                    ? phaseStatus
+                      ? PHASE_BADGE[phaseStatus]
+                      : "Geen taken"
+                    : areaLabel
+                }
                 width={labelW}
                 y={19}
                 fontSize={9}
                 fontFamily="system-ui, sans-serif"
-                fill="#78716c"
+                fill={
+                  overlayActive
+                    ? phaseStatus === "done"
+                      ? "#15803d"
+                      : phaseStatus === "in-progress"
+                        ? "#ea580c"
+                        : "#78716c"
+                    : "#78716c"
+                }
                 align="center"
               />
             </Group>

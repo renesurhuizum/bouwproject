@@ -3,18 +3,25 @@
 // Begroting per fase: begroot vs werkelijk uitgegeven.
 
 import { useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
-import { useProject, useBudget, useExpenses, usePhases } from "@/lib/hooks";
+import { Plus, Trash2, Lightbulb, Ruler } from "lucide-react";
+import { useProject, useBudget, useExpenses, usePhases, useProjectRooms } from "@/lib/hooks";
 import { create, remove } from "@/lib/db/repo";
 import type { BudgetLine } from "@/lib/domain/types";
 import { KOSTEN_CATEGORIEEN } from "@/lib/domain/constants";
 import { formatEuro } from "@/lib/format";
+import { polygonArea } from "@/lib/geometry";
+
+// NL-renovatie benchmark: gangbare totaalkosten per m² woonoppervlak.
+const BENCHMARK_MIN_PER_M2 = 1000;
+const BENCHMARK_MAX_PER_M2 = 1800;
+const ONVOORZIEN_PCT = 0.12;
 
 export function Begroting() {
   const project = useProject();
   const budget = useBudget(project?.id) ?? [];
   const expenses = useExpenses(project?.id) ?? [];
   const phases = usePhases(project?.id) ?? [];
+  const rooms = useProjectRooms(project?.id) ?? [];
   const [open, setOpen] = useState(false);
 
   const totals = useMemo(() => {
@@ -22,6 +29,29 @@ export function Begroting() {
     const besteed = expenses.reduce((s, e) => s + e.amount, 0);
     return { begroot, besteed };
   }, [budget, expenses]);
+
+  // Totaal vloeroppervlak uit de plattegrond (alle verdiepingen).
+  const totalArea = useMemo(
+    () => rooms.reduce((s, r) => s + (r.polygon.length >= 3 ? polygonArea(r.polygon) : 0), 0),
+    [rooms],
+  );
+
+  const hasOnvoorzien = budget.some((b) => b.category === "Onvoorzien");
+  const begrootExclOnvoorzien = budget
+    .filter((b) => b.category !== "Onvoorzien")
+    .reduce((s, b) => s + b.amount, 0);
+  const onvoorzienSuggestie = Math.round(begrootExclOnvoorzien * ONVOORZIEN_PCT);
+
+  async function addOnvoorzien() {
+    if (!project || onvoorzienSuggestie <= 0) return;
+    await create<BudgetLine>("budget", {
+      projectId: project.id,
+      category: "Onvoorzien",
+      amount: onvoorzienSuggestie,
+    });
+  }
+
+  const perM2 = totalArea > 0 ? totals.begroot / totalArea : null;
 
   // Per fase optellen.
   const perPhase = useMemo(() => {
@@ -44,6 +74,72 @@ export function Begroting() {
           good={totals.begroot - totals.besteed >= 0}
         />
       </div>
+
+      {/* Onvoorzien-advies: NL-vuistregel is 10–15% van het bouwbudget reserveren */}
+      {!hasOnvoorzien && onvoorzienSuggestie > 0 && (
+        <div className="flex items-start gap-2.5 rounded-card border border-warn/40 bg-warn/10 p-3">
+          <Lightbulb size={16} className="mt-0.5 shrink-0 text-warn" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-ink-900">
+              Geen post &ldquo;Onvoorzien&rdquo; in je begroting
+            </p>
+            <p className="mt-0.5 text-[11px] leading-snug text-ink-500">
+              Bij een verbouwing van een bestaande woning loopt 10–15% van het budget
+              vrijwel altijd uit op verrassingen (leidingen, houtrot, fundering).
+            </p>
+            <button
+              onClick={addOnvoorzien}
+              className="mt-2 rounded-lg bg-warn px-3 py-1.5 text-[11px] font-semibold text-white"
+            >
+              Voeg 12% toe ({formatEuro(onvoorzienSuggestie)})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* m²-benchmark op basis van het getekende vloeroppervlak */}
+      {perM2 !== null && totals.begroot > 0 && (
+        <div className="rounded-card border border-line bg-paper-raised p-3">
+          <div className="flex items-center gap-2">
+            <Ruler size={14} className="shrink-0 text-blueprint" />
+            <span className="text-xs font-medium text-ink-900">
+              Begroting per m²: <span className="tabular">{formatEuro(perM2)}</span>
+              <span className="text-ink-400"> ({totalArea.toFixed(0)} m² getekend)</span>
+            </span>
+          </div>
+          {/* Schaalbalkje van de benchmark-range */}
+          <div className="relative mt-2.5 h-1.5 rounded-full bg-paper-sunken">
+            <div
+              className="absolute h-full rounded-full bg-blueprint/30"
+              style={{ left: "20%", width: "60%" }}
+            />
+            <div
+              className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow"
+              style={{
+                left: `${Math.min(95, Math.max(5, 20 + ((perM2 - BENCHMARK_MIN_PER_M2) / (BENCHMARK_MAX_PER_M2 - BENCHMARK_MIN_PER_M2)) * 60))}%`,
+                background:
+                  perM2 < BENCHMARK_MIN_PER_M2
+                    ? "#d97706"
+                    : perM2 > BENCHMARK_MAX_PER_M2
+                      ? "#dc2626"
+                      : "#16a34a",
+              }}
+            />
+          </div>
+          <div className="mt-1 flex justify-between text-[10px] text-ink-400">
+            <span>€{BENCHMARK_MIN_PER_M2}/m²</span>
+            <span>gangbaar bij renovatie</span>
+            <span>€{BENCHMARK_MAX_PER_M2}/m²</span>
+          </div>
+          <p className="mt-1.5 text-[11px] leading-snug text-ink-500">
+            {perM2 < BENCHMARK_MIN_PER_M2
+              ? "Je zit onder de gangbare bandbreedte — check of alle posten (arbeid, installaties, afwerking) zijn meegenomen."
+              : perM2 > BENCHMARK_MAX_PER_M2
+                ? "Je zit boven de gangbare bandbreedte — dat kan kloppen bij hoogwaardige afwerking of constructiewerk."
+                : "Je begroting valt binnen de gangbare bandbreedte voor woningrenovatie in NL."}
+          </p>
+        </div>
+      )}
 
       {open ? (
         <BudgetForm

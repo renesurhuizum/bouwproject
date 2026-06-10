@@ -2,7 +2,9 @@
 
 // Compacte topbar met projectnaam en (op de plattegrond/3D) een verdieping-kiezer.
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Settings } from "lucide-react";
 import { useProject, useLevels } from "@/lib/hooks";
 import { useEditor } from "@/lib/store/editor";
 
@@ -31,26 +33,39 @@ export function TopBar() {
         </div>
       </div>
 
-      {showLevels && levels && levels.length > 0 && (
-        <div className="flex shrink-0 gap-1 rounded-full bg-paper-sunken p-1">
-          {levels.map((lvl) => {
-            const active = lvl.id === activeLevelId;
-            return (
-              <button
-                key={lvl.id}
-                onClick={() => setActiveLevel(lvl.id)}
-                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                  active
-                    ? "bg-ink-900 text-paper-raised"
-                    : "text-ink-500 hover:text-ink-900"
-                }`}
-              >
-                {lvl.name}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      <div className="flex shrink-0 items-center gap-2">
+        {showLevels && levels && levels.length > 0 && (
+          <div className="flex gap-1 rounded-full bg-paper-sunken p-1">
+            {levels.map((lvl) => {
+              const active = lvl.id === activeLevelId;
+              return (
+                <button
+                  key={lvl.id}
+                  onClick={() => setActiveLevel(lvl.id)}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                    active
+                      ? "bg-ink-900 text-paper-raised"
+                      : "text-ink-500 hover:text-ink-900"
+                  }`}
+                >
+                  {lvl.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <Link
+          href="/instellingen"
+          aria-label="Instellingen"
+          className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+            pathname === "/instellingen"
+              ? "bg-ink-900 text-paper-raised"
+              : "text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
+          }`}
+        >
+          <Settings size={17} />
+        </Link>
+      </div>
     </header>
   );
 }

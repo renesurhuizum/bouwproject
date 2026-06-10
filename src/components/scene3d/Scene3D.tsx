@@ -3,11 +3,11 @@
 // 3D-weergave: plattegrond geëxtrudeerd naar muren. Orbit-camera om rond te kijken.
 // Plan-coördinaten (x, y in meters) → wereld (x, z). Hoogte = y omhoog.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
-import { OrbitControls, Grid } from "@react-three/drei";
+import { OrbitControls, Grid, Sky } from "@react-three/drei";
 import { useLiveQuery } from "dexie-react-hooks";
 import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem } from "@/lib/domain/types";
 import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac } from "@/lib/hooks";
@@ -16,7 +16,8 @@ import { getDB } from "@/lib/db/db";
 import { create as dbCreate } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
 import { use3DEdit } from "./use3DEdit";
-import { dist, angle, polygonCentroid } from "@/lib/geometry";
+import { WalkthroughMode } from "./WalkthroughMode";
+import { dist, angle, polygonCentroid, projectOnSegment } from "@/lib/geometry";
 import type { Point } from "@/lib/domain/types";
 
 const STATUS_3D: Record<Wall["status"], { color: string; opacity: number }> = {
@@ -62,7 +63,7 @@ function wallBoxes(length: number, height: number, openings: Opening[]): Box[] {
   return boxes;
 }
 
-function WallMesh({ wall, openings }: { wall: Wall; openings: Opening[] }) {
+function WallMesh({ wall, openings, wallColor }: { wall: Wall; openings: Opening[]; wallColor?: string }) {
   const length = dist(wall.start, wall.end);
   if (length < 0.01) return null;
   const cx = (wall.start.x + wall.end.x) / 2;
@@ -70,6 +71,7 @@ function WallMesh({ wall, openings }: { wall: Wall; openings: Opening[] }) {
   const rotY = -angle(wall.start, wall.end);
   const style = STATUS_3D[wall.status];
   const boxes = wallBoxes(length, wall.height, openings);
+  const finalColor = wallColor && wall.status === "existing" ? wallColor : style.color;
 
   return (
     <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
@@ -77,7 +79,7 @@ function WallMesh({ wall, openings }: { wall: Wall; openings: Opening[] }) {
         <mesh key={i} position={[b.localX, b.y, 0]} castShadow receiveShadow>
           <boxGeometry args={[b.w, b.h, wall.thickness]} />
           <meshStandardMaterial
-            color={style.color}
+            color={finalColor}
             transparent={style.opacity < 1}
             opacity={style.opacity}
             roughness={wall.material === "concrete" ? 0.95 : wall.material === "brick" ? 0.88 : 0.80}
@@ -89,6 +91,14 @@ function WallMesh({ wall, openings }: { wall: Wall; openings: Opening[] }) {
   );
 }
 
+const FLOOR_COLORS: Record<string, string> = {
+  tile: "#d4cfc8",
+  wood: "#c9a96e",
+  carpet: "#8a9070",
+  stone: "#b8b0a4",
+  concrete: "#a8a8a8",
+};
+
 function RoomFloor3D({ room }: { room: Room }) {
   const shape = useMemo(() => {
     const s = new THREE.Shape();
@@ -97,16 +107,34 @@ function RoomFloor3D({ room }: { room: Room }) {
     return s;
   }, [room.polygon]);
 
+  const floorColor = room.floorMaterial
+    ? FLOOR_COLORS[room.floorMaterial]
+    : (room.color ?? "#e6d6bf");
+
   return (
     <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} receiveShadow>
       <shapeGeometry args={[shape]} />
       <meshStandardMaterial
-        color={room.color ?? "#e6d6bf"}
-        transparent
-        opacity={0.6}
-        roughness={1}
+        color={floorColor}
+        roughness={room.floorMaterial === "tile" ? 0.3 : room.floorMaterial === "wood" ? 0.65 : 0.9}
         side={THREE.DoubleSide}
       />
+    </mesh>
+  );
+}
+
+function RoomCeiling3D({ room, height }: { room: Room; height: number }) {
+  const shape = useMemo(() => {
+    const s = new THREE.Shape();
+    room.polygon.forEach((p, i) => (i ? s.lineTo(p.x, p.y) : s.moveTo(p.x, p.y)));
+    s.closePath();
+    return s;
+  }, [room.polygon]);
+
+  return (
+    <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, height - 0.01, 0]} receiveShadow>
+      <shapeGeometry args={[shape]} />
+      <meshStandardMaterial color="#f4f0e8" roughness={0.95} side={THREE.DoubleSide} />
     </mesh>
   );
 }
@@ -418,17 +446,49 @@ function LevelScene({
     return m;
   }, [openings]);
 
+
   const elev = level.elevation;
+
+  // Bepaal wandkleur: gebruik de wandkleur van de aangrenzende ruimte.
+  // Een muur hoort bij een ruimte als beide eindpunten dicht bij een
+  // polygon-zijde van die ruimte liggen.
+  const wallColorById = useMemo(() => {
+    const m = new Map<string, string>();
+    const NEAR = 0.35; // m
+    const onRoomEdge = (p: Point, poly: Point[]) => {
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i];
+        const b = poly[(i + 1) % poly.length];
+        if (projectOnSegment(p, a, b).dist < NEAR) return true;
+      }
+      return false;
+    };
+    for (const w of walls) {
+      for (const r of rooms) {
+        if (!r.wallColor || r.polygon.length < 3) continue;
+        if (onRoomEdge(w.start, r.polygon) && onRoomEdge(w.end, r.polygon)) {
+          m.set(w.id, r.wallColor);
+          break;
+        }
+      }
+    }
+    return m;
+  }, [walls, rooms]);
 
   return (
     <group position={[0, elev, 0]}>
       {visibleLayers.rooms &&
         rooms
           .filter((r) => r.polygon.length >= 3)
-          .map((r) => <RoomFloor3D key={r.id} room={r} />)}
+          .map((r) => (
+            <group key={r.id}>
+              <RoomFloor3D room={r} />
+              <RoomCeiling3D room={r} height={level.height} />
+            </group>
+          ))}
       {visibleLayers.structure &&
         walls.map((w) => (
-          <WallMesh key={w.id} wall={w} openings={openingsByWall.get(w.id) ?? []} />
+          <WallMesh key={w.id} wall={w} openings={openingsByWall.get(w.id) ?? []} wallColor={wallColorById.get(w.id)} />
         ))}
       {visibleLayers.electrical &&
         electrical.map((it) => <ElectricalMarker key={it.id} item={it} />)}
@@ -467,6 +527,8 @@ export function Scene3D() {
   const visibleLayers = useEditor((s) => s.visibleLayers);
   const project = useProject();
   const editMode = use3DEdit((s) => s.mode);
+  const [walkMode, setWalkMode] = useState(false);
+  const [dayMode, setDayMode] = useState(true);
 
   const levels = useLiveQuery(
     async () => {
@@ -485,56 +547,103 @@ export function Scene3D() {
   const center = pts.length ? polygonCentroid(pts) : { x: 0, y: 0 };
   const maxElev = levels.length ? levels[levels.length - 1].elevation + levels[levels.length - 1].height : 8;
 
+  const groundFloorElev = levels[0]?.elevation ?? 0;
+
   return (
-    <Canvas
-      shadows
-      camera={{ position: [center.x + maxElev, maxElev * 0.9, center.y + maxElev], fov: 50 }}
-      gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}
-      style={{ cursor: editMode !== "none" ? "crosshair" : "grab" }}
-    >
-      <color attach="background" args={["#eceadf"]} />
-      <ambientLight intensity={0.45} />
-      <hemisphereLight args={["#f0ecd8", "#8a9070", 0.6]} />
-      <directionalLight
-        position={[12, 20, 8]}
-        intensity={1.8}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-        shadow-camera-far={60}
-        shadow-camera-left={-20}
-        shadow-camera-right={20}
-        shadow-camera-top={20}
-        shadow-camera-bottom={-20}
-      />
-      <directionalLight position={[-8, 12, -6]} intensity={0.4} color="#d4e8f0" />
+    <div className="relative h-full w-full">
+      <Canvas
+        shadows
+        camera={{
+          position: [center.x + maxElev, maxElev * 0.9, center.y + maxElev],
+          fov: walkMode ? 75 : 50,
+        }}
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: dayMode ? 1.1 : 0.6 }}
+        style={{ cursor: editMode !== "none" ? "crosshair" : walkMode ? "none" : "grab" }}
+      >
+        {dayMode ? (
+          <Sky sunPosition={[100, 20, 100]} turbidity={8} rayleigh={0.5} />
+        ) : (
+          <color attach="background" args={["#0a0e1a"]} />
+        )}
 
-      {/* Vloer */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, 0, center.y]} receiveShadow>
-        <planeGeometry args={[80, 80]} />
-        <meshStandardMaterial color="#d8d0c0" roughness={0.95} />
-      </mesh>
-      <Grid
-        position={[center.x, 0.01, center.y]}
-        args={[80, 80]}
-        cellSize={1}
-        cellColor="#c7c0b0"
-        sectionSize={5}
-        sectionColor="#a8a094"
-        fadeDistance={60}
-        infiniteGrid
-      />
+        <ambientLight intensity={dayMode ? 0.45 : 0.15} />
+        <hemisphereLight args={dayMode ? ["#f0ecd8", "#8a9070", 0.6] : ["#1a2040", "#0a0e0a", 0.3]} />
+        <directionalLight
+          position={[12, 20, 8]}
+          intensity={dayMode ? 1.8 : 0.1}
+          castShadow
+          shadow-mapSize={[2048, 2048]}
+          shadow-camera-far={60}
+          shadow-camera-left={-20}
+          shadow-camera-right={20}
+          shadow-camera-top={20}
+          shadow-camera-bottom={-20}
+          color={dayMode ? "#fffae8" : "#3060c0"}
+        />
+        {!dayMode && <pointLight position={[center.x, groundFloorElev + 2.2, center.y]} intensity={2} distance={12} color="#ffd080" />}
+        <directionalLight position={[-8, 12, -6]} intensity={0.4} color="#d4e8f0" />
 
-      {levels.map((level) => (
-        <LevelScene key={level.id} level={level} visibleLayers={visibleLayers} />
-      ))}
+        {/* Vloer */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, 0, center.y]} receiveShadow>
+          <planeGeometry args={[80, 80]} />
+          <meshStandardMaterial color="#d8d0c0" roughness={0.95} />
+        </mesh>
+        <Grid
+          position={[center.x, 0.01, center.y]}
+          args={[80, 80]}
+          cellSize={1}
+          cellColor="#c7c0b0"
+          sectionSize={5}
+          sectionColor="#a8a094"
+          fadeDistance={60}
+          infiniteGrid
+        />
 
-      <OrbitControls
-        target={[center.x, maxElev / 2, center.y]}
-        enableDamping
-        maxPolarAngle={Math.PI / 2.05}
-        minDistance={2}
-        maxDistance={80}
-      />
-    </Canvas>
+        {levels.map((level) => (
+          <LevelScene key={level.id} level={level} visibleLayers={visibleLayers} />
+        ))}
+
+        {walkMode ? (
+          <WalkthroughMode
+            startPosition={[center.x, groundFloorElev + 1.65, center.y]}
+            onExit={() => setWalkMode(false)}
+          />
+        ) : (
+          <OrbitControls
+            target={[center.x, maxElev / 2, center.y]}
+            enableDamping
+            maxPolarAngle={Math.PI / 2.05}
+            minDistance={2}
+            maxDistance={80}
+          />
+        )}
+      </Canvas>
+
+      {/* 3D controls overlay */}
+      <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-col gap-2">
+        <button
+          className="pointer-events-auto hidden rounded-xl border border-white/20 bg-ink-900/80 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur hover:bg-ink-900 md:flex items-center gap-1.5"
+          onClick={() => setWalkMode((w) => !w)}
+          title={walkMode ? "Terug naar overzicht" : "Door het huis lopen (WASD + muis)"}
+        >
+          {walkMode ? "↺ Orbit" : "▶ Doorlopen"}
+        </button>
+        <button
+          className="pointer-events-auto rounded-xl border border-white/20 bg-ink-900/80 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur hover:bg-ink-900"
+          onClick={() => setDayMode((d) => !d)}
+          title={dayMode ? "Avondlicht" : "Daglicht"}
+        >
+          {dayMode ? "🌙" : "☀️"}
+        </button>
+      </div>
+
+      {walkMode && (
+        <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center">
+          <div className="rounded-full bg-ink-900/70 px-4 py-1.5 text-xs text-white/80 backdrop-blur">
+            WASD bewegen · muis kijken · Shift = sprinten · Esc = stoppen
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

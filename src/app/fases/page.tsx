@@ -3,18 +3,21 @@
 // Fasering: de juiste volgorde met afhankelijkheden + taken per fase.
 
 import { useState } from "react";
-import { Lock, Check, Plus, ListPlus } from "lucide-react";
-import { useProject, usePhases, useTasks } from "@/lib/hooks";
+import { Lock, Check, Plus, ListPlus, ListChecks, CalendarRange } from "lucide-react";
+import { useProject, usePhases, useTasks, useProjectRooms } from "@/lib/hooks";
 import { analyzePhases, type PhaseStatusInfo } from "@/lib/phases";
 import { create, update, remove } from "@/lib/db/repo";
-import type { Phase, PhaseStatus, TaskItem } from "@/lib/domain/types";
+import type { Phase, PhaseStatus, Room, TaskItem } from "@/lib/domain/types";
 import { PHASE_STATUS_LABEL, PHASE_TASK_TEMPLATES } from "@/lib/domain/constants";
+import { GanttChart } from "@/components/fases/GanttChart";
 
 export default function FasesPage() {
   const project = useProject();
   const phases = usePhases(project?.id) ?? [];
   const tasks = useTasks(project?.id) ?? [];
+  const rooms = useProjectRooms(project?.id) ?? [];
   const analysis = analyzePhases(phases);
+  const [tab, setTab] = useState<"taken" | "tijdlijn">("taken");
 
   const hasAnyTasks = tasks.length > 0;
 
@@ -47,23 +50,64 @@ export default function FasesPage() {
           </p>
         </header>
 
-        {!hasAnyTasks && (
+        {/* Tabs */}
+        <div className="flex gap-1 rounded-card bg-paper-sunken p-1">
           <button
-            onClick={generateAll}
-            className="flex w-full items-center justify-center gap-2 rounded-card border border-accent/40 bg-accent-soft py-3 text-sm font-medium text-accent"
+            onClick={() => setTab("taken")}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-colors ${
+              tab === "taken" ? "bg-paper-raised text-ink-900 shadow-sm" : "text-ink-500"
+            }`}
           >
-            <ListPlus size={18} /> Genereer volledig stappenplan
+            <ListChecks size={16} /> Taken
           </button>
-        )}
+          <button
+            onClick={() => setTab("tijdlijn")}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-colors ${
+              tab === "tijdlijn" ? "bg-paper-raised text-ink-900 shadow-sm" : "text-ink-500"
+            }`}
+          >
+            <CalendarRange size={16} /> Tijdlijn
+          </button>
+        </div>
 
-        {analysis.map((info) => (
-          <PhaseCard
-            key={info.phase.id}
-            info={info}
-            tasks={tasks.filter((t) => t.phaseId === info.phase.id)}
-            projectId={project?.id ?? ""}
-          />
-        ))}
+        {tab === "taken" ? (
+          <>
+            {!hasAnyTasks && (
+              <button
+                onClick={generateAll}
+                className="flex w-full items-center justify-center gap-2 rounded-card border border-accent/40 bg-accent-soft py-3 text-sm font-medium text-accent"
+              >
+                <ListPlus size={18} /> Genereer volledig stappenplan
+              </button>
+            )}
+
+            {analysis.map((info) => (
+              <PhaseCard
+                key={info.phase.id}
+                info={info}
+                tasks={tasks.filter((t) => t.phaseId === info.phase.id)}
+                projectId={project?.id ?? ""}
+                rooms={rooms}
+              />
+            ))}
+          </>
+        ) : (
+          <div className="space-y-2">
+            {phases.length === 0 ? (
+              <p className="py-8 text-center text-sm text-ink-400">
+                Nog geen fases om te plannen.
+              </p>
+            ) : (
+              <>
+                <p className="px-1 text-xs text-ink-400">
+                  Planning op basis van afhankelijkheden. Sleep de rechterrand van een balk
+                  om de duur aan te passen.
+                </p>
+                <GanttChart phases={phases} projectStartDate={project?.startDate} />
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -73,10 +117,12 @@ function PhaseCard({
   info,
   tasks,
   projectId,
+  rooms,
 }: {
   info: PhaseStatusInfo;
   tasks: TaskItem[];
   projectId: string;
+  rooms: Room[];
 }) {
   const { phase, blocked, blockedBy, ready } = info;
   const [newTask, setNewTask] = useState("");
@@ -187,6 +233,27 @@ function PhaseCard({
             >
               {t.title}
             </span>
+            {rooms.length > 0 && (
+              <select
+                value={t.roomId ?? ""}
+                onChange={(e) =>
+                  update<TaskItem>("tasks", t.id, { roomId: e.target.value || undefined })
+                }
+                className={`max-w-24 shrink-0 truncate rounded-md border-0 px-1.5 py-0.5 text-[10px] ${
+                  t.roomId
+                    ? "bg-blueprint-soft font-medium text-blueprint"
+                    : "bg-paper-sunken text-ink-400"
+                }`}
+                title="Koppel aan ruimte (voor voortgang op de plattegrond)"
+              >
+                <option value="">— ruimte</option>
+                {rooms.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <button
               onClick={() => remove("tasks", t.id)}
               className="text-xs text-ink-300 hover:text-danger"

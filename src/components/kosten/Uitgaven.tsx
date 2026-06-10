@@ -2,7 +2,7 @@
 
 // Uitgaven boeken en bekijken, per categorie.
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { useProject, useExpenses, usePhases } from "@/lib/hooks";
 import { create, remove } from "@/lib/db/repo";
@@ -18,11 +18,11 @@ export function Uitgaven() {
 
   const total = expenses.reduce((s, e) => s + e.amount, 0);
 
-  const byCategory = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const e of expenses) map.set(e.category, (map.get(e.category) ?? 0) + e.amount);
-    return [...map.entries()].sort((a, b) => b[1] - a[1]);
-  }, [expenses]);
+  // Geen handmatige useMemo: React Compiler memoïseert dit zelf en struikelde
+  // over de instabiele referentie uit de live query.
+  const map = new Map<string, number>();
+  for (const e of expenses) map.set(e.category, (map.get(e.category) ?? 0) + e.amount);
+  const byCategory = [...map.entries()].sort((a, b) => b[1] - a[1]);
 
   return (
     <div className="space-y-4">

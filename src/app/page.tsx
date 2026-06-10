@@ -4,7 +4,7 @@
 
 import Link from "next/link";
 import { Suspense } from "react";
-import { LayoutTemplate, Box, Receipt, ListChecks, FileText, ArrowRight, TrendingUp } from "lucide-react";
+import { LayoutTemplate, Box, Receipt, ListChecks, FileText, Frame, Settings, ArrowRight, TrendingUp } from "lucide-react";
 import { useProject, usePhases, useExpenses, useBudget } from "@/lib/hooks";
 import { analyzePhases, phaseProgress } from "@/lib/phases";
 import { formatEuro } from "@/lib/format";
@@ -86,12 +86,14 @@ function DashboardContent() {
         <h2 className="mb-2 px-0.5 text-[11px] font-semibold uppercase tracking-widest text-ink-400">
           Ga naar
         </h2>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-4">
           <QuickLink href="/plattegrond" label="Plattegrond" icon={LayoutTemplate} />
           <QuickLink href="/3d" label="3D" icon={Box} />
-          <QuickLink href="/kosten" label="Kosten" icon={Receipt} />
+          <QuickLink href="/aanzichten" label="Aanzichten" icon={Frame} />
           <QuickLink href="/fases" label="Fases" icon={ListChecks} />
+          <QuickLink href="/kosten" label="Kosten" icon={Receipt} />
           <QuickLink href="/werkblad" label="Werkblad" icon={FileText} />
+          <QuickLink href="/instellingen" label="Instellingen" icon={Settings} />
         </div>
       </section>
 
