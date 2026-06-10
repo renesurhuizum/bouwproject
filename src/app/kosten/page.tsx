@@ -6,12 +6,14 @@ import { useState } from "react";
 import { Uitgaven } from "@/components/kosten/Uitgaven";
 import { Begroting } from "@/components/kosten/Begroting";
 import { Materiaal } from "@/components/kosten/Materiaal";
+import { Hoeveelheden } from "@/components/kosten/Hoeveelheden";
 
-type Tab = "uitgaven" | "begroting" | "materiaal";
+type Tab = "uitgaven" | "begroting" | "hoeveelheden" | "materiaal";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "uitgaven", label: "Uitgaven" },
   { key: "begroting", label: "Begroting" },
+  { key: "hoeveelheden", label: "Hoeveelheden" },
   { key: "materiaal", label: "Materiaal" },
 ];
 
@@ -41,6 +43,7 @@ export default function KostenPage() {
 
         {tab === "uitgaven" && <Uitgaven />}
         {tab === "begroting" && <Begroting />}
+        {tab === "hoeveelheden" && <Hoeveelheden />}
         {tab === "materiaal" && <Materiaal />}
       </div>
     </div>

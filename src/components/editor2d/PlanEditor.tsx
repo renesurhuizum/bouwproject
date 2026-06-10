@@ -17,9 +17,11 @@ import type {
   Room,
   Furniture,
   PlumbingType,
+  Level,
 } from "@/lib/domain/types";
 import { create, remove, update } from "@/lib/db/repo";
 import { getDB } from "@/lib/db/db";
+import { useLiveQuery } from "dexie-react-hooks";
 import { useHistory } from "@/lib/history";
 import { useEditor, type SelKind } from "@/lib/store/editor";
 import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac } from "@/lib/hooks";
@@ -29,7 +31,7 @@ import {
   OPENING_DEFAULTS,
   OPENING_SNAP_M,
 } from "@/lib/domain/constants";
-import { dist, snapToGrid, snapToPoints, projectOnSegment } from "@/lib/geometry";
+import { dist, snapToGrid, snapToPoints, projectOnSegment, constrainToAngle } from "@/lib/geometry";
 import { GRID_SNAP_M } from "@/lib/store/editor";
 import { formatLength } from "@/lib/format";
 import {
@@ -44,7 +46,7 @@ import { BgImageLayer } from "./BgImageLayer";
 import { GridLayer } from "./GridLayer";
 import { WallsLayer } from "./WallsLayer";
 import { OpeningsLayer } from "./OpeningsLayer";
-import { RoomsLayer } from "./RoomsLayer";
+import { RoomsLayer, type RoomPhaseStatus } from "./RoomsLayer";
 import { ElectricalLayer } from "./ElectricalLayer";
 import { PlumbingLayer } from "./PlumbingLayer";
 import { FurnitureLayer } from "./FurnitureLayer";
@@ -95,6 +97,41 @@ export function PlanEditor() {
   const [divideRect, setDivideRect] = useState<LayoutRect | null>(null);
   const divideStartRef = useRef<Point | null>(null);
 
+  // Shift-toets tracking voor orthogonaal tekenen
+  const shiftRef = useRef(false);
+  // Wall length editing overlay
+  const [editingWallId, setEditingWallId] = useState<string | null>(null);
+  const [editLengthValue, setEditLengthValue] = useState("");
+  const lengthInputRef = useRef<HTMLInputElement>(null);
+
+  // Active level data voor Bouwbesluit validatie
+  const activeLevel = useLiveQuery(
+    async () => (activeLevelId ? await getDB().levels.get(activeLevelId) : null),
+    [activeLevelId],
+  ) as Level | null | undefined;
+
+  // Fase-overlay: status per ruimte op basis van taken met roomId.
+  const phaseOverlay = useEditor((s) => s.phaseOverlay);
+  const phaseStatusByRoom = useLiveQuery(
+    async () => {
+      if (!phaseOverlay) return null;
+      const tasks = (await getDB().tasks.toArray()).filter((t) => !t.deleted && t.roomId);
+      const m = new Map<string, RoomPhaseStatus>();
+      const byRoom = new Map<string, { total: number; done: number }>();
+      for (const t of tasks) {
+        const cur = byRoom.get(t.roomId!) ?? { total: 0, done: 0 };
+        cur.total += 1;
+        if (t.done) cur.done += 1;
+        byRoom.set(t.roomId!, cur);
+      }
+      for (const [roomId, { total, done }] of byRoom) {
+        m.set(roomId, done === total ? "done" : done > 0 ? "in-progress" : "todo");
+      }
+      return m;
+    },
+    [phaseOverlay],
+  ) as Map<string, RoomPhaseStatus> | null | undefined;
+
   // Gebaar-refs.
   const pointers = useRef<Map<number, Point>>(new Map());
   const gesture = useRef<{ lastDist?: number; lastCenter?: Point }>({});
@@ -102,6 +139,15 @@ export function PlanEditor() {
   const tapRef = useRef<
     { id: number; start: Point; time: number; moved: boolean; onStage: boolean } | null
   >(null);
+
+  // Shift-toets bijhouden voor orthogonaal tekenen.
+  useEffect(() => {
+    const onDown = (e: KeyboardEvent) => { if (e.key === "Shift") shiftRef.current = true; };
+    const onUp = (e: KeyboardEvent) => { if (e.key === "Shift") shiftRef.current = false; };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    return () => { window.removeEventListener("keydown", onDown); window.removeEventListener("keyup", onUp); };
+  }, []);
 
   // Containergrootte volgen.
   useEffect(() => {
@@ -212,7 +258,40 @@ export function PlanEditor() {
   function snapPoint(m: Point): Point {
     const near = snapToPoints(m, endpoints, pxToMeters(SNAP_RADIUS_PX, view));
     setSnapTarget(near);
-    return near ?? snapToGrid(m, GRID_SNAP_M[gridSnap]);
+    let result = near ?? snapToGrid(m, GRID_SNAP_M[gridSnap]);
+    // Shift = ortho-constraint: snap naar 0°/45°/90° vanuit beginpunt
+    if (shiftRef.current && draftStart) {
+      result = constrainToAngle(result, draftStart, 45);
+    }
+    return result;
+  }
+
+  function startEditLength(wallId: string) {
+    const wall = walls.find((w) => w.id === wallId);
+    if (!wall) return;
+    const len = Math.round(dist(wall.start, wall.end) * 100); // cm
+    setEditingWallId(wallId);
+    setEditLengthValue(String(len));
+    setTimeout(() => { lengthInputRef.current?.select(); }, 50);
+  }
+
+  async function applyEditLength() {
+    if (!editingWallId) return;
+    const wall = walls.find((w) => w.id === editingWallId);
+    if (!wall) { setEditingWallId(null); return; }
+    const cm = parseFloat(editLengthValue);
+    if (!isNaN(cm) && cm >= 1) {
+      const newLenM = cm / 100;
+      const lenM = dist(wall.start, wall.end);
+      if (lenM > 0) {
+        const dx = (wall.end.x - wall.start.x) / lenM;
+        const dy = (wall.end.y - wall.start.y) / lenM;
+        await update("walls", wall.id, {
+          end: { x: wall.start.x + dx * newLenM, y: wall.start.y + dy * newLenM },
+        });
+      }
+    }
+    setEditingWallId(null);
   }
 
   async function handleMoveEndpoint(wallId: string, which: "start" | "end", screenX: number, screenY: number) {
@@ -556,6 +635,9 @@ export function PlanEditor() {
               rooms={rooms}
               selectedId={selection?.kind === "room" ? selection.id : null}
               onSelect={(id) => onSelectEntity("room", id)}
+              walls={walls}
+              levels={activeLevel ? [activeLevel] : []}
+              phaseStatusByRoom={phaseOverlay ? (phaseStatusByRoom ?? new Map()) : null}
             />
           )}
 
@@ -566,6 +648,7 @@ export function PlanEditor() {
               selectedId={selection?.kind === "wall" ? selection.id : null}
               onSelect={(id) => onSelectEntity("wall", id)}
               onMoveEndpoint={handleMoveEndpoint}
+              onEditLength={tool === "select" ? startEditLength : undefined}
             />
           )}
 
@@ -746,6 +829,37 @@ export function PlanEditor() {
           </Layer>
         </Stage>
       )}
+
+      {/* Wandlengte bewerken overlay */}
+      {editingWallId && (() => {
+        const wall = walls.find((w) => w.id === editingWallId);
+        if (!wall) return null;
+        const mid = metersToScreen(
+          { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 },
+          view,
+        );
+        return (
+          <div
+            className="pointer-events-auto absolute z-40 flex items-center gap-1.5 rounded-xl border border-accent bg-paper-raised/98 px-2.5 py-1.5 shadow-xl"
+            style={{ left: mid.x - 60, top: mid.y - 48 }}
+          >
+            <input
+              ref={lengthInputRef}
+              type="number"
+              value={editLengthValue}
+              onChange={(e) => setEditLengthValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void applyEditLength();
+                if (e.key === "Escape") setEditingWallId(null);
+              }}
+              onBlur={() => void applyEditLength()}
+              className="tabular w-20 rounded-md border border-line bg-paper px-2 py-1 text-right text-sm text-ink-900 focus:outline-none focus:ring-1 focus:ring-accent"
+              autoFocus
+            />
+            <span className="text-xs text-ink-500">cm</span>
+          </div>
+        );
+      })()}
 
       {/* Leiding-tekenhulp */}
       {tool === "draw-pipe" && (

@@ -4,11 +4,11 @@
 // status, stippellijn bij sloop, en een markering bij dragende muren.
 // Bij geselecteerde muur: draggable eindpunt-handles zodat je muren kunt aanpassen.
 
-import { Fragment } from "react";
+import React, { Fragment } from "react";
 import { Layer, Line, Circle, Label, Tag, Text } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Wall } from "@/lib/domain/types";
-import { dist } from "@/lib/geometry";
+import { dist, getCornerFillPoints } from "@/lib/geometry";
 import { formatLength } from "@/lib/format";
 import { metersToScreen, type ViewState } from "./viewport";
 
@@ -18,6 +18,7 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onMoveEndpoint?: (wallId: string, which: "start" | "end", screenX: number, screenY: number) => void;
+  onEditLength?: (wallId: string) => void;
 }
 
 // Bereken de 4 hoekpunten van een muur als gevulde rechthoek in wereld-meters,
@@ -56,9 +57,44 @@ const WALL_STROKE: Record<string, string> = {
   demolish:  "#dc2626",
 };
 
-export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint }: Props) {
+// Compute corner fill polygons for all junction points.
+function buildCornerFills(walls: Wall[], view: ViewState): React.ReactNode[] {
+  const byEndpoint = new Map<string, Wall[]>();
+  const key = (p: { x: number; y: number }) =>
+    `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`;
+  for (const w of walls) {
+    const sk = key(w.start);
+    const ek = key(w.end);
+    byEndpoint.set(sk, [...(byEndpoint.get(sk) ?? []), w]);
+    byEndpoint.set(ek, [...(byEndpoint.get(ek) ?? []), w]);
+  }
+  const fills: React.ReactNode[] = [];
+  let idx = 0;
+  for (const [, connected] of byEndpoint) {
+    if (connected.length < 2) continue;
+    // Use first wall's endpoint that matches (start or end)
+    const ep = connected[0].start;
+    const pts = getCornerFillPoints(ep, connected);
+    if (pts.length < 3) continue;
+    const screenPts = pts.flatMap((p) => {
+      const s = metersToScreen(p, view);
+      return [s.x, s.y];
+    });
+    // Color: use the "most dominant" wall fill color (first non-demolish)
+    const dominantWall = connected.find((w) => w.status !== "demolish") ?? connected[0];
+    const fill = WALL_FILL[dominantWall.status] ?? "#d6d0c4";
+    fills.push(
+      <Line key={`cf-${idx++}`} points={screenPts} closed fill={fill} stroke="none" strokeWidth={0} listening={false} />,
+    );
+  }
+  return fills;
+}
+
+export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint, onEditLength }: Props) {
   return (
     <Layer>
+      {/* Corner fill patches — rendered BEFORE walls so walls overlay on top */}
+      {buildCornerFills(walls, view)}
       {walls.map((w) => {
         const polyPts = wallPolygonPoints(w, view);
         if (polyPts.length === 0) return null;
@@ -164,15 +200,27 @@ export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint }
               </>
             )}
 
-            {/* Lengte-label bij niet-geselecteerde muren */}
+            {/* Lengte-label bij niet-geselecteerde muren — klikbaar om te bewerken */}
             {lenPx >= 34 && !selected && (
-              <Label x={mid.x} y={mid.y} listening={false} opacity={0.96}>
-                <Tag fill="#fbfaf6" stroke="#ddd7ca" strokeWidth={1} cornerRadius={3} />
+              <Label
+                x={mid.x}
+                y={mid.y}
+                opacity={0.96}
+                onClick={() => onEditLength?.(w.id)}
+                onTap={() => onEditLength?.(w.id)}
+                style={{ cursor: "pointer" }}
+              >
+                <Tag
+                  fill={onEditLength ? "#e8f0fe" : "#fbfaf6"}
+                  stroke={onEditLength ? "#93c5fd" : "#ddd7ca"}
+                  strokeWidth={1}
+                  cornerRadius={3}
+                />
                 <Text
                   text={formatLength(lenM)}
                   fontSize={11}
                   fontFamily="monospace"
-                  fill="#1c1917"
+                  fill={onEditLength ? "#1d4ed8" : "#1c1917"}
                   padding={3}
                 />
               </Label>
