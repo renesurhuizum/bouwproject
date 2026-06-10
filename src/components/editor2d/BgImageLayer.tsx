@@ -20,10 +20,8 @@ export function BgImageLayer({ levelId, view }: Props) {
   const [img, setImg] = useState<HTMLImageElement | null>(null);
 
   useEffect(() => {
-    if (!level?.bgImageBlob) {
-      setImg(null);
-      return;
-    }
+    // Geen blob → cleanup van de vorige run heeft img al op null gezet.
+    if (!level?.bgImageBlob) return;
     const url = URL.createObjectURL(level.bgImageBlob);
     const image = new window.Image();
     image.onload = () => setImg(image);

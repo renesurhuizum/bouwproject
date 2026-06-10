@@ -103,6 +103,43 @@ function projectItems(
   return items.sort((a, b) => a.offset - b.offset);
 }
 
+// Maatlijn met eindstreepjes en label (NEN-stijl).
+function DimLine({ x1, y1, x2, y2, text, outside = false }: {
+  x1: number; y1: number; x2: number; y2: number; text: string; outside?: boolean;
+}) {
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  const TICK = 6;
+  const isH = Math.abs(y1 - y2) < 2;
+  return (
+    <g stroke="#ea580c" strokeWidth={0.8} fill="none">
+      <line x1={x1} y1={y1} x2={x2} y2={y2} />
+      {isH ? (
+        <>
+          <line x1={x1} y1={y1 - TICK} x2={x1} y2={y1 + TICK} />
+          <line x1={x2} y1={y2 - TICK} x2={x2} y2={y2 + TICK} />
+        </>
+      ) : (
+        <>
+          <line x1={x1 - TICK} y1={y1} x2={x1 + TICK} y2={y1} />
+          <line x1={x2 - TICK} y1={y2} x2={x2 + TICK} y2={y2} />
+        </>
+      )}
+      <text
+        x={mx + (isH ? 0 : (outside ? -20 : 4))}
+        y={my + (isH ? -4 : 3)}
+        textAnchor={isH ? "middle" : "start"}
+        fontSize={9}
+        fontFamily="monospace"
+        fill="#ea580c"
+        stroke="none"
+      >
+        {text}
+      </text>
+    </g>
+  );
+}
+
 export function WallElevation({
   wall,
   openings,
@@ -129,43 +166,6 @@ export function WallElevation({
 
   // Filter openings op deze muur
   const wallOpenings = openings.filter((o) => o.wallId === wall.id);
-
-  // Maatlijn helper
-  const DimLine = ({ x1, y1, x2, y2, text, outside = false }: {
-    x1: number; y1: number; x2: number; y2: number; text: string; outside?: boolean;
-  }) => {
-    const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2;
-    const TICK = 6;
-    const isH = Math.abs(y1 - y2) < 2;
-    return (
-      <g stroke="#ea580c" strokeWidth={0.8} fill="none">
-        <line x1={x1} y1={y1} x2={x2} y2={y2} />
-        {isH ? (
-          <>
-            <line x1={x1} y1={y1 - TICK} x2={x1} y2={y1 + TICK} />
-            <line x1={x2} y1={y2 - TICK} x2={x2} y2={y2 + TICK} />
-          </>
-        ) : (
-          <>
-            <line x1={x1 - TICK} y1={y1} x2={x1 + TICK} y2={y1} />
-            <line x1={x2 - TICK} y1={y2} x2={x2 + TICK} y2={y2} />
-          </>
-        )}
-        <text
-          x={mx + (isH ? 0 : (outside ? -20 : 4))}
-          y={my + (isH ? -4 : 3)}
-          textAnchor={isH ? "middle" : "start"}
-          fontSize={9}
-          fontFamily="monospace"
-          fill="#ea580c"
-          stroke="none"
-        >
-          {text}
-        </text>
-      </g>
-    );
-  };
 
   return (
     <svg

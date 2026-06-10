@@ -45,8 +45,9 @@ export function WalkthroughMode({ startPosition, onExit }: Props) {
     };
   }, [onExit]);
 
-  // Beweging per frame
-  useFrame((_, delta) => {
+  // Beweging per frame — camera via frame-state zodat React Compiler
+  // geen render-variabele ziet muteren.
+  useFrame((state, delta) => {
     const controls = controlsRef.current;
     if (!controls?.isLocked) return;
     const keys = keysRef.current;
@@ -61,7 +62,7 @@ export function WalkthroughMode({ startPosition, onExit }: Props) {
 
     // Hoogte vastzetten op ooghoogte (geen vliegen)
     const floorY = startPosition[1];
-    if (camera.position.y !== floorY) camera.position.y = floorY;
+    if (state.camera.position.y !== floorY) state.camera.position.y = floorY;
   });
 
   return (

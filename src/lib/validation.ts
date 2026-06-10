@@ -52,6 +52,25 @@ export function validateElectrical(items: ElectricalItem[]): ValidationIssue[] {
   return issues;
 }
 
+// ── Constructieve veiligheid: dragende muren ─────────────────────────────────
+
+export function validateWalls(walls: Wall[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  for (const wall of walls) {
+    if (wall.loadBearing && wall.status === "demolish") {
+      issues.push({
+        severity: "error",
+        message:
+          "Dragende muur staat gepland voor sloop — laat eerst een constructeur rekenen (staalbalk/portaal) en check vergunningsplicht bij het Omgevingsloket",
+        entityId: wall.id,
+      });
+    }
+  }
+
+  return issues;
+}
+
 // ── Bouwbesluit 2012 ruimte-controles ─────────────────────────────────────────
 
 const FUNC_WOONRUIMTE = ["woonkamer", "slaapkamer", "kamer", "woon", "slaap", "bedroom", "living"];

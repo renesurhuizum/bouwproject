@@ -5,9 +5,9 @@
 
 import { useMemo, useState } from "react";
 import { AlertTriangle, Info, ShieldCheck, ChevronDown, ChevronUp } from "lucide-react";
-import { useProject, useLevels, useRooms, useElectrical } from "@/lib/hooks";
+import { useProject, useLevels, useRooms, useElectrical, useWalls } from "@/lib/hooks";
 import { useEditor } from "@/lib/store/editor";
-import { validateElectrical, validateRooms, type ValidationIssue } from "@/lib/validation";
+import { validateElectrical, validateRooms, validateWalls, type ValidationIssue } from "@/lib/validation";
 
 export function ComplianceBanner() {
   const project = useProject();
@@ -17,15 +17,17 @@ export function ComplianceBanner() {
 
   const rooms = useRooms(level?.id) ?? [];
   const electrical = useElectrical(level?.id) ?? [];
+  const walls = useWalls(level?.id) ?? [];
   const [open, setOpen] = useState(false);
 
   const issues = useMemo<ValidationIssue[]>(() => {
     if (!level) return [];
     return [
+      ...validateWalls(walls),
       ...validateElectrical(electrical),
       ...validateRooms(rooms, [level]),
     ];
-  }, [electrical, rooms, level]);
+  }, [walls, electrical, rooms, level]);
 
   if (issues.length === 0) return null;
 

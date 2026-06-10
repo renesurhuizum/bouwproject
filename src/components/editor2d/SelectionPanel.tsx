@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Camera, Trash2, X } from "lucide-react";
 import { getDB } from "@/lib/db/db";
@@ -208,6 +208,14 @@ export function SelectionPanel() {
                 {wall.loadBearing ? "Ja" : "Nee"}
               </button>
             </Row>
+
+            {wall.loadBearing && wall.status === "demolish" && (
+              <div className="rounded-lg border border-danger/40 bg-danger/10 px-2.5 py-2 text-[11px] leading-snug text-danger">
+                <strong>Let op:</strong> dragende muur slopen vereist een constructeursberekening
+                (staalbalk of portaal) en is vaak vergunningsplichtig. Check het Omgevingsloket
+                vóór je begint.
+              </div>
+            )}
 
             <DeleteButton onClick={() => removeAnd("walls", wall.id, () => select(null))} />
           </div>
@@ -664,13 +672,16 @@ function WallLengthField({ wall }: { wall: Wall }) {
 }
 
 function PhotoThumb({ photo, onClick }: { photo: Photo; onClick: () => void }) {
-  const [src, setSrc] = useState<string | null>(null);
+  // Object-URL tijdens render aanmaken; cleanup via effect (geen setState-cascade).
+  const src = useMemo(
+    () => (photo.blob ? URL.createObjectURL(photo.blob) : null),
+    [photo.blob],
+  );
   useEffect(() => {
-    if (!photo.blob) return;
-    const url = URL.createObjectURL(photo.blob);
-    setSrc(url);
-    return () => URL.revokeObjectURL(url);
-  }, [photo.blob]);
+    return () => {
+      if (src) URL.revokeObjectURL(src);
+    };
+  }, [src]);
   if (!src) return null;
   return (
     <button
@@ -684,13 +695,15 @@ function PhotoThumb({ photo, onClick }: { photo: Photo; onClick: () => void }) {
 }
 
 function Lightbox({ photo, onClose }: { photo: Photo; onClose: () => void }) {
-  const [src, setSrc] = useState<string | null>(null);
+  const src = useMemo(
+    () => (photo.blob ? URL.createObjectURL(photo.blob) : null),
+    [photo.blob],
+  );
   useEffect(() => {
-    if (!photo.blob) return;
-    const url = URL.createObjectURL(photo.blob);
-    setSrc(url);
-    return () => URL.revokeObjectURL(url);
-  }, [photo.blob]);
+    return () => {
+      if (src) URL.revokeObjectURL(src);
+    };
+  }, [src]);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"

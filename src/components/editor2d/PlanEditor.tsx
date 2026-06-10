@@ -161,8 +161,13 @@ export function PlanEditor() {
     return () => ro.disconnect();
   }, []);
 
-  // Tool wisselt → tekening afbreken.
-  useEffect(() => {
+  // Tool of verdieping wisselt → tekening afbreken.
+  // State-reset tijdens render (React-patroon "adjusting state during render")
+  // i.p.v. in een effect, om een extra render-cascade te vermijden.
+  const [prevToolKey, setPrevToolKey] = useState(`${tool}|${activeLevelId}`);
+  const toolKey = `${tool}|${activeLevelId}`;
+  if (toolKey !== prevToolKey) {
+    setPrevToolKey(toolKey);
     setDraftStart(null);
     setRoomDraft([]);
     setPipePoints([]);
@@ -171,7 +176,7 @@ export function PlanEditor() {
       setDivideRect(null);
       divideStartRef.current = null;
     }
-  }, [tool, activeLevelId]);
+  }
 
   // Sneltoetsen: Delete = selectie weg, Escape = annuleren/deselecteren.
   useEffect(() => {
