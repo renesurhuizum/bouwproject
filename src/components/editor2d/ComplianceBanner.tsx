@@ -3,11 +3,25 @@
 // Compliance-hints: NEN 1010 (elektra) + Bouwbesluit 2012 (ruimtes).
 // Verschijnt als inklapbare banner linksonder zodra er meldingen zijn.
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { AlertTriangle, Info, ShieldCheck, ChevronDown, ChevronUp } from "lucide-react";
-import { useProject, useLevels, useRooms, useElectrical, useWalls } from "@/lib/hooks";
+import {
+  useProject,
+  useLevels,
+  useRooms,
+  useElectrical,
+  useWalls,
+  usePlumbing,
+  useHvac,
+} from "@/lib/hooks";
 import { useEditor } from "@/lib/store/editor";
-import { validateElectrical, validateRooms, validateWalls, type ValidationIssue } from "@/lib/validation";
+import {
+  validateElectrical,
+  validateRooms,
+  validateRoomServices,
+  validateWalls,
+  type ValidationIssue,
+} from "@/lib/validation";
 
 export function ComplianceBanner() {
   const project = useProject();
@@ -18,16 +32,27 @@ export function ComplianceBanner() {
   const rooms = useRooms(level?.id) ?? [];
   const electrical = useElectrical(level?.id) ?? [];
   const walls = useWalls(level?.id) ?? [];
+  const plumbing = usePlumbing(level?.id) ?? [];
+  const hvac = useHvac(level?.id ?? null) ?? [];
   const [open, setOpen] = useState(false);
+
+  // Deferred: tijdens continue edits (slider/sleep) coalescen de validatie-runs
+  // zodat de editor responsief blijft; de banner loopt hooguit een tel achter.
+  const dWalls = useDeferredValue(walls);
+  const dElectrical = useDeferredValue(electrical);
+  const dRooms = useDeferredValue(rooms);
+  const dPlumbing = useDeferredValue(plumbing);
+  const dHvac = useDeferredValue(hvac);
 
   const issues = useMemo<ValidationIssue[]>(() => {
     if (!level) return [];
     return [
-      ...validateWalls(walls),
-      ...validateElectrical(electrical),
-      ...validateRooms(rooms, [level]),
+      ...validateWalls(dWalls),
+      ...validateElectrical(dElectrical),
+      ...validateRooms(dRooms, [level]),
+      ...validateRoomServices(dRooms, dPlumbing, dElectrical, dHvac),
     ];
-  }, [walls, electrical, rooms, level]);
+  }, [dWalls, dElectrical, dRooms, dPlumbing, dHvac, level]);
 
   if (issues.length === 0) return null;
 
@@ -44,7 +69,7 @@ export function ComplianceBanner() {
         : { bg: "bg-blueprint/10", border: "border-blueprint/40", text: "text-blueprint" };
 
   return (
-    <div className="no-print pointer-events-auto absolute bottom-[76px] left-3 z-10 w-[min(20rem,calc(100vw-1.5rem))]">
+    <div className="no-print pointer-events-auto absolute left-3 top-[60px] z-10 w-[min(18rem,calc(100vw-1.5rem))]">
       <div className={`rounded-xl border ${tone.border} ${tone.bg} shadow-lg backdrop-blur`}>
         <button
           onClick={() => setOpen((v) => !v)}
@@ -57,7 +82,7 @@ export function ComplianceBanner() {
               : `${infos} tip${infos > 1 ? "s" : ""}`}
           </span>
           <span className="ml-auto text-ink-500">
-            {open ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+            {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </span>
         </button>
         {open && (

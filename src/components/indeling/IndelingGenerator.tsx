@@ -3,11 +3,12 @@
 // Indeling-generator: afmetingen + wensen → meerdere voorstellen → toepassen
 // op de actieve verdieping (muren + ruimtes).
 
-import { useState } from "react";
-import { Sparkles, X, Check } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Sparkles, X, Check, Square, PencilRuler } from "lucide-react";
 import { getDB } from "@/lib/db/db";
 import { create, remove } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
+import { useWalls } from "@/lib/hooks";
 import type { Wall, Room, Opening } from "@/lib/domain/types";
 import {
   generateLayouts,
@@ -16,7 +17,7 @@ import {
   type DoorSide,
   type Layout,
 } from "@/lib/layoutGenerator";
-import { dist, polygonArea } from "@/lib/geometry";
+import { bounds, dist, polygonArea } from "@/lib/geometry";
 
 // Welke buitenmuur hoort bij de voordeur-zijde (volgorde: top, rechts, onder, links).
 const DOOR_OUTER_INDEX: Record<DoorSide, number> = { achter: 0, rechts: 1, voor: 2, links: 3 };
@@ -31,6 +32,21 @@ const DOOR_SIDES: { key: DoorSide; label: string }[] = [
 
 export function IndelingGenerator({ onClose }: { onClose: () => void }) {
   const activeLevelId = useEditor((s) => s.activeLevelId);
+  const walls = useWalls(activeLevelId) ?? [];
+
+  // Footprint uit de getekende muren: bounding box van alle muur-eindpunten.
+  const footprint = useMemo(() => {
+    if (walls.length === 0) return null;
+    const { min, max } = bounds(walls.flatMap((w) => [w.start, w.end]));
+    const w = max.x - min.x;
+    const h = max.y - min.y;
+    if (w < 3 || h < 3) return null;
+    return { x: min.x, y: min.y, w, h };
+  }, [walls]);
+
+  // Bron: bestaande plattegrond (indien aanwezig) of een nieuwe rechthoek.
+  const [useExisting, setUseExisting] = useState(true);
+  const basedOnPlan = useExisting && footprint !== null;
 
   const [width, setWidth] = useState("10");
   const [depth, setDepth] = useState("8");
@@ -41,6 +57,20 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
   const [applying, setApplying] = useState(false);
 
   function generate() {
+    if (basedOnPlan && footprint) {
+      setLayouts(
+        generateLayouts({
+          width: footprint.w,
+          depth: footprint.h,
+          originX: footprint.x,
+          originY: footprint.y,
+          doorSide,
+          bedrooms,
+          wishes,
+        }),
+      );
+      return;
+    }
     const w = parseFloat(width.replace(",", "."));
     const d = parseFloat(depth.replace(",", "."));
     if (isNaN(w) || isNaN(d) || w < 3 || d < 3) return;
@@ -51,44 +81,48 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
     if (!activeLevelId || applying) return;
     setApplying(true);
     const db = getDB();
-    // Bestaande structuur op deze verdieping wissen.
-    const oldWalls = (await db.walls.where("levelId").equals(activeLevelId).toArray()).filter(
-      (w) => !w.deleted,
-    );
-    const wallIds = new Set(oldWalls.map((w) => w.id));
-    for (const w of oldWalls) await remove("walls", w.id);
+    // Bestaande ruimtes wissen (worden opnieuw gegenereerd).
     const oldRooms = (await db.rooms.where("levelId").equals(activeLevelId).toArray()).filter(
       (r) => !r.deleted,
     );
     for (const r of oldRooms) await remove("rooms", r.id);
-    const allOpenings = (await db.openings.toArray()).filter((o) => !o.deleted);
-    for (const o of allOpenings) if (wallIds.has(o.wallId)) await remove("openings", o.id);
 
-    // Buitenmuren (dragend) + voordeur op de gekozen zijde.
-    const outer = outerWalls(layout.outer);
-    const doorIdx = DOOR_OUTER_INDEX[doorSide];
-    for (let i = 0; i < outer.length; i++) {
-      const seg = outer[i];
-      const wall = await create<Wall>("walls", {
-        levelId: activeLevelId,
-        start: seg.a,
-        end: seg.b,
-        thickness: 0.3,
-        height: 2.6,
-        material: "brick",
-        loadBearing: true,
-        status: "new",
-      });
-      if (i === doorIdx) {
-        const len = dist(seg.a, seg.b);
-        await create<Opening>("openings", {
-          wallId: wall.id,
-          type: "door",
-          width: 1.0,
-          height: 2.1,
-          sillHeight: 0,
-          offset: len / 2,
+    if (!basedOnPlan) {
+      // Nieuwe rechthoek: ook de bestaande muren + bijbehorende openingen wissen.
+      const oldWalls = (await db.walls.where("levelId").equals(activeLevelId).toArray()).filter(
+        (w) => !w.deleted,
+      );
+      const wallIds = new Set(oldWalls.map((w) => w.id));
+      for (const w of oldWalls) await remove("walls", w.id);
+      const allOpenings = (await db.openings.toArray()).filter((o) => !o.deleted);
+      for (const o of allOpenings) if (wallIds.has(o.wallId)) await remove("openings", o.id);
+
+      // Buitenmuren (dragend) + voordeur op de gekozen zijde.
+      const outer = outerWalls(layout.outer);
+      const doorIdx = DOOR_OUTER_INDEX[doorSide];
+      for (let i = 0; i < outer.length; i++) {
+        const seg = outer[i];
+        const wall = await create<Wall>("walls", {
+          levelId: activeLevelId,
+          start: seg.a,
+          end: seg.b,
+          thickness: 0.3,
+          height: 2.6,
+          material: "brick",
+          loadBearing: true,
+          status: "new",
         });
+        if (i === doorIdx) {
+          const len = dist(seg.a, seg.b);
+          await create<Opening>("openings", {
+            wallId: wall.id,
+            type: "door",
+            width: 1.0,
+            height: 2.1,
+            sillHeight: 0,
+            offset: len / 2,
+          });
+        }
       }
     }
     // Interne wanden + doorgang tussen de kamers.
@@ -145,24 +179,62 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
 
         {/* Formulier */}
         <section className="space-y-3 rounded-card border border-line bg-paper-raised p-4">
-          <div className="flex gap-3">
-            <Field label="Breedte (m)">
-              <input
-                value={width}
-                onChange={(e) => setWidth(e.target.value)}
-                inputMode="decimal"
-                className="tabular w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-900"
-              />
-            </Field>
-            <Field label="Diepte (m)">
-              <input
-                value={depth}
-                onChange={(e) => setDepth(e.target.value)}
-                inputMode="decimal"
-                className="tabular w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-900"
-              />
-            </Field>
-          </div>
+          {/* Bron: bestaande plattegrond of nieuwe rechthoek */}
+          {footprint && (
+            <div>
+              <span className="mb-1 block text-xs text-ink-500">Indeling binnen</span>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => setUseExisting(true)}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium ${
+                    useExisting ? "bg-ink-900 text-paper-raised" : "bg-paper-sunken text-ink-700"
+                  }`}
+                >
+                  <PencilRuler size={14} /> Mijn plattegrond
+                </button>
+                <button
+                  onClick={() => setUseExisting(false)}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium ${
+                    !useExisting ? "bg-ink-900 text-paper-raised" : "bg-paper-sunken text-ink-700"
+                  }`}
+                >
+                  <Square size={14} /> Nieuwe rechthoek
+                </button>
+              </div>
+            </div>
+          )}
+
+          {basedOnPlan && footprint ? (
+            <div className="flex items-center gap-2 rounded-lg border border-accent/30 bg-accent-soft px-3 py-2 text-xs text-ink-700">
+              <PencilRuler size={15} className="shrink-0 text-accent" />
+              <span>
+                Footprint uit je tekening:{" "}
+                <span className="tabular font-semibold text-ink-900">
+                  {footprint.w.toFixed(1)} × {footprint.h.toFixed(1)} m
+                </span>
+                . Je buitenmuren blijven staan; alleen de indeling wordt ingevuld.
+              </span>
+            </div>
+          ) : (
+            <div className="flex gap-3">
+              <Field label="Breedte (m)">
+                <input
+                  value={width}
+                  onChange={(e) => setWidth(e.target.value)}
+                  inputMode="decimal"
+                  className="tabular w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-900"
+                />
+              </Field>
+              <Field label="Diepte (m)">
+                <input
+                  value={depth}
+                  onChange={(e) => setDepth(e.target.value)}
+                  inputMode="decimal"
+                  className="tabular w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-900"
+                />
+              </Field>
+            </div>
+          )}
 
           <div>
             <span className="mb-1 block text-xs text-ink-500">Voordeur aan de zijde</span>
@@ -238,8 +310,10 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
               </div>
             ))}
             <p className="px-1 text-[11px] text-ink-400">
-              Let op: toepassen vervangt de muren en ruimtes op de huidige verdieping. Daarna kun je
-              alles vrij aanpassen in de plattegrond.
+              {basedOnPlan
+                ? "Toepassen behoudt je buitenmuren en voegt de scheidingswanden + ruimtes toe. Werkt het mooist bij een rechthoekige plattegrond; bij een L-vorm vul je daarna handmatig bij."
+                : "Let op: toepassen vervangt de muren en ruimtes op de huidige verdieping."}{" "}
+              Daarna kun je alles vrij aanpassen in de plattegrond.
             </p>
           </section>
         )}
@@ -292,8 +366,9 @@ function LayoutPreview({ layout, doorSide }: { layout: Layout; doorSide: DoorSid
       className="mx-auto block"
     >
       {layout.rooms.map((r, i) => {
-        const x = r.rect.x * scale;
-        const y = r.rect.y * scale;
+        // Normaliseer t.o.v. de footprint-oorsprong (kan verschoven zijn).
+        const x = (r.rect.x - layout.outer.x) * scale;
+        const y = (r.rect.y - layout.outer.y) * scale;
         const w = r.rect.w * scale;
         const h = r.rect.h * scale;
         const area = polygonArea(rectPolygon(r.rect));

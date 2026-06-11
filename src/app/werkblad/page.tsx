@@ -15,6 +15,7 @@ import {
   useOpenings,
   useElectrical,
   usePlumbing,
+  useFurniture,
   useHvac,
   usePhases,
   useTasks,
@@ -59,6 +60,7 @@ export default function WerkbladPage() {
   const openings = useOpenings(level?.id) ?? [];
   const electrical = useElectrical(level?.id) ?? [];
   const plumbing = usePlumbing(level?.id) ?? [];
+  const furniture = useFurniture(level?.id ?? null) ?? [];
   const hvac = useHvac(level?.id) ?? [];
   const phases = usePhases(project?.id) ?? [];
   const tasks = useTasks(project?.id) ?? [];
@@ -147,6 +149,7 @@ export default function WerkbladPage() {
                 openings={openings}
                 electrical={electrical}
                 plumbing={plumbing}
+                furniture={furniture}
                 northDegrees={project?.northDegrees ?? 0}
               />
             </div>

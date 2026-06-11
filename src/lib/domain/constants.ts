@@ -55,6 +55,7 @@ export const ELECTRICAL_DEFAULT_HEIGHT: Record<ElectricalType, number> = {
   "wall-light": 1.9,
   data: 0.3,
   panel: 1.5,
+  perilex: 0.6, // achter/onder kooktoestel
   outdoor: 0.6,
 };
 
@@ -67,7 +68,22 @@ export const ELECTRICAL_LABEL: Record<ElectricalType, string> = {
   "wall-light": "Wandlamp",
   data: "Data / UTP",
   panel: "Groepenkast",
+  perilex: "Perilex (kookgroep)",
   outdoor: "Buitenpunt",
+};
+
+// Korte symboolcode op plattegrond, werkblad en aanzichten (één bron).
+export const ELECTRICAL_CODE: Record<ElectricalType, string> = {
+  socket: "S",
+  "socket-double": "S²",
+  switch: "W",
+  light: "L",
+  spot: "·",
+  "wall-light": "WL",
+  data: "D",
+  panel: "▣",
+  perilex: "P",
+  outdoor: "B",
 };
 
 // Veelgebruikte uitzonderingen op de standaardhoogte.
@@ -312,6 +328,19 @@ export const FIXTURE_DEFAULT_HEIGHT: Record<FixtureKind, number> = {
 };
 
 export const PLUMBING_COLOR = "#0891b2"; // teal
+
+// Werkelijke voetafdruk (m) per sanitair-soort — één bron voor 2D-editor,
+// werkblad en 3D zodat symbolen overal dezelfde fysieke maat houden.
+export const FIXTURE_FOOTPRINT: Record<FixtureKind, { w: number; h: number }> = {
+  toilet:            { w: 0.42, h: 0.68 },
+  sink:              { w: 0.55, h: 0.45 },
+  shower:            { w: 0.90, h: 0.90 },
+  bath:              { w: 1.70, h: 0.75 },
+  "kitchen-tap":     { w: 0.30, h: 0.30 },
+  "washing-machine": { w: 0.60, h: 0.60 },
+  boiler:            { w: 0.45, h: 0.45 },
+  "outdoor-tap":     { w: 0.30, h: 0.30 },
+};
 
 // ── Materialen ────────────────────────────────────────────────────────────────
 

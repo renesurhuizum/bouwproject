@@ -14,6 +14,7 @@ const ELECTRICAL_OPTIONS: { type: ElectricalType; label: string }[] = [
   { type: "light",         label: "Lichtpunt" },
   { type: "spot",          label: "Inbouwspot" },
   { type: "data",          label: "Data/UTP" },
+  { type: "perilex",       label: "Perilex (koken)" },
 ];
 
 const FIXTURE_OPTIONS: FixtureKind[] = [
