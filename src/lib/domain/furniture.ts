@@ -18,6 +18,10 @@ export const FURNITURE_DEFAULTS: Record<FurnitureKind, { w: number; d: number; h
   "bathtub":        { w: 1.70, d: 0.75, h: 0.55, label: "Bad",             color: "#e8f4f8" },
   "shower-cabin":   { w: 0.90, d: 0.90, h: 2.20, label: "Douchecabine",    color: "#d4eaf0" },
   "kitchen-island": { w: 1.20, d: 0.90, h: 0.90, label: "Keukeneiland",    color: "#e8e0d0" },
+  "kitchen-base":   { w: 0.60, d: 0.60, h: 0.90, label: "Onderkast",       color: "#f0ece4" },
+  "kitchen-high":   { w: 0.60, d: 0.60, h: 2.10, label: "Hoge kast",       color: "#f0ece4" },
+  "kitchen-upper":  { w: 0.60, d: 0.35, h: 0.70, label: "Bovenkast",       color: "#f0ece4" },
+  "kitchen-corner": { w: 0.90, d: 0.90, h: 0.90, label: "Hoekkast",        color: "#f0ece4" },
 };
 
 export const FURNITURE_CATEGORIES: { label: string; kinds: FurnitureKind[] }[] = [
@@ -25,5 +29,5 @@ export const FURNITURE_CATEGORIES: { label: string; kinds: FurnitureKind[] }[] =
   { label: "Slapen",   kinds: ["bed-single", "bed-double", "bed-king", "wardrobe"] },
   { label: "Eten",     kinds: ["dining-table", "dining-chair", "desk", "office-chair"] },
   { label: "Badkamer", kinds: ["bathtub", "shower-cabin"] },
-  { label: "Keuken",   kinds: ["kitchen-island"] },
+  { label: "Keuken",   kinds: ["kitchen-island", "kitchen-base", "kitchen-high", "kitchen-upper", "kitchen-corner"] },
 ];

@@ -774,6 +774,47 @@ function renderKitchenIsland(p: SymbolProps): ReactNode {
   );
 }
 
+/* ─── Keukenmodules ─── */
+
+function renderKitchenBase({ sw, sd, color, stroke }: SymbolProps) {
+  // Aanrechtblad: horizontale lijn op 1/3 hoogte
+  return (
+    <>
+      <Line points={[2, sd / 3, sw - 2, sd / 3]} stroke={stroke} strokeWidth={1} listening={false} />
+      <Line points={[sw / 2, 4, sw / 2, sd - 4]} stroke={stroke} strokeWidth={1} dash={[3, 3]} opacity={0.5} listening={false} />
+    </>
+  );
+}
+
+function renderKitchenHigh({ sw, sd, color, stroke }: SymbolProps) {
+  return (
+    <>
+      <Line points={[2, sd * 0.4, sw - 2, sd * 0.4]} stroke={stroke} strokeWidth={1} listening={false} />
+      <Line points={[2, sd * 0.7, sw - 2, sd * 0.7]} stroke={stroke} strokeWidth={1} listening={false} />
+      <Line points={[sw / 2, 4, sw / 2, sd - 4]} stroke={stroke} strokeWidth={1} dash={[3, 3]} opacity={0.5} listening={false} />
+    </>
+  );
+}
+
+function renderKitchenUpper({ sw, sd, color, stroke }: SymbolProps) {
+  return (
+    <>
+      <Line points={[2, sd / 2, sw - 2, sd / 2]} stroke={stroke} strokeWidth={1} dash={[4, 3]} listening={false} />
+    </>
+  );
+}
+
+function renderKitchenCorner({ sw, sd, color, stroke }: SymbolProps) {
+  const min = Math.min(sw, sd);
+  return (
+    <>
+      <Line points={[2, sd / 3, sw - 2, sd / 3]} stroke={stroke} strokeWidth={1} listening={false} />
+      <Line points={[sw / 3, 2, sw / 3, sd - 2]} stroke={stroke} strokeWidth={1} listening={false} />
+      <Line points={[2, 2, min * 0.6, min * 0.6]} stroke={stroke} strokeWidth={1} dash={[3, 3]} opacity={0.5} listening={false} />
+    </>
+  );
+}
+
 /* --------------------------------- mapping --------------------------------- */
 
 const RENDERERS: Record<FurnitureKind, (p: SymbolProps) => ReactNode> = {
@@ -794,6 +835,10 @@ const RENDERERS: Record<FurnitureKind, (p: SymbolProps) => ReactNode> = {
   bathtub: renderBathtub,
   "shower-cabin": renderShowerCabin,
   "kitchen-island": renderKitchenIsland,
+  "kitchen-base": renderKitchenBase,
+  "kitchen-high": renderKitchenHigh,
+  "kitchen-upper": renderKitchenUpper,
+  "kitchen-corner": renderKitchenCorner,
 };
 
 export function FurnitureSymbol({

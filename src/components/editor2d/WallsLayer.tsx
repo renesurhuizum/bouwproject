@@ -16,6 +16,7 @@ interface Props {
   view: ViewState;
   walls: Wall[];
   selectedId: string | null;
+  multiSelectedIds?: string[];
   onSelect: (id: string) => void;
   onMoveEndpoint?: (wallId: string, which: "start" | "end", screenX: number, screenY: number) => void;
   onEditLength?: (wallId: string) => void;
@@ -92,7 +93,7 @@ function buildCornerFills(walls: Wall[], view: ViewState): React.ReactNode[] {
   return fills;
 }
 
-export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint, onEditLength }: Props) {
+export function WallsLayer({ view, walls, selectedId, multiSelectedIds, onSelect, onMoveEndpoint, onEditLength }: Props) {
   return (
     <Layer>
       {/* Corner fill patches — rendered BEFORE walls so walls overlay on top */}
@@ -104,6 +105,7 @@ export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint, 
         const a = metersToScreen(w.start, view);
         const b = metersToScreen(w.end, view);
         const selected = w.id === selectedId;
+        const multiSelected = !selected && (multiSelectedIds?.includes(w.id) ?? false);
         const lenM = dist(w.start, w.end);
         const lenPx = Math.hypot(b.x - a.x, b.y - a.y);
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };

@@ -4,9 +4,9 @@
 // Plan (plattegrond + maatvoering), Aanzichten (wand-elevaties) en
 // Specificaties (ruimtes, installaties, hoeveelheidsstaat). Print → "Bewaar als PDF".
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef } from "react";
 import Link from "next/link";
-import { Printer, ArrowLeft, Map as MapIcon, Frame, ListTree } from "lucide-react";
+import { Printer, ArrowLeft, Map as MapIcon, Frame, ListTree, DoorOpen, Scissors, Download } from "lucide-react";
 import {
   useProject,
   useLevels,
@@ -19,10 +19,14 @@ import {
   useHvac,
   usePhases,
   useTasks,
+  useSections,
 } from "@/lib/hooks";
 import { useEditor } from "@/lib/store/editor";
 import { WerkbladPlan } from "@/components/werkblad/WerkbladPlan";
 import { WallElevation } from "@/components/werkblad/WallElevation";
+import { OpeningSchedule } from "@/components/werkblad/OpeningSchedule";
+import { CrossSection } from "@/components/werkblad/CrossSection";
+import { exportSvgAsPng } from "@/lib/exportImage";
 import { roomWalls } from "@/lib/roomWalls";
 import { computeQuantities } from "@/lib/quantityTakeoff";
 import { polygonArea } from "@/lib/geometry";
@@ -34,11 +38,13 @@ import {
 } from "@/lib/domain/constants";
 import type { ElectricalType, FixtureKind } from "@/lib/domain/types";
 
-type Tab = "plan" | "aanzichten" | "specs";
+type Tab = "plan" | "aanzichten" | "kozijnstaat" | "doorsnede" | "specs";
 
 const TABS: { key: Tab; label: string; icon: typeof MapIcon }[] = [
   { key: "plan", label: "Plan", icon: MapIcon },
   { key: "aanzichten", label: "Aanzichten", icon: Frame },
+  { key: "kozijnstaat", label: "Kozijnen", icon: DoorOpen },
+  { key: "doorsnede", label: "Doorsnede", icon: Scissors },
   { key: "specs", label: "Specificaties", icon: ListTree },
 ];
 
@@ -64,8 +70,13 @@ export default function WerkbladPage() {
   const hvac = useHvac(level?.id) ?? [];
   const phases = usePhases(project?.id) ?? [];
   const tasks = useTasks(project?.id) ?? [];
+  const sections = useSections(level?.id) ?? [];
 
   const [tab, setTab] = useState<Tab>("plan");
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+  const planSvgRef = useRef<SVGSVGElement>(null);
+
+  const activeSection = sections.find((s) => s.id === activeSectionId) ?? sections[0] ?? null;
 
   // Elektra samenvatten per type.
   const elecByType = new Map<ElectricalType, { count: number; height: number }>();
@@ -106,12 +117,22 @@ export default function WerkbladPage() {
             );
           })}
         </div>
-        <button
-          onClick={() => window.print()}
-          className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
-        >
-          <Printer size={16} /> Print / PDF
-        </button>
+        <div className="flex gap-2">
+          {tab === "plan" && (
+            <button
+              onClick={() => { if (planSvgRef.current) exportSvgAsPng(planSvgRef.current, `${project?.name ?? "plattegrond"}.png`); }}
+              className="flex items-center gap-2 rounded-lg border border-ink-900 px-4 py-2 text-sm font-semibold text-ink-900"
+            >
+              <Download size={16} /> PNG
+            </button>
+          )}
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
+          >
+            <Printer size={16} /> Print / PDF
+          </button>
+        </div>
       </div>
 
       <div className="mx-auto max-w-3xl space-y-6 p-5 pb-10">
@@ -151,6 +172,7 @@ export default function WerkbladPage() {
                 plumbing={plumbing}
                 furniture={furniture}
                 northDegrees={project?.northDegrees ?? 0}
+                svgRef={planSvgRef}
               />
             </div>
           </section>
@@ -185,6 +207,63 @@ export default function WerkbladPage() {
                   </div>
                 );
               })
+            )}
+          </section>
+        )}
+
+        {/* ── KOZIJNSTAAT ──────────────────────────────────────── */}
+        {tab === "kozijnstaat" && (
+          <section>
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-ink-500">
+              Kozijnstaat
+            </h2>
+            <div className="rounded-lg border border-line bg-white p-3">
+              <OpeningSchedule openings={openings} walls={walls} />
+            </div>
+          </section>
+        )}
+
+        {/* ── DOORSNEDE ────────────────────────────────────────── */}
+        {tab === "doorsnede" && (
+          <section className="space-y-4">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-ink-500">
+              Doorsneden
+            </h2>
+            {sections.length === 0 ? (
+              <p className="py-8 text-center text-sm text-ink-300">
+                Nog geen doorsnede-lijnen. Teken een snijlijn in de plattegrond (gereedschap ✂).
+              </p>
+            ) : (
+              <>
+                {sections.length > 1 && (
+                  <div className="flex gap-2">
+                    {sections.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => setActiveSectionId(s.id)}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                          (activeSection?.id ?? sections[0]?.id) === s.id
+                            ? "border-ink-900 bg-ink-900 text-white"
+                            : "border-line text-ink-500 hover:border-ink-900"
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {activeSection && (
+                  <div className="rounded-lg border border-line bg-white p-3">
+                    <CrossSection
+                      section={activeSection}
+                      levels={levels}
+                      walls={walls}
+                      openings={openings}
+                      rooms={rooms}
+                    />
+                  </div>
+                )}
+              </>
             )}
           </section>
         )}

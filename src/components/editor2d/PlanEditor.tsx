@@ -5,8 +5,8 @@
 // - Muis: slepen pant (select), scrollwiel zoomt.
 // - Muren tekenen met snapping op raster en bestaande eindpunten.
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Stage, Layer, Line, Circle, Label, Tag, Text } from "react-konva";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Stage, Layer, Line, Rect, Circle, Label, Tag, Text } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type {
   Point,
@@ -16,6 +16,9 @@ import type {
   Opening,
   Room,
   Furniture,
+  Staircase,
+  Column,
+  Beam,
   PlumbingType,
   Level,
 } from "@/lib/domain/types";
@@ -24,15 +27,16 @@ import { getDB } from "@/lib/db/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useHistory } from "@/lib/history";
 import { useEditor, type SelKind } from "@/lib/store/editor";
-import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac } from "@/lib/hooks";
+import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useSections } from "@/lib/hooks";
 import {
   ELECTRICAL_DEFAULT_HEIGHT,
   FIXTURE_DEFAULT_HEIGHT,
   OPENING_DEFAULTS,
   OPENING_SNAP_M,
 } from "@/lib/domain/constants";
-import { dist, snapToGrid, snapToPoints, projectOnSegment, constrainToAngle } from "@/lib/geometry";
+import { dist, snapToGrid, snapToPoints, projectOnSegment, constrainToAngle, bounds, pointInPolygon, wallIntersection, mirrorPoints } from "@/lib/geometry";
 import { GRID_SNAP_M } from "@/lib/store/editor";
+import { buildClipboard, pasteClipboard } from "@/lib/clipboard";
 import { formatLength } from "@/lib/format";
 import {
   screenToMeters,
@@ -51,6 +55,11 @@ import { ElectricalLayer } from "./ElectricalLayer";
 import { PlumbingLayer } from "./PlumbingLayer";
 import { FurnitureLayer } from "./FurnitureLayer";
 import { HvacLayer } from "./HvacLayer";
+import { StairsLayer } from "./StairsLayer";
+import { ColumnsLayer } from "./ColumnsLayer";
+import { BeamsLayer } from "./BeamsLayer";
+import { RoofLayer } from "./RoofLayer";
+import { SectionLayer } from "./SectionLayer";
 import { RoomDivider } from "./RoomDivider";
 import { ElectricalLegend } from "./ElectricalLegend";
 import { Minimap } from "./Minimap";
@@ -78,7 +87,13 @@ export function PlanEditor() {
   const gridSnap = useEditor((s) => s.gridSnap);
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const selection = useEditor((s) => s.selection);
+  const multiSelection = useEditor((s) => s.multiSelection);
+  const setMultiSelection = useEditor((s) => s.setMultiSelection);
+  const toggleMultiItem = useEditor((s) => s.toggleMultiItem);
+  const clipboard = useEditor((s) => s.clipboard);
+  const setClipboard = useEditor((s) => s.setClipboard);
   const select = useEditor((s) => s.select);
+  const lockedLayers = useEditor((s) => s.lockedLayers);
 
   const walls = useWalls(activeLevelId) ?? [];
   const rooms = useRooms(activeLevelId) ?? [];
@@ -87,15 +102,26 @@ export function PlanEditor() {
   const openings = useOpenings(activeLevelId) ?? [];
   const furniture = useFurniture(activeLevelId) ?? [];
   const hvac = useHvac(activeLevelId) ?? [];
+  const stairs = useStairs(activeLevelId) ?? [];
+  const columns = useColumns(activeLevelId) ?? [];
+  const beams = useBeams(activeLevelId) ?? [];
+  const roofs = useRoofs(activeLevelId) ?? [];
+  const sections = useSections(activeLevelId) ?? [];
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
   const [snapTarget, setSnapTarget] = useState<Point | null>(null);
   const [roomDraft, setRoomDraft] = useState<Point[]>([]);
   const [pipePoints, setPipePoints] = useState<Point[]>([]);
+  const [sectionPoints, setSectionPoints] = useState<Point[]>([]);
   const [menu, setMenu] = useState<{ x: number; y: number; kind: SelKind; id: string } | null>(null);
   const [divideRect, setDivideRect] = useState<LayoutRect | null>(null);
   const divideStartRef = useRef<Point | null>(null);
+  // Lasso rubber-band selectie (scherm-pixels)
+  const [lasso, setLasso] = useState<{ start: Point; current: Point } | null>(null);
+  const lassoStartRef = useRef<Point | null>(null);
+  // Beam draft
+  const [beamStart, setBeamStart] = useState<Point | null>(null);
 
   // Shift-toets tracking voor orthogonaal tekenen
   const shiftRef = useRef(false);
@@ -162,8 +188,6 @@ export function PlanEditor() {
   }, []);
 
   // Tool of verdieping wisselt → tekening afbreken.
-  // State-reset tijdens render (React-patroon "adjusting state during render")
-  // i.p.v. in een effect, om een extra render-cascade te vermijden.
   const [prevToolKey, setPrevToolKey] = useState(`${tool}|${activeLevelId}`);
   const toolKey = `${tool}|${activeLevelId}`;
   if (toolKey !== prevToolKey) {
@@ -171,6 +195,10 @@ export function PlanEditor() {
     setDraftStart(null);
     setRoomDraft([]);
     setPipePoints([]);
+    setSectionPoints([]);
+    setBeamStart(null);
+    setLasso(null);
+    lassoStartRef.current = null;
     setMenu(null);
     if (tool !== "divide") {
       setDivideRect(null);
@@ -183,11 +211,44 @@ export function PlanEditor() {
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement;
       if (el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
+
       if (e.key === "Delete" || e.key === "Backspace") {
-        if (selection) {
+        if (multiSelection.length > 1) {
+          e.preventDefault();
+          void (async () => {
+            for (const s of multiSelection) await deleteEntity(s.kind, s.id);
+            setMultiSelection([]);
+          })();
+        } else if (selection) {
           e.preventDefault();
           void deleteEntity(selection.kind, selection.id);
         }
+      } else if (e.key === "c" && (e.ctrlKey || e.metaKey) && multiSelection.length > 0) {
+        e.preventDefault();
+        const clip = buildClipboard(multiSelection, { walls, openings, rooms, electrical, plumbing, hvac, furniture });
+        setClipboard(clip);
+      } else if (e.key === "v" && (e.ctrlKey || e.metaKey) && clipboard && activeLevelId) {
+        e.preventDefault();
+        void (async () => {
+          const pasteOffset = { x: 0.5, y: 0.5 };
+          const newItems = await pasteClipboard(clipboard, pasteOffset, activeLevelId);
+          setMultiSelection(newItems);
+          // Verhoog paste offset door clipboard te updaten
+          setClipboard({
+            ...clipboard,
+            bbox: {
+              min: { x: clipboard.bbox.min.x + 0.5, y: clipboard.bbox.min.y + 0.5 },
+              max: { x: clipboard.bbox.max.x + 0.5, y: clipboard.bbox.max.y + 0.5 },
+            },
+          });
+        })();
+      } else if (e.key === "d" && (e.ctrlKey || e.metaKey) && multiSelection.length > 0 && activeLevelId) {
+        e.preventDefault();
+        void (async () => {
+          const clip = buildClipboard(multiSelection, { walls, openings, rooms, electrical, plumbing, hvac, furniture });
+          const newItems = await pasteClipboard(clip, { x: 0.3, y: 0.3 }, activeLevelId);
+          setMultiSelection(newItems);
+        })();
       } else if (e.key === "Enter" && tool === "draw-pipe" && pipePoints.length >= 2 && activeLevelId) {
         e.preventDefault();
         void (async () => {
@@ -200,38 +261,63 @@ export function PlanEditor() {
           });
           setPipePoints([]);
         })();
+      } else if (e.key === "Enter" && tool === "draw-section" && sectionPoints.length >= 2 && activeLevelId) {
+        e.preventDefault();
+        void finalizeSectionLine(sectionPoints);
       } else if (e.key === "Escape") {
         setDraftStart(null);
         setRoomDraft([]);
         setPipePoints([]);
+        setSectionPoints([]);
+        setBeamStart(null);
+        setLasso(null);
+        lassoStartRef.current = null;
         setMenu(null);
         select(null);
+        setMultiSelection([]);
       } else if (e.key === "z" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
         e.preventDefault();
         void redo();
       } else if (e.key === "z" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         void undo();
+      // Pijl-nudge voor geselecteerde items
+      } else if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) && (selection || multiSelection.length > 0)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 1.0 : GRID_SNAP_M[gridSnap];
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        void nudgeSelection(multiSelection.length > 0 ? multiSelection : (selection ? [selection] : []), dx, dy);
+      // Rotatie sneltoets voor geselecteerde meubels/installaties
+      } else if (e.key === "r" && !e.ctrlKey && !e.metaKey && selection?.kind === "furniture") {
+        e.preventDefault();
+        const f = furniture.find((f) => f.id === selection.id);
+        if (f) void update("furniture", f.id, { rotation: (f.rotation + (e.shiftKey ? -15 : 15) + 360) % 360 });
+      // Spiegel sneltoetsen
+      } else if (e.key === "m" && !e.ctrlKey && !e.metaKey && multiSelection.length > 0) {
+        e.preventDefault();
+        void mirrorSelection(multiSelection, e.shiftKey ? "v" : "h");
       } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
         switch (e.key.toLowerCase()) {
           case "w": setTool("wall"); break;
-          case "v": setTool("select"); break;
-          case "r": setTool("room"); break;
+          case "v": if (!e.ctrlKey) setTool("select"); break;
+          case "r": if (!selection) setTool("room"); break;
           case "e": setPlaceKind({ domain: "electrical", type: "socket" }); break;
+          case "t": setTool("trim"); break;
           case "f":
             setTool("place-furniture");
             if (!furniturePaletteKind) setFurniturePaletteKind("sofa-2");
             break;
-          case "d": setTool("divide"); break;
+          case "d": if (!e.ctrlKey) setTool("divide"); break;
         }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection, undo, redo]);
+  }, [selection, multiSelection, clipboard, undo, redo, walls, openings, rooms, electrical, plumbing, hvac, furniture, pipePoints, sectionPoints, tool, gridSnap, activeLevelId]);
 
-  const TABLE_FOR: Record<SelKind, "walls" | "openings" | "electrical" | "rooms" | "plumbing" | "hvac" | "furniture"> = {
+  const TABLE_FOR: Record<SelKind, import("@/lib/db/repo").TableName> = {
     wall: "walls",
     opening: "openings",
     electrical: "electrical",
@@ -239,6 +325,11 @@ export function PlanEditor() {
     plumbing: "plumbing",
     hvac: "hvac",
     furniture: "furniture",
+    staircase: "stairs",
+    column: "columns",
+    beam: "beams",
+    roof: "roofs",
+    section: "sections",
   };
 
   async function deleteEntity(kind: SelKind, id: string) {
@@ -248,6 +339,133 @@ export function PlanEditor() {
     await remove(tbl, id);
     setMenu(null);
     if (selection?.id === id) select(null);
+  }
+
+  // Verplaats geselecteerde items met delta dx/dy (m).
+  async function nudgeSelection(items: import("@/lib/store/editor").Selection[], dx: number, dy: number) {
+    for (const s of items) {
+      if (s.kind === "wall") {
+        const w = walls.find((w) => w.id === s.id);
+        if (w) await update("walls", w.id, {
+          start: { x: w.start.x + dx, y: w.start.y + dy },
+          end: { x: w.end.x + dx, y: w.end.y + dy },
+        });
+      } else if (s.kind === "room") {
+        const r = rooms.find((r) => r.id === s.id);
+        if (r) await update("rooms", r.id, { polygon: r.polygon.map((p) => ({ x: p.x + dx, y: p.y + dy })) });
+      } else if (s.kind === "electrical") {
+        const e = electrical.find((e) => e.id === s.id);
+        if (e) await update("electrical", e.id, { position: { x: e.position.x + dx, y: e.position.y + dy } });
+      } else if (s.kind === "plumbing") {
+        const p = plumbing.find((p) => p.id === s.id);
+        if (p && p.position) await update("plumbing", p.id, { position: { x: p.position.x + dx, y: p.position.y + dy } });
+        if (p && p.path) await update("plumbing", p.id, { path: p.path.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })) });
+      } else if (s.kind === "hvac") {
+        const h = hvac.find((h) => h.id === s.id);
+        if (h && h.position) await update("hvac", h.id, { position: { x: h.position.x + dx, y: h.position.y + dy } });
+      } else if (s.kind === "furniture") {
+        const f = furniture.find((f) => f.id === s.id);
+        if (f) await update("furniture", f.id, { position: { x: f.position.x + dx, y: f.position.y + dy } });
+      }
+    }
+  }
+
+  // Spiegel geselecteerde items rond de horizontale of verticale as door het middelpunt.
+  async function mirrorSelection(items: import("@/lib/store/editor").Selection[], axis: "h" | "v") {
+    const allPts: Point[] = [];
+    for (const s of items) {
+      if (s.kind === "wall") {
+        const w = walls.find((w) => w.id === s.id);
+        if (w) allPts.push(w.start, w.end);
+      } else if (s.kind === "room") {
+        const r = rooms.find((r) => r.id === s.id);
+        if (r) allPts.push(...r.polygon);
+      } else if (s.kind === "furniture") {
+        const f = furniture.find((f) => f.id === s.id);
+        if (f) allPts.push(f.position);
+      } else if (s.kind === "electrical") {
+        const e = electrical.find((e) => e.id === s.id);
+        if (e) allPts.push(e.position);
+      }
+    }
+    if (allPts.length === 0) return;
+    const b = bounds(allPts);
+    const pivot = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2 };
+    for (const s of items) {
+      if (s.kind === "wall") {
+        const w = walls.find((w) => w.id === s.id);
+        if (w) {
+          const [ns, ne] = mirrorPoints([w.start, w.end], axis, pivot);
+          await update("walls", w.id, { start: ns, end: ne });
+        }
+      } else if (s.kind === "room") {
+        const r = rooms.find((r) => r.id === s.id);
+        if (r) await update("rooms", r.id, { polygon: mirrorPoints(r.polygon, axis, pivot) });
+      } else if (s.kind === "furniture") {
+        const f = furniture.find((f) => f.id === s.id);
+        if (f) {
+          const [np] = mirrorPoints([f.position], axis, pivot);
+          const newRot = axis === "h" ? (360 - f.rotation) % 360 : (180 - f.rotation + 360) % 360;
+          await update("furniture", f.id, { position: np, rotation: newRot });
+        }
+      } else if (s.kind === "electrical") {
+        const e = electrical.find((e) => e.id === s.id);
+        if (e) {
+          const [np] = mirrorPoints([e.position], axis, pivot);
+          await update("electrical", e.id, { position: np });
+        }
+      }
+    }
+  }
+
+  async function finalizeSectionLine(points: Point[]) {
+    if (!activeLevelId || points.length < 2) return;
+    const labelIndex = sections.length + 1;
+    const label = String.fromCharCode(64 + labelIndex) + "-" + String.fromCharCode(64 + labelIndex);
+    await create<import("@/lib/domain/types").SectionLine>("sections", {
+      levelId: activeLevelId,
+      start: points[0],
+      end: points[points.length - 1],
+      label,
+    });
+    setSectionPoints([]);
+  }
+
+  // Lasso: verzamel alle items die binnen de rechthoek vallen.
+  function commitLasso(startScreen: Point, endScreen: Point, addToExisting: boolean) {
+    const minX = Math.min(startScreen.x, endScreen.x);
+    const maxX = Math.max(startScreen.x, endScreen.x);
+    const minY = Math.min(startScreen.y, endScreen.y);
+    const maxY = Math.max(startScreen.y, endScreen.y);
+    const inBox = (p: Point) => {
+      const s = metersToScreen(p, view);
+      return s.x >= minX && s.x <= maxX && s.y >= minY && s.y <= maxY;
+    };
+    const found: import("@/lib/store/editor").Selection[] = [];
+    for (const w of walls) {
+      if (!lockedLayers.structure && (inBox(w.start) || inBox(w.end))) found.push({ kind: "wall", id: w.id });
+    }
+    for (const r of rooms) {
+      if (!lockedLayers.rooms && r.polygon.some(inBox)) found.push({ kind: "room", id: r.id });
+    }
+    for (const e of electrical) {
+      if (!lockedLayers.electrical && inBox(e.position)) found.push({ kind: "electrical", id: e.id });
+    }
+    for (const f of furniture) {
+      if (!lockedLayers.furniture && inBox(f.position)) found.push({ kind: "furniture", id: f.id });
+    }
+    for (const p of plumbing) {
+      if (!lockedLayers.plumbing && p.position && inBox(p.position)) found.push({ kind: "plumbing", id: p.id });
+    }
+    for (const h of hvac) {
+      if (!lockedLayers.hvac && h.position && inBox(h.position)) found.push({ kind: "hvac", id: h.id });
+    }
+    if (addToExisting) {
+      const existing = multiSelection.filter((s) => !found.some((f) => f.id === s.id));
+      setMultiSelection([...existing, ...found]);
+    } else {
+      setMultiSelection(found);
+    }
   }
 
   const endpoints = useMemo<Point[]>(
@@ -411,8 +629,6 @@ export function PlanEditor() {
       return;
     }
     if (tool === "room") {
-      // Tik dicht bij het beginpunt (≥2 punten) = ruimte automatisch sluiten.
-      // Twee drempelwaarden: pixel-snap-radius of 0.5m absoluut.
       const closeSnap = roomDraft.length >= 2 && (
         dist(snapped, roomDraft[0]) < pxToMeters(SNAP_RADIUS_PX * 1.6, view) ||
         dist(snapped, roomDraft[0]) < 0.5
@@ -447,9 +663,96 @@ export function PlanEditor() {
       setPipePoints((prev) => [...prev, snapped]);
       return;
     }
+    if (tool === "draw-section" && activeLevelId) {
+      if (sectionPoints.length === 0) {
+        setSectionPoints([snapped]);
+      } else {
+        void finalizeSectionLine([...sectionPoints, snapped]);
+      }
+      return;
+    }
+    if (tool === "place-staircase" && activeLevelId) {
+      void (async () => {
+        const item = await create<Staircase>("stairs", {
+          levelId: activeLevelId,
+          kind: (placeKind?.domain === "staircase" ? placeKind.kind : "straight") ?? "straight",
+          position: snapped,
+          width: 1.2,
+          run: 3.0,
+          steps: 16,
+          rotation: 0,
+          direction: "up",
+        });
+        select({ kind: "staircase", id: item.id });
+      })();
+      return;
+    }
+    if (tool === "place-column" && activeLevelId) {
+      void (async () => {
+        const wallDef = useEditor.getState().wallDefaults;
+        const item = await create<Column>("columns", {
+          levelId: activeLevelId,
+          position: snapped,
+          shape: "square",
+          size: 0.2,
+          material: wallDef.material,
+          loadBearing: true,
+        });
+        select({ kind: "column", id: item.id });
+      })();
+      return;
+    }
+    if (tool === "place-beam" && activeLevelId) {
+      if (!beamStart) {
+        setBeamStart(snapped);
+      } else {
+        void (async () => {
+          const item = await create<Beam>("beams", {
+            levelId: activeLevelId,
+            start: beamStart,
+            end: snapped,
+            profile: "HEA140",
+            heightZ: 2.6,
+          });
+          select({ kind: "beam", id: item.id });
+          setBeamStart(null);
+        })();
+      }
+      return;
+    }
+    if (tool === "trim" && activeLevelId) {
+      // Klik op dichtstbijzijnde muur-eindpunt → verleng/trim naar snijpunt met andere muur
+      let bestWall: Wall | null = null;
+      let bestEnd: "start" | "end" = "start";
+      let bestDist = pxToMeters(SNAP_RADIUS_PX * 3, view);
+      for (const w of walls) {
+        const ds = dist(snapped, w.start);
+        const de = dist(snapped, w.end);
+        if (ds < bestDist) { bestDist = ds; bestWall = w; bestEnd = "start"; }
+        if (de < bestDist) { bestDist = de; bestWall = w; bestEnd = "end"; }
+      }
+      if (bestWall) {
+        // Zoek de dichtstbijzijnde andere muur om mee te snijden
+        let closest: { wall: Wall; pt: Point; d: number } | null = null;
+        for (const w of walls) {
+          if (w.id === bestWall.id) continue;
+          const pt = wallIntersection(bestWall, w);
+          if (!pt) continue;
+          const d = dist(pt, bestEnd === "start" ? bestWall.start : bestWall.end);
+          if (!closest || d < closest.d) closest = { wall: w, pt, d };
+        }
+        if (closest) {
+          void update("walls", bestWall.id, { [bestEnd]: closest.pt });
+        }
+      }
+      return;
+    }
     // select: tik op leeg vlak = deselecteren
     if (tool === "select" && onStage) {
-      select(null);
+      if (!shiftRef.current) {
+        select(null);
+        setMultiSelection([]);
+      }
     }
   }
 
@@ -471,7 +774,14 @@ export function PlanEditor() {
         moved: false,
         onStage: e.target === stage,
       };
-      if (tool === "select") panPointer.current = { id: evt.pointerId, last: pos };
+      if (tool === "select") {
+        // Alleen pannen als op het canvas zelf (niet op een entity)
+        if (e.target === stage) {
+          panPointer.current = { id: evt.pointerId, last: pos };
+          // Start lasso
+          lassoStartRef.current = pos;
+        }
+      }
       if (tool === "divide") {
         divideStartRef.current = screenToMeters(pos, view);
         setCursor(screenToMeters(pos, view));
@@ -525,7 +835,10 @@ export function PlanEditor() {
     if (tapRef.current && evt.pointerId === tapRef.current.id) {
       if (dist(pos, tapRef.current.start) > 8) tapRef.current.moved = true;
     }
-    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture") {
+    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "draw-section" || tool === "place-beam") {
+      setCursor(snapPoint(screenToMeters(pos, view)));
+    }
+    if (tool === "trim") {
       setCursor(snapPoint(screenToMeters(pos, view)));
     }
     if (tool === "divide") {
@@ -533,10 +846,20 @@ export function PlanEditor() {
       if (tapRef.current) tapRef.current.moved = true;
     }
     if (panPointer.current && evt.pointerId === panPointer.current.id && tool === "select") {
-      const dx = pos.x - panPointer.current.last.x;
-      const dy = pos.y - panPointer.current.last.y;
-      setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
-      panPointer.current.last = pos;
+      // Als lasso actief is → update lasso, niet pannen
+      if (lassoStartRef.current && tapRef.current?.moved) {
+        setLasso({ start: lassoStartRef.current, current: pos });
+        panPointer.current = null; // stop pannen tijdens lasso
+      } else {
+        const dx = pos.x - panPointer.current.last.x;
+        const dy = pos.y - panPointer.current.last.y;
+        setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+        panPointer.current.last = pos;
+        // Update lasso current als we al voorbij lasso-drempel zijn
+        if (lassoStartRef.current) {
+          setLasso({ start: lassoStartRef.current, current: pos });
+        }
+      }
     }
   }
 
@@ -559,6 +882,16 @@ export function PlanEditor() {
       panPointer.current = null;
     }
     if (wasTap) handleTap(pos, t!.onStage);
+    // Lasso afronden bij loslaten (als er een lasso actief was en groter dan drempel)
+    if (tool === "select" && lassoStartRef.current && lasso) {
+      const w = Math.abs(lasso.current.x - lasso.start.x);
+      const h = Math.abs(lasso.current.y - lasso.start.y);
+      if (w > 8 || h > 8) {
+        commitLasso(lasso.start, lasso.current, shiftRef.current);
+      }
+      setLasso(null);
+    }
+    lassoStartRef.current = null;
     // Divide-rechthoek afronden bij loslaten.
     if (tool === "divide" && divideStartRef.current) {
       const endM = screenToMeters(pos, view);
@@ -604,11 +937,16 @@ export function PlanEditor() {
   }
 
   function onSelectEntity(
-    kind: "wall" | "room" | "electrical" | "opening" | "plumbing",
+    kind: SelKind,
     id: string,
   ) {
-    if (tool !== "select") return; // bij tekenen niet selecteren
-    select({ kind, id });
+    if (tool !== "select") return;
+    if (lockedLayers[kind === "wall" || kind === "opening" ? "structure" : (kind as import("@/lib/domain/types").EditorLayer)]) return;
+    if (shiftRef.current) {
+      toggleMultiItem({ kind, id });
+    } else {
+      select({ kind, id });
+    }
   }
 
   // Draft (rubber-band) lengte.
@@ -651,6 +989,7 @@ export function PlanEditor() {
               view={view}
               walls={walls}
               selectedId={selection?.kind === "wall" ? selection.id : null}
+              multiSelectedIds={multiSelection.filter((s) => s.kind === "wall").map((s) => s.id)}
               onSelect={(id) => onSelectEntity("wall", id)}
               onMoveEndpoint={handleMoveEndpoint}
               onEditLength={tool === "select" ? startEditLength : undefined}
@@ -672,6 +1011,7 @@ export function PlanEditor() {
               view={view}
               items={electrical}
               selectedId={selection?.kind === "electrical" ? selection.id : null}
+              multiSelectedIds={multiSelection.filter((s) => s.kind === "electrical").map((s) => s.id)}
               onSelect={(id) => onSelectEntity("electrical", id)}
             />
           )}
@@ -695,7 +1035,7 @@ export function PlanEditor() {
               view={view}
               items={hvac}
               selectedId={selection?.kind === "hvac" ? selection.id : null}
-              onSelect={(id) => select({ kind: "hvac", id })}
+              onSelect={(id) => onSelectEntity("hvac", id)}
             />
           )}
 
@@ -704,11 +1044,74 @@ export function PlanEditor() {
               view={view}
               furniture={furniture}
               selectedId={selection?.kind === "furniture" ? selection.id : null}
-              onSelect={(id) => select({ kind: "furniture", id })}
+              multiSelectedIds={multiSelection.filter((s) => s.kind === "furniture").map((s) => s.id)}
+              onSelect={(id) => onSelectEntity("furniture", id)}
               onMove={async (id, x, y) => {
                 await update("furniture", id, { position: { x, y } });
               }}
             />
+          )}
+
+          {visibleLayers.structure && (
+            <StairsLayer
+              view={view}
+              stairs={stairs}
+              selectedId={selection?.kind === "staircase" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("staircase", id)}
+            />
+          )}
+
+          {visibleLayers.structure && (
+            <ColumnsLayer
+              view={view}
+              columns={columns}
+              selectedId={selection?.kind === "column" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("column", id)}
+            />
+          )}
+
+          {visibleLayers.structure && (
+            <BeamsLayer
+              view={view}
+              beams={beams}
+              selectedId={selection?.kind === "beam" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("beam", id)}
+            />
+          )}
+
+          {visibleLayers.roof && (
+            <RoofLayer
+              view={view}
+              roofs={roofs}
+              selectedId={selection?.kind === "roof" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("roof", id)}
+            />
+          )}
+
+          <SectionLayer
+            view={view}
+            sections={sections}
+            selectedId={selection?.kind === "section" ? selection.id : null}
+            onSelect={(id) => onSelectEntity("section", id)}
+            draftPoints={tool === "draw-section" ? sectionPoints : []}
+            cursor={tool === "draw-section" ? cursor : null}
+          />
+
+          {/* Lasso rubber-band selectie */}
+          {lasso && (
+            <Layer listening={false}>
+              <Rect
+                x={Math.min(lasso.start.x, lasso.current.x)}
+                y={Math.min(lasso.start.y, lasso.current.y)}
+                width={Math.abs(lasso.current.x - lasso.start.x)}
+                height={Math.abs(lasso.current.y - lasso.start.y)}
+                fill="rgba(59,130,246,0.08)"
+                stroke="#3b82f6"
+                strokeWidth={1.5}
+                dash={[6, 4]}
+                listening={false}
+              />
+            </Layer>
           )}
 
           {/* Draft / cursor */}
@@ -768,6 +1171,38 @@ export function PlanEditor() {
                 radius={5}
                 fill="#ea580c"
               />
+            )}
+
+            {/* Balk-draft */}
+            {tool === "place-beam" && beamStart && cursor && (
+              <>
+                <Line
+                  points={[
+                    metersToScreen(beamStart, view).x, metersToScreen(beamStart, view).y,
+                    metersToScreen(cursor, view).x, metersToScreen(cursor, view).y,
+                  ]}
+                  stroke="#6b7280"
+                  strokeWidth={6}
+                  dash={[10, 5]}
+                />
+                <Circle x={metersToScreen(beamStart, view).x} y={metersToScreen(beamStart, view).y} radius={5} fill="#6b7280" />
+              </>
+            )}
+
+            {/* Sectielijn-draft */}
+            {tool === "draw-section" && sectionPoints.length > 0 && cursor && (
+              <>
+                <Line
+                  points={[
+                    metersToScreen(sectionPoints[0], view).x, metersToScreen(sectionPoints[0], view).y,
+                    metersToScreen(cursor, view).x, metersToScreen(cursor, view).y,
+                  ]}
+                  stroke="#7c3aed"
+                  strokeWidth={2}
+                  dash={[12, 6]}
+                />
+                <Circle x={metersToScreen(sectionPoints[0], view).x} y={metersToScreen(sectionPoints[0], view).y} radius={5} fill="#7c3aed" />
+              </>
             )}
 
             {/* Divide-rechthoek preview */}

@@ -33,6 +33,10 @@ const OPENING_TYPES: OpeningType[] = ["door", "window", "passage"];
 export function SelectionPanel() {
   const selection = useEditor((s) => s.selection);
   const select = useEditor((s) => s.select);
+  const multiSelection = useEditor((s) => s.multiSelection);
+  const setMultiSelection = useEditor((s) => s.setMultiSelection);
+  const clipboard = useEditor((s) => s.clipboard);
+  const setClipboard = useEditor((s) => s.setClipboard);
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const project = useProject();
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
@@ -111,8 +115,136 @@ export function SelectionPanel() {
 
   const tool = useEditor((s) => s.tool);
   const isPlacementMode = tool === "place" || tool === "draw-pipe";
+  const walls_sel = useLiveQuery(
+    async () => {
+      if (!activeLevelId) return [];
+      return (await getDB().walls.where("levelId").equals(activeLevelId).toArray()).filter((w) => !w.deleted);
+    },
+    [activeLevelId],
+    [],
+  );
+  const electrical_sel = useLiveQuery(
+    async () => {
+      if (!activeLevelId) return [];
+      return (await getDB().electrical.where("levelId").equals(activeLevelId).toArray()).filter((e) => !e.deleted);
+    },
+    [activeLevelId],
+    [],
+  );
+  const furniture_sel = useLiveQuery(
+    async () => {
+      if (!activeLevelId) return [];
+      return (await getDB().furniture.where("levelId").equals(activeLevelId).toArray()).filter((f) => !f.deleted);
+    },
+    [activeLevelId],
+    [],
+  );
+  const plumbing_sel = useLiveQuery(
+    async () => {
+      if (!activeLevelId) return [];
+      return (await getDB().plumbing.where("levelId").equals(activeLevelId).toArray()).filter((p) => !p.deleted);
+    },
+    [activeLevelId],
+    [],
+  );
+  const hvac_sel = useLiveQuery(
+    async () => {
+      if (!activeLevelId) return [];
+      return (await getDB().hvac.where("levelId").equals(activeLevelId).toArray()).filter((h) => !h.deleted);
+    },
+    [activeLevelId],
+    [],
+  );
+  const rooms_sel = useLiveQuery(
+    async () => {
+      if (!activeLevelId) return [];
+      return (await getDB().rooms.where("levelId").equals(activeLevelId).toArray()).filter((r) => !r.deleted);
+    },
+    [activeLevelId],
+    [],
+  );
 
-  if (!selection || isPlacementMode) return null;
+  if (isPlacementMode) return null;
+
+  // Multi-select panel
+  if (multiSelection.length > 1) {
+    const wallCount = multiSelection.filter((s) => s.kind === "wall").length;
+    const roomCount = multiSelection.filter((s) => s.kind === "room").length;
+    const otherCount = multiSelection.length - wallCount - roomCount;
+    return (
+      <div className="pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3">
+        <div className="mx-auto max-w-md rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-ink-900">
+              {multiSelection.length} items geselecteerd
+              {wallCount > 0 ? ` · ${wallCount} muren` : ""}
+              {roomCount > 0 ? ` · ${roomCount} ruimtes` : ""}
+              {otherCount > 0 ? ` · ${otherCount} overig` : ""}
+            </h2>
+            <button
+              onClick={() => setMultiSelection([])}
+              className="rounded-lg p-1 text-ink-500 hover:bg-paper-sunken"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => {
+                import("@/lib/clipboard").then(({ buildClipboard }) => {
+                  const allEnt = {
+                    walls: walls_sel ?? [],
+                    openings: [],
+                    rooms: rooms_sel ?? [],
+                    electrical: electrical_sel ?? [],
+                    plumbing: plumbing_sel ?? [],
+                    hvac: hvac_sel ?? [],
+                    furniture: furniture_sel ?? [],
+                  };
+                  const clip = buildClipboard(multiSelection, allEnt);
+                  setClipboard(clip);
+                });
+              }}
+              className="rounded-md bg-paper-sunken px-2.5 py-1.5 text-xs font-medium text-ink-700 hover:bg-line"
+            >
+              Kopiëren
+            </button>
+            {wallCount > 0 && (
+              <>
+                {(["new", "existing", "demolish"] as const).map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => {
+                      for (const s of multiSelection) {
+                        if (s.kind === "wall") void update("walls", s.id, { status: st });
+                      }
+                    }}
+                    className="rounded-md bg-paper-sunken px-2.5 py-1.5 text-xs font-medium text-ink-700 hover:bg-line"
+                  >
+                    {st === "new" ? "Nieuw" : st === "existing" ? "Bestaand" : "Slopen"}
+                  </button>
+                ))}
+              </>
+            )}
+            <button
+              onClick={async () => {
+                for (const s of multiSelection) {
+                  const tbl = s.kind === "wall" ? "walls" : s.kind === "room" ? "rooms" : s.kind === "electrical" ? "electrical" : s.kind === "furniture" ? "furniture" : s.kind === "plumbing" ? "plumbing" : s.kind === "hvac" ? "hvac" : null;
+                  if (tbl) await remove(tbl as Parameters<typeof remove>[0], s.id);
+                }
+                setMultiSelection([]);
+              }}
+              className="rounded-md bg-danger/10 px-2.5 py-1.5 text-xs font-medium text-danger hover:bg-danger/20"
+            >
+              Verwijder alles
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!selection) return null;
 
   return (
     <div className="pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3">
@@ -493,20 +625,31 @@ export function SelectionPanel() {
         {selection?.kind === "furniture" && selectedFurniture && (
           <div className="space-y-2.5">
             <Row label="Rotatie">
-              <div className="flex gap-1">
-                {([0, 90, 180, 270] as const).map((deg) => (
-                  <button
-                    key={deg}
-                    onClick={() => void update("furniture", selectedFurniture.id, { rotation: deg })}
-                    className={`rounded-md px-2 py-1 text-[11px] font-medium ${
-                      selectedFurniture.rotation === deg
-                        ? "bg-accent text-white"
-                        : "bg-paper-sunken text-ink-700"
-                    }`}
-                  >
-                    {deg}°
-                  </button>
-                ))}
+              <div className="flex items-center gap-1.5">
+                <div className="flex gap-1">
+                  {([0, 90, 180, 270] as const).map((deg) => (
+                    <button
+                      key={deg}
+                      onClick={() => void update("furniture", selectedFurniture.id, { rotation: deg })}
+                      className={`rounded-md px-2 py-1 text-[11px] font-medium ${
+                        Math.round(selectedFurniture.rotation) === deg
+                          ? "bg-accent text-white"
+                          : "bg-paper-sunken text-ink-700"
+                      }`}
+                    >
+                      {deg}°
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  value={Math.round(selectedFurniture.rotation)}
+                  min={0}
+                  max={359}
+                  onChange={(e) => void update("furniture", selectedFurniture.id, { rotation: Number(e.target.value) % 360 })}
+                  className="tabular w-16 rounded-md border border-line bg-paper px-2 py-1 text-right text-xs text-ink-900"
+                />
+                <span className="text-[11px] text-ink-500">°</span>
               </div>
             </Row>
             <Row label="Kleur">

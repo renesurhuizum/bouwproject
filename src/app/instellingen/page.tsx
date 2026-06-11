@@ -252,6 +252,39 @@ export default function InstellingenPage() {
           </div>
         </section>
 
+        {/* Locatie voor zonnestand */}
+        <section className="space-y-3 rounded-card border border-line bg-paper-raised p-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+            Locatie (3D zonnestand)
+          </h2>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="mb-1 block text-xs text-ink-500">Breedtegraad (lat)</span>
+              <input
+                type="number"
+                step="0.01"
+                defaultValue={project?.lat ?? 52.3}
+                onBlur={(e) => patchProject({ lat: parseFloat(e.target.value) || 52.3 })}
+                className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-900 tabular"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-ink-500">Lengtegraad (lng)</span>
+              <input
+                type="number"
+                step="0.01"
+                defaultValue={project?.lng ?? 5.3}
+                onBlur={(e) => patchProject({ lng: parseFloat(e.target.value) || 5.3 })}
+                className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-900 tabular"
+              />
+            </label>
+          </div>
+          <span className="block text-[11px] text-ink-400">
+            Standaard: Nederland (52.3°N, 5.3°O). Wordt gebruikt voor de realistische
+            zonnestand in de 3D-weergave.
+          </span>
+        </section>
+
         {/* Databeheer */}
         <section className="space-y-3 rounded-card border border-line bg-paper-raised p-4">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">

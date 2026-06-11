@@ -3,15 +3,15 @@
 // 3D-weergave: plattegrond geëxtrudeerd naar muren. Orbit-camera om rond te kijken.
 // Plan-coördinaten (x, y in meters) → wereld (x, z). Hoogte = y omhoog.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import type { ReactNode } from "react";
 import * as THREE from "three";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, Grid, Sky } from "@react-three/drei";
 import { useLiveQuery } from "dexie-react-hooks";
-import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem } from "@/lib/domain/types";
-import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac } from "@/lib/hooks";
+import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem, Staircase, Column, Beam, Roof } from "@/lib/domain/types";
+import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { ELECTRICAL_LABEL } from "@/lib/domain/constants";
 import { getDB } from "@/lib/db/db";
@@ -21,6 +21,9 @@ import { use3DEdit } from "./use3DEdit";
 import { WalkthroughMode } from "./WalkthroughMode";
 import { dist, angle, polygonCentroid, projectOnSegment } from "@/lib/geometry";
 import type { Point } from "@/lib/domain/types";
+import { buildGableRoof, buildShedRoof, buildFlatRoof } from "@/lib/roofGeometry";
+import { sunAzimuthElevation, sunToLightDir } from "@/lib/sunPosition";
+import { makeTileCanvas, makeWoodCanvas, makeConcreteCanvas, makeRoofTileCanvas } from "@/lib/textures";
 
 const STATUS_3D: Record<Wall["status"], { color: string; opacity: number }> = {
   existing: { color: "#b8b0a2", opacity: 1 },
@@ -109,6 +112,21 @@ function RoomFloor3D({ room }: { room: Room }) {
     return s;
   }, [room.polygon]);
 
+  const texture = useMemo(() => {
+    const mat = room.floorMaterial;
+    if (!mat) return null;
+    let canvas: HTMLCanvasElement;
+    if (mat === "tile") canvas = makeTileCanvas();
+    else if (mat === "wood") canvas = makeWoodCanvas();
+    else if (mat === "stone" || mat === "concrete") canvas = makeConcreteCanvas();
+    else return null;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(4, 4);
+    return tex;
+  }, [room.floorMaterial]);
+
   const floorColor = room.floorMaterial
     ? FLOOR_COLORS[room.floorMaterial]
     : (room.color ?? "#e6d6bf");
@@ -117,7 +135,8 @@ function RoomFloor3D({ room }: { room: Room }) {
     <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} receiveShadow>
       <shapeGeometry args={[shape]} />
       <meshStandardMaterial
-        color={floorColor}
+        color={texture ? "#ffffff" : floorColor}
+        map={texture ?? undefined}
         roughness={room.floorMaterial === "tile" ? 0.3 : room.floorMaterial === "wood" ? 0.65 : 0.9}
         side={THREE.DoubleSide}
       />
@@ -933,6 +952,187 @@ function HvacMesh3D({ item }: { item: HvacItem }) {
   return null;
 }
 
+// ── Trap ─────────────────────────────────────────────────────────────────────
+
+function StaircaseModel3D({ item }: { item: Staircase }) {
+  const steps = Math.max(1, item.steps);
+  const risePerStep = 0.20;
+  const runPerStep = item.run / steps;
+  const color = "#c8c0b4";
+  const rotY = -(item.rotation * Math.PI) / 180;
+
+  if (item.kind === "spiral") {
+    return (
+      <group position={[item.position.x, 0, item.position.y]} rotation={[0, rotY, 0]}>
+        {Array.from({ length: steps }, (_, i) => {
+          const a = (i / steps) * Math.PI * 2;
+          const r = item.width * 0.4;
+          return (
+            <mesh key={i} position={[Math.cos(a) * r, i * risePerStep, Math.sin(a) * r]}
+              rotation={[0, -a, 0]} castShadow>
+              <boxGeometry args={[item.width * 0.85, risePerStep * 0.6, runPerStep * 1.1]} />
+              <meshStandardMaterial color={color} roughness={0.8} />
+            </mesh>
+          );
+        })}
+        <mesh position={[0, (steps * risePerStep) / 2, 0]} castShadow>
+          <cylinderGeometry args={[0.08, 0.08, steps * risePerStep, 12]} />
+          <meshStandardMaterial color="#888880" roughness={0.7} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (item.kind === "l-shape") {
+    const half = Math.floor(steps / 2);
+    const second = steps - half;
+    return (
+      <group position={[item.position.x, 0, item.position.y]} rotation={[0, rotY, 0]}>
+        {Array.from({ length: half }, (_, i) => (
+          <mesh key={`a${i}`} position={[i * runPerStep + runPerStep / 2, (i + 0.5) * risePerStep, 0]} castShadow>
+            <boxGeometry args={[runPerStep, risePerStep, item.width]} />
+            <meshStandardMaterial color={color} roughness={0.8} />
+          </mesh>
+        ))}
+        {Array.from({ length: second }, (_, i) => (
+          <mesh key={`b${i}`} position={[half * runPerStep, (half + i + 0.5) * risePerStep, -(i * runPerStep + runPerStep / 2)]} castShadow>
+            <boxGeometry args={[item.width, risePerStep, runPerStep]} />
+            <meshStandardMaterial color={color} roughness={0.8} />
+          </mesh>
+        ))}
+      </group>
+    );
+  }
+
+  return (
+    <group position={[item.position.x, 0, item.position.y]} rotation={[0, rotY, 0]}>
+      {Array.from({ length: steps }, (_, i) => (
+        <mesh key={i} position={[i * runPerStep + runPerStep / 2, (i + 0.5) * risePerStep, 0]} castShadow receiveShadow>
+          <boxGeometry args={[runPerStep, risePerStep, item.width]} />
+          <meshStandardMaterial color={color} roughness={0.8} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+// ── Kolom ────────────────────────────────────────────────────────────────────
+
+function ColumnModel3D({ item }: { item: Column }) {
+  const h = item.height ?? 2.8;
+  const color = item.material === "concrete" ? "#b0aaa0" : item.material === "brick" ? "#c8705a" : "#d8d4cc";
+  return (
+    <group position={[item.position.x, h / 2, item.position.y]} castShadow>
+      {item.shape === "round" ? (
+        <mesh castShadow receiveShadow>
+          <cylinderGeometry args={[item.size / 2, item.size / 2, h, 16]} />
+          <meshStandardMaterial color={color} roughness={0.85} />
+        </mesh>
+      ) : (
+        <mesh castShadow receiveShadow>
+          <boxGeometry args={[item.size, h, item.size]} />
+          <meshStandardMaterial color={color} roughness={0.85} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+// ── Stalen balk ───────────────────────────────────────────────────────────────
+
+function BeamModel3D({ item }: { item: Beam }) {
+  const length = dist(item.start, item.end);
+  if (length < 0.01) return null;
+  const cx = (item.start.x + item.end.x) / 2;
+  const cz = (item.start.y + item.end.y) / 2;
+  const rotY = -angle(item.start, item.end);
+  const bw = item.flangeWidth ?? 0.16;
+  const bh = bw;
+  const y = item.heightZ + bh / 2;
+  return (
+    <group position={[cx, y, cz]} rotation={[0, rotY, 0]}>
+      <mesh castShadow>
+        <boxGeometry args={[length, bh, 0.008]} />
+        <meshStandardMaterial color="#666870" metalness={0.65} roughness={0.35} />
+      </mesh>
+      <mesh position={[0, bh / 2, 0]} castShadow>
+        <boxGeometry args={[length, 0.012, bw * 0.6]} />
+        <meshStandardMaterial color="#666870" metalness={0.65} roughness={0.35} />
+      </mesh>
+      <mesh position={[0, -bh / 2, 0]} castShadow>
+        <boxGeometry args={[length, 0.012, bw * 0.6]} />
+        <meshStandardMaterial color="#666870" metalness={0.65} roughness={0.35} />
+      </mesh>
+    </group>
+  );
+}
+
+// ── Dak ───────────────────────────────────────────────────────────────────────
+
+function RoofMesh3D({ roof, wallHeight, footprint }: { roof: Roof; wallHeight: number; footprint: Point[] }) {
+  const geo = useMemo(() => {
+    const poly = (roof.polygon && roof.polygon.length >= 3) ? roof.polygon : footprint;
+    if (poly.length < 3) return null;
+    let data;
+    if (roof.type === "gable") {
+      data = buildGableRoof(poly, roof.pitch, roof.ridgeDirection, roof.overhang, wallHeight);
+    } else if (roof.type === "shed") {
+      data = buildShedRoof(poly, roof.pitch, roof.ridgeDirection, roof.overhang, wallHeight);
+    } else {
+      data = buildFlatRoof(poly, roof.overhang, wallHeight);
+    }
+    if (data.vertices.length === 0) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(data.vertices, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(data.normals, 3));
+    g.setIndex(new THREE.BufferAttribute(data.indices, 1));
+    return g;
+  }, [roof, wallHeight, footprint]);
+
+  const roofTex = useMemo(() => {
+    const tex = new THREE.CanvasTexture(makeRoofTileCanvas());
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(4, 2);
+    return tex;
+  }, []);
+
+  if (!geo) return null;
+  return (
+    <mesh geometry={geo} castShadow receiveShadow>
+      <meshStandardMaterial map={roofTex} roughness={0.85} metalness={0} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
+// ── Hulpcomponenten in Canvas (screenshot + clip-plane) ───────────────────────
+
+function ScreenshotTrigger({ trigger, onCapture }: { trigger: number; onCapture: (blob: Blob) => void }) {
+  const { gl } = useThree();
+  const prev = useRef(0);
+  useEffect(() => {
+    if (trigger === 0 || trigger === prev.current) return;
+    prev.current = trigger;
+    requestAnimationFrame(() => {
+      gl.domElement.toBlob((blob) => { if (blob) onCapture(blob); }, "image/png");
+    });
+  }, [trigger, gl, onCapture]);
+  return null;
+}
+
+function ClipPlane({ enabled, x }: { enabled: boolean; x: number }) {
+  const { gl } = useThree();
+  useEffect(() => {
+    gl.localClippingEnabled = enabled;
+    gl.clippingPlanes = enabled ? [new THREE.Plane(new THREE.Vector3(1, 0, 0), -x)] : [];
+    return () => {
+      gl.clippingPlanes = [];
+      gl.localClippingEnabled = false;
+    };
+  }, [enabled, x, gl]);
+  return null;
+}
+
 function FloorPlane({ levelId, elevation }: { levelId: string; elevation: number }) {
   const { mode, furnitureKind, electricalType, plumbingFixture, hvacType, reset } = use3DEdit();
   const active = mode !== "none";
@@ -1004,6 +1204,19 @@ function LevelScene({
   const plumbing = usePlumbing(level.id) ?? [];
   const furniture = useFurniture(level.id) ?? [];
   const hvac = useHvac(level.id) ?? [];
+  const stairs = useStairs(level.id) ?? [];
+  const columns = useColumns(level.id) ?? [];
+  const beams = useBeams(level.id) ?? [];
+  const roofs = useRoofs(level.id) ?? [];
+
+  const buildingFootprint = useMemo<Point[]>(() => {
+    if (walls.length === 0) return [];
+    const xs = walls.flatMap((w) => [w.start.x, w.end.x]);
+    const ys = walls.flatMap((w) => [w.start.y, w.end.y]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    return [{ x: minX, y: minY }, { x: maxX, y: minY }, { x: maxX, y: maxY }, { x: minX, y: maxY }];
+  }, [walls]);
 
   const openingsByWall = useMemo(() => {
     const m = new Map<string, Opening[]>();
@@ -1087,6 +1300,16 @@ function LevelScene({
         furniture.map((it) => <FurnitureMesh3D key={it.id} item={it} />)}
       {visibleLayers.hvac &&
         hvac.map((it) => <HvacMesh3D key={it.id} item={it} />)}
+      {visibleLayers.structure &&
+        stairs.map((it) => <StaircaseModel3D key={it.id} item={it} />)}
+      {visibleLayers.structure &&
+        columns.map((it) => <ColumnModel3D key={it.id} item={it} />)}
+      {visibleLayers.structure &&
+        beams.map((it) => <BeamModel3D key={it.id} item={it} />)}
+      {visibleLayers.roof &&
+        roofs.map((it) => (
+          <RoofMesh3D key={it.id} roof={it} wallHeight={level.height} footprint={buildingFootprint} />
+        ))}
     </group>
   );
 }
@@ -1098,6 +1321,21 @@ export function Scene3D() {
   const editMode = use3DEdit((s) => s.mode);
   const [walkMode, setWalkMode] = useState(false);
   const [dayMode, setDayMode] = useState(true);
+  const [sunDate, setSunDate] = useState("2024-06-21");
+  const [sunHour, setSunHour] = useState(13);
+  const [showSunPanel, setShowSunPanel] = useState(false);
+  const [clipEnabled, setClipEnabled] = useState(false);
+  const [clipX, setClipX] = useState(0);
+  const [screenshotTrigger, setScreenshotTrigger] = useState(0);
+
+  const handleCapture = useCallback((blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `3d-${Date.now()}.png`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
 
   const levels = useLiveQuery(
     async () => {
@@ -1122,6 +1360,23 @@ export function Scene3D() {
 
   const groundFloorElev = levels[0]?.elevation ?? 0;
 
+  // Zonnestand
+  const sunPos = useMemo<[number, number, number]>(() => {
+    if (!dayMode) return [100, 20, 100];
+    const d = new Date(sunDate);
+    d.setUTCHours(Math.floor(sunHour), Math.round((sunHour % 1) * 60), 0, 0);
+    const { azimuth, elevation } = sunAzimuthElevation(d, project?.lat ?? 52.3, project?.lng ?? 5.3);
+    const [x, y, z] = sunToLightDir(azimuth, elevation);
+    return [x * 80, y * 80, z * 80];
+  }, [dayMode, sunDate, sunHour, project?.lat, project?.lng]);
+
+  // Clip-range gebaseerd op gebouwafmetingen
+  const buildingBounds = useMemo(() => {
+    if (!pts.length) return { minX: -10, maxX: 10 };
+    const xs = pts.map((p) => p.x);
+    return { minX: Math.min(...xs) - 2, maxX: Math.max(...xs) + 2 };
+  }, [pts]);
+
   return (
     <div className="relative h-full w-full">
       <Canvas
@@ -1134,7 +1389,7 @@ export function Scene3D() {
         style={{ cursor: editMode !== "none" ? "crosshair" : walkMode ? "none" : "grab" }}
       >
         {dayMode ? (
-          <Sky sunPosition={[100, 20, 100]} turbidity={8} rayleigh={0.5} />
+          <Sky sunPosition={sunPos} turbidity={8} rayleigh={0.5} />
         ) : (
           <color attach="background" args={["#0a0e1a"]} />
         )}
@@ -1142,7 +1397,7 @@ export function Scene3D() {
         <ambientLight intensity={dayMode ? 0.45 : 0.15} />
         <hemisphereLight args={dayMode ? ["#f0ecd8", "#8a9070", 0.6] : ["#1a2040", "#0a0e0a", 0.3]} />
         <directionalLight
-          position={[12, 20, 8]}
+          position={sunPos}
           intensity={dayMode ? 1.8 : 0.1}
           castShadow
           shadow-mapSize={[2048, 2048]}
@@ -1155,6 +1410,9 @@ export function Scene3D() {
         />
         {!dayMode && <pointLight position={[center.x, groundFloorElev + 2.2, center.y]} intensity={2} distance={12} color="#ffd080" />}
         <directionalLight position={[-8, 12, -6]} intensity={0.4} color="#d4e8f0" />
+
+        <ScreenshotTrigger trigger={screenshotTrigger} onCapture={handleCapture} />
+        <ClipPlane enabled={clipEnabled} x={clipX} />
 
         {/* Vloer */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, 0, center.y]} receiveShadow>
@@ -1213,7 +1471,73 @@ export function Scene3D() {
         >
           {dayMode ? "🌙" : "☀️"}
         </button>
+        {dayMode && (
+          <button
+            className="pointer-events-auto rounded-xl border border-white/20 bg-ink-900/80 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur hover:bg-ink-900"
+            onClick={() => setShowSunPanel((v) => !v)}
+            title="Zonnestand instellen"
+          >
+            ☀ Zon
+          </button>
+        )}
+        <button
+          className={`pointer-events-auto rounded-xl border border-white/20 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur hover:bg-ink-900 ${clipEnabled ? "bg-orange-700/80" : "bg-ink-900/80"}`}
+          onClick={() => setClipEnabled((v) => !v)}
+          title="Doorsnede aan/uit"
+        >
+          ✂ Doorsnede
+        </button>
+        <button
+          className="pointer-events-auto rounded-xl border border-white/20 bg-ink-900/80 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur hover:bg-ink-900"
+          onClick={() => setScreenshotTrigger((t) => t + 1)}
+          title="Download PNG van 3D-view"
+        >
+          📷
+        </button>
       </div>
+
+      {/* Zon-paneel */}
+      {showSunPanel && dayMode && (
+        <div className="pointer-events-auto absolute right-3 top-40 z-20 flex flex-col gap-2 rounded-xl border border-white/20 bg-ink-900/90 p-3 text-xs text-white shadow-xl backdrop-blur w-52">
+          <label className="flex flex-col gap-1">
+            <span className="font-semibold">Datum</span>
+            <input
+              type="date"
+              value={sunDate}
+              onChange={(e) => setSunDate(e.target.value)}
+              className="rounded bg-white/10 px-2 py-1 text-white"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-semibold">Tijd: {Math.floor(sunHour)}:{String(Math.round((sunHour % 1) * 60)).padStart(2, "0")}</span>
+            <input
+              type="range"
+              min={5}
+              max={21}
+              step={0.25}
+              value={sunHour}
+              onChange={(e) => setSunHour(parseFloat(e.target.value))}
+              className="w-full"
+            />
+          </label>
+        </div>
+      )}
+
+      {/* Clip-plane slider */}
+      {clipEnabled && (
+        <div className="pointer-events-auto absolute left-1/2 bottom-10 z-20 -translate-x-1/2 flex flex-col items-center gap-1 rounded-xl border border-white/20 bg-ink-900/90 px-4 py-2 text-xs text-white shadow-xl backdrop-blur">
+          <span className="font-semibold">Doorsnede X = {clipX.toFixed(1)} m</span>
+          <input
+            type="range"
+            min={buildingBounds.minX}
+            max={buildingBounds.maxX}
+            step={0.1}
+            value={clipX}
+            onChange={(e) => setClipX(parseFloat(e.target.value))}
+            className="w-48"
+          />
+        </div>
+      )}
 
       {walkMode && (
         <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center">

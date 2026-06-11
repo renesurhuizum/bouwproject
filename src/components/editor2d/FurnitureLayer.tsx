@@ -10,11 +10,12 @@ interface Props {
   view: ViewState;
   furniture: Furniture[];
   selectedId: string | null;
+  multiSelectedIds?: string[];
   onSelect: (id: string) => void;
   onMove: (id: string, x: number, y: number) => void;
 }
 
-export function FurnitureLayer({ view, furniture, selectedId, onSelect, onMove }: Props) {
+export function FurnitureLayer({ view, furniture, selectedId, multiSelectedIds, onSelect, onMove }: Props) {
   return (
     <Layer>
       {furniture.map((item) => {
@@ -25,6 +26,7 @@ export function FurnitureLayer({ view, furniture, selectedId, onSelect, onMove }
         const sw = metersToPx(w, view);
         const sd = metersToPx(d, view);
         const selected = item.id === selectedId;
+        const multiSelected = multiSelectedIds?.includes(item.id) && !selected;
 
         return (
           <Group
@@ -51,8 +53,8 @@ export function FurnitureLayer({ view, furniture, selectedId, onSelect, onMove }
               width={sw}
               height={sd}
               fill={item.color ?? def.color}
-              stroke={selected ? "#ea580c" : "#8b7355"}
-              strokeWidth={selected ? 2 : 1}
+              stroke={selected ? "#ea580c" : multiSelected ? "#3b82f6" : "#8b7355"}
+              strokeWidth={selected || multiSelected ? 2 : 1}
               cornerRadius={2}
               opacity={0.85}
             />

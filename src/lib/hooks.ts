@@ -4,7 +4,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { getDB } from "./db/db";
-import type { Furniture, HvacItem } from "./domain/types";
+import type { Beam, Column, Dormer, Furniture, HvacItem, Roof, SectionLine, Staircase } from "./domain/types";
 
 function notDeleted<T extends { deleted?: boolean }>(rows: T[] | undefined): T[] {
   return (rows ?? []).filter((r) => !r.deleted);
@@ -181,5 +181,77 @@ export function useHvac(levelId: string | null) {
     },
     [levelId],
     [] as HvacItem[],
+  );
+}
+
+export function useStairs(levelId: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      const rows = await getDB().stairs.where("levelId").equals(levelId).toArray();
+      return rows.filter((s) => !s.deleted);
+    },
+    [levelId],
+    [] as Staircase[],
+  );
+}
+
+export function useColumns(levelId: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      const rows = await getDB().columns.where("levelId").equals(levelId).toArray();
+      return rows.filter((c) => !c.deleted);
+    },
+    [levelId],
+    [] as Column[],
+  );
+}
+
+export function useBeams(levelId: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      const rows = await getDB().beams.where("levelId").equals(levelId).toArray();
+      return rows.filter((b) => !b.deleted);
+    },
+    [levelId],
+    [] as Beam[],
+  );
+}
+
+export function useRoofs(levelId: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      const rows = await getDB().roofs.where("levelId").equals(levelId).toArray();
+      return rows.filter((r) => !r.deleted);
+    },
+    [levelId],
+    [] as Roof[],
+  );
+}
+
+export function useDormers(roofId: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!roofId) return [];
+      const rows = await getDB().dormers.where("roofId").equals(roofId).toArray();
+      return rows.filter((d) => !d.deleted);
+    },
+    [roofId],
+    [] as Dormer[],
+  );
+}
+
+export function useSections(levelId: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      const rows = await getDB().sections.where("levelId").equals(levelId).toArray();
+      return rows.filter((s) => !s.deleted);
+    },
+    [levelId],
+    [] as SectionLine[],
   );
 }

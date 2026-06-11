@@ -16,6 +16,12 @@ import {
   Sofa,
   Undo2,
   Redo2,
+  Scissors,
+  ArrowUpFromLine,
+  Columns3,
+  Home,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import { useHistory } from "@/lib/history";
@@ -27,6 +33,7 @@ import type {
   HvacType,
   OpeningType,
   WallStatus,
+  StaircaseKind,
 } from "@/lib/domain/types";
 import {
   ELECTRICAL_LABEL,
@@ -78,6 +85,13 @@ const LAYERS: { key: EditorLayer; label: string }[] = [
   { key: "plumbing", label: "Water" },
   { key: "hvac", label: "Verwarming" },
   { key: "furniture", label: "Meubels" },
+  { key: "roof", label: "Dak" },
+];
+
+const STAIRCASE_KINDS: { kind: StaircaseKind; label: string }[] = [
+  { kind: "straight", label: "Recht" },
+  { kind: "l-shape", label: "L-vorm" },
+  { kind: "spiral", label: "Spiltrap" },
 ];
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
@@ -99,12 +113,18 @@ export function Toolbar() {
   const setFurniturePaletteKind = useEditor((s) => s.setFurniturePaletteKind);
   const pipeType = useEditor((s) => s.pipeType);
   const setPipeType = useEditor((s) => s.setPipeType);
+  const lockedLayers = useEditor((s) => s.lockedLayers);
+  const toggleLayerLock = useEditor((s) => s.toggleLayerLock);
 
   const undo = useHistory((s) => s.undo);
   const redo = useHistory((s) => s.redo);
 
   const SNAP_LABEL = { fine: "10cm", normal: "50cm", coarse: "1m" };
   const [showLayers, setShowLayers] = useState(false);
+  const [showConstructie, setShowConstructie] = useState(false);
+
+  const isConstructieTool = tool === "place-staircase" || tool === "place-column" || tool === "place-beam" || tool === "trim" || tool === "draw-section" || tool === "place-roof";
+  const [staircaseKind, setStaircaseKind] = useState<StaircaseKind>("straight");
 
   // Bepaal welk tabblad actief is in het "Installatie"-paneel.
   // draw-pipe hoort bij het Water-tabblad.
@@ -349,21 +369,94 @@ export function Toolbar() {
         </div>
       )}
 
+      {/* Constructie-paneel */}
+      {showConstructie && (
+        <div className="pointer-events-auto w-full max-w-sm rounded-xl border border-line bg-paper-raised/97 p-2 shadow-lg backdrop-blur">
+          <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wide text-ink-400">Trappen</p>
+          <div className="mb-2 flex gap-1">
+            {STAIRCASE_KINDS.map(({ kind, label }) => (
+              <button
+                key={kind}
+                onClick={() => {
+                  setStaircaseKind(kind);
+                  setPlaceKind({ domain: "staircase", kind });
+                  setTool("place-staircase");
+                }}
+                className={`flex-1 rounded-lg py-1.5 text-[10px] font-medium ${
+                  tool === "place-staircase" && placeKind?.domain === "staircase" && placeKind.kind === kind
+                    ? "bg-accent text-white"
+                    : "bg-paper-sunken text-ink-700"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wide text-ink-400">Draagstructuur</p>
+          <div className="mb-2 flex gap-1">
+            <button
+              onClick={() => setTool("place-column")}
+              className={`flex-1 rounded-lg py-1.5 text-[10px] font-medium ${tool === "place-column" ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"}`}
+            >
+              Kolom
+            </button>
+            <button
+              onClick={() => { setTool("place-beam"); setPlaceKind({ domain: "beam" }); }}
+              className={`flex-1 rounded-lg py-1.5 text-[10px] font-medium ${tool === "place-beam" ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"}`}
+            >
+              Stalen balk
+            </button>
+            <button
+              onClick={() => setTool("trim")}
+              className={`flex-1 rounded-lg py-1.5 text-[10px] font-medium ${tool === "trim" ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"}`}
+            >
+              ✂ Trim
+            </button>
+          </div>
+          <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wide text-ink-400">Dak</p>
+          <div className="mb-2 flex gap-1">
+            <button
+              onClick={() => { setTool("place-roof"); setPlaceKind({ domain: "roof" }); }}
+              className={`flex-1 rounded-lg py-1.5 text-[10px] font-medium ${tool === "place-roof" ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"}`}
+            >
+              Dak toevoegen
+            </button>
+          </div>
+          <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wide text-ink-400">Documentatie</p>
+          <div className="flex gap-1">
+            <button
+              onClick={() => { setTool("draw-section"); setPlaceKind({ domain: "section" }); }}
+              className={`flex-1 rounded-lg py-1.5 text-[10px] font-medium ${tool === "draw-section" ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"}`}
+            >
+              Doorsnede-lijn
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Lagen-paneel */}
       {showLayers && (
         <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
           {LAYERS.map((l) => (
-            <button
-              key={l.key}
-              onClick={() => toggleLayer(l.key)}
-              className={`rounded-lg px-2.5 py-1.5 text-xs font-medium ${
-                visibleLayers[l.key]
-                  ? "bg-ink-900 text-paper-raised"
-                  : "bg-paper-sunken text-ink-300"
-              }`}
-            >
-              {l.label}
-            </button>
+            <div key={l.key} className="flex items-center gap-0.5">
+              <button
+                onClick={() => toggleLayer(l.key)}
+                className={`rounded-lg px-2 py-1.5 text-xs font-medium ${
+                  visibleLayers[l.key]
+                    ? "bg-ink-900 text-paper-raised"
+                    : "bg-paper-sunken text-ink-300"
+                }`}
+              >
+                {l.label}
+              </button>
+              <button
+                onClick={() => toggleLayerLock(l.key)}
+                className="rounded p-1 text-ink-400 hover:text-ink-700"
+                title={lockedLayers[l.key] ? "Ontgrendelen" : "Vergrendelen"}
+              >
+                {lockedLayers[l.key] ? <Lock size={11} /> : <Unlock size={11} />}
+              </button>
+            </div>
           ))}
           <button
             onClick={toggleGrid}
@@ -432,6 +525,20 @@ export function Toolbar() {
           label="Meubels"
         >
           <Sofa size={20} />
+        </ToolBtn>
+        <ToolBtn
+          active={isConstructieTool || showConstructie}
+          onClick={() => {
+            if (isConstructieTool) {
+              setTool("select");
+              setShowConstructie(false);
+            } else {
+              setShowConstructie((v) => !v);
+            }
+          }}
+          label="Constructie"
+        >
+          <Columns3 size={20} />
         </ToolBtn>
         <div className="mx-0.5 h-7 w-px bg-line" />
         <ToolBtn active={showLayers} onClick={() => setShowLayers((v) => !v)} label="Lagen">

@@ -15,10 +15,11 @@ interface Props {
   view: ViewState;
   items: ElectricalItem[];
   selectedId: string | null;
+  multiSelectedIds?: string[];
   onSelect: (id: string) => void;
 }
 
-export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
+export function ElectricalLayer({ view, items, selectedId, multiSelectedIds, onSelect }: Props) {
   const byId = new Map(items.map((it) => [it.id, it]));
 
   // Schakelaar → lichtpunt verbindingen (stippellijn), op basis van linkedIds.
@@ -50,11 +51,15 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
       {items.map((it) => {
         const p = metersToScreen(it.position, view);
         const selected = it.id === selectedId;
+        const multiSelected = !selected && (multiSelectedIds?.includes(it.id) ?? false);
         const r = 11;
         return (
           <Fragment key={it.id}>
             {selected && (
               <Circle x={p.x} y={p.y} radius={r + 5} fill="#fb923c" opacity={0.5} listening={false} />
+            )}
+            {multiSelected && (
+              <Circle x={p.x} y={p.y} radius={r + 5} fill="#3b82f6" opacity={0.4} listening={false} />
             )}
             {it.type === "switch" || it.type === "panel" ? (
               <Rect

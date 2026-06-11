@@ -132,6 +132,43 @@ export function bounds(points: Point[]): { min: Point; max: Point } {
   return { min: { x: minX, y: minY }, max: { x: maxX, y: maxY } };
 }
 
+// Snijpunt van twee oneindige verlengingen van muur-segmenten a en b.
+// Geeft null als de lijnen parallel zijn.
+export function wallIntersection(
+  a: { start: Point; end: Point },
+  b: { start: Point; end: Point },
+): Point | null {
+  const d1x = a.end.x - a.start.x;
+  const d1y = a.end.y - a.start.y;
+  const d2x = b.end.x - b.start.x;
+  const d2y = b.end.y - b.start.y;
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-10) return null; // parallel
+  const dx = b.start.x - a.start.x;
+  const dy = b.start.y - a.start.y;
+  const t = (dx * d2y - dy * d2x) / denom;
+  return { x: a.start.x + t * d1x, y: a.start.y + t * d1y };
+}
+
+// Spiegel een array van punten rond een horizontale (h) of verticale (v) as
+// door het opgegeven spiegel-punt `pivot`.
+export function mirrorPoints(pts: Point[], axis: "h" | "v", pivot: Point): Point[] {
+  return pts.map((p) =>
+    axis === "h"
+      ? { x: 2 * pivot.x - p.x, y: p.y }
+      : { x: p.x, y: 2 * pivot.y - p.y },
+  );
+}
+
+// Bounding box van een selectie van punten inclusief centroid.
+export function selectionBbox(pts: Point[]): { min: Point; max: Point; center: Point } {
+  const b = bounds(pts);
+  return {
+    ...b,
+    center: { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2 },
+  };
+}
+
 // Punt-in-polygon (ray casting). Randpunten tellen als binnen
 // (kwadratische afstand, tolerantie 1 mm — geen sqrt in de hot loop).
 export function pointInPolygon(p: Point, poly: Point[]): boolean {

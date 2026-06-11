@@ -19,8 +19,13 @@ export interface Point {
 export interface Project extends Entity {
   name: string;
   description?: string;
-  northDegrees?: number;  // voor noordpijl op werkblad (0 = omhoog = Noord)
-  startDate?: string;     // ISO yyyy-mm-dd voor Gantt
+  northDegrees?: number;   // voor noordpijl op werkblad (0 = omhoog = Noord)
+  startDate?: string;      // ISO yyyy-mm-dd voor Gantt
+  revisionNumber?: number; // 0-based, oplopen bij elke revisie
+  revisionDate?: string;   // ISO yyyy-mm-dd van laatste revisie
+  drawingScale?: number;   // 50 | 100 | 200 (schaal 1:N)
+  lat?: number;            // breedtegraad voor zonnestand
+  lng?: number;            // lengtegraad voor zonnestand
 }
 
 export interface Level extends Entity {
@@ -100,6 +105,7 @@ export interface ElectricalItem extends Entity {
   type: ElectricalType;
   position: Point;
   heightZ: number; // m boven vloer
+  rotation?: number; // graden, vrije rotatie
   group?: string; // groepnummer
   wallId?: string;
   label?: string;
@@ -133,6 +139,7 @@ export interface PlumbingItem extends Entity {
   diameter?: number; // mm
   fixture?: FixtureKind;
   heightZ?: number; // m
+  rotation?: number; // graden, vrije rotatie
   note?: string;
 }
 
@@ -141,13 +148,14 @@ export type FurnitureKind =
   | "sofa-2" | "sofa-3" | "sofa-l"
   | "dining-table" | "dining-chair" | "desk" | "office-chair"
   | "wardrobe" | "bookshelf" | "tv-unit" | "coffee-table"
-  | "bathtub" | "shower-cabin" | "kitchen-island";
+  | "bathtub" | "shower-cabin" | "kitchen-island"
+  | "kitchen-base" | "kitchen-high" | "kitchen-upper" | "kitchen-corner";
 
 export interface Furniture extends Entity {
   levelId: string;
   kind: FurnitureKind;
   position: Point;
-  rotation: number;      // graden: 0, 90, 180, 270
+  rotation: number;      // graden, vrij getal (niet meer beperkt tot 0/90/180/270)
   width?: number;        // m (override)
   depth?: number;        // m (override)
   color?: string;
@@ -166,6 +174,7 @@ export interface HvacItem extends Entity {
   path?: Point[];
   position?: Point;
   heightZ?: number;
+  rotation?: number; // graden, vrije rotatie
   note?: string;
 }
 
@@ -235,4 +244,73 @@ export interface Photo extends Entity {
 }
 
 // Layer-zichtbaarheid in de editor
-export type EditorLayer = "structure" | "electrical" | "plumbing" | "hvac" | "rooms" | "furniture";
+export type EditorLayer = "structure" | "electrical" | "plumbing" | "hvac" | "rooms" | "furniture" | "roof";
+
+// ── Bouwkundige elementen ─────────────────────────────────────────────────────
+
+export type StaircaseKind = "straight" | "l-shape" | "spiral";
+
+export interface Staircase extends Entity {
+  levelId: string;
+  kind: StaircaseKind;
+  position: Point;     // linkerbovenhoek (in m)
+  width: number;       // loopbreedte in m
+  run: number;         // horizontale lengte in m
+  steps: number;       // aantal treden
+  rotation: number;    // graden
+  direction: "up" | "down";
+}
+
+export type ColumnShape = "round" | "square";
+
+export interface Column extends Entity {
+  levelId: string;
+  position: Point;
+  shape: ColumnShape;
+  size: number;         // diameter (round) of zijde (square) in m
+  height?: number;      // m (optioneel override)
+  material: WallMaterial;
+  loadBearing: boolean;
+}
+
+export interface Beam extends Entity {
+  levelId: string;
+  start: Point;
+  end: Point;
+  profile: "HEA100" | "HEA140" | "HEA160" | "HEB200" | "custom";
+  heightZ: number;      // hoogte boven vloer in m
+  flangeWidth?: number; // breedte flens in m (bij custom)
+}
+
+// ── Dak ───────────────────────────────────────────────────────────────────────
+
+export type RoofType = "gable" | "hip" | "shed" | "flat" | "mansard";
+
+export interface Roof extends Entity {
+  levelId: string;
+  type: RoofType;
+  pitch: number;           // hellingshoek in graden (bijv. 45)
+  ridgeDirection: number;  // richting van de nok in graden (0 = Noord-Zuid nok)
+  overhang: number;        // dakoversteek in m (standaard 0.5)
+  polygon?: Point[];       // optioneel: dakvoet-polygoon (anders: buitenmuren)
+}
+
+export type DormerType = "gable-dormer" | "shed-dormer" | "velux";
+
+export interface Dormer extends Entity {
+  roofId: string;
+  type: DormerType;
+  positionAlongEave: number;  // m langs de gevellijn
+  width: number;              // m
+  height: number;             // m
+  facingSide: "left" | "right" | "front" | "back";
+}
+
+// ── Doorsnede-lijn ────────────────────────────────────────────────────────────
+
+export interface SectionLine extends Entity {
+  levelId: string;
+  start: Point;
+  end: Point;
+  label: string; // "A-A", "B-B", etc.
+}

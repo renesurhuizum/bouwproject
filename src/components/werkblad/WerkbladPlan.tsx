@@ -4,7 +4,7 @@
 // openingen (deur-zwaaiboog / raam), installatiepunten met hoogtes, plus
 // maatlijnen, schaalbalk, noordpijl en legenda. Geen Konva — schoon voor print.
 
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import type {
   Wall,
   Room,
@@ -197,6 +197,7 @@ interface Props {
   furniture?: Furniture[];
   northDegrees?: number;
   maxWidth?: number;
+  svgRef?: RefObject<SVGSVGElement | null>;
 }
 
 export function WerkbladPlan({
@@ -208,6 +209,7 @@ export function WerkbladPlan({
   furniture = [],
   northDegrees = 0,
   maxWidth = 700,
+  svgRef,
 }: Props) {
   const pts: Point[] = [
     ...walls.flatMap((w) => [w.start, w.end]),
@@ -241,7 +243,7 @@ export function WerkbladPlan({
   const barX = PAD;
 
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="block">
+    <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`} className="block">
       {/* Maatlijnen — totale breedte (boven) en hoogte (rechts) */}
       <g stroke="#ea580c" strokeWidth={0.7} fill="none">
         <line x1={sx(b.min.x)} y1={PAD + DIM - 14} x2={sx(b.max.x)} y2={PAD + DIM - 14} />
