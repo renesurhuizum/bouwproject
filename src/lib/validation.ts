@@ -9,7 +9,7 @@ import type {
   Wall,
   Level,
 } from "./domain/types";
-import { pointInPolygon, polygonArea, projectOnSegment } from "./geometry";
+import { bounds, pointInPolygon, polygonArea, projectOnSegment } from "./geometry";
 import { roomWalls } from "./roomWalls";
 
 export interface ValidationIssue {
@@ -160,163 +160,108 @@ export function validateRoomServices(
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
-  const inRoom = (room: Room, p?: { x: number; y: number }) =>
-    !!p && pointInPolygon(p, room.polygon);
-
   for (const room of rooms) {
     if (room.polygon.length < 3) continue;
 
-    const fixtures = plumbing.filter((it) => it.type === "fixture" && inRoom(room, it.position));
+    // Bounding-box voorfilter zodat pointInPolygon alleen draait voor
+    // kandidaten die de ruimte überhaupt kunnen raken.
+    const bb = bounds(room.polygon);
+    const inRoom = (p?: { x: number; y: number }) =>
+      !!p &&
+      p.x >= bb.min.x && p.x <= bb.max.x &&
+      p.y >= bb.min.y && p.y <= bb.max.y &&
+      pointInPolygon(p, room.polygon);
+
+    // Eén pass over alle water-items: sanitair in de ruimte + leidingtypes
+    // die de ruimte raken (één polygon-test per traject-punt).
+    const fixtures: PlumbingItem[] = [];
+    const pipeTypes = new Set<string>();
+    for (const it of plumbing) {
+      if (it.type === "fixture") {
+        if (inRoom(it.position)) fixtures.push(it);
+      } else if (!pipeTypes.has(it.type) && it.path?.some((p) => inRoom(p))) {
+        pipeTypes.add(it.type);
+      }
+    }
     const hasFixture = (kind: string) => fixtures.some((f) => f.fixture === kind);
-    // Leiding "raakt" de ruimte als een traject-punt binnen de polygon ligt.
-    const hasPipe = (type: string) =>
-      plumbing.some((it) => it.type === type && it.path?.some((p) => pointInPolygon(p, room.polygon)));
-    const elec = electrical.filter((it) => inRoom(room, it.position));
+    const hasPipe = (type: string) => pipeTypes.has(type);
+    const elec = electrical.filter((it) => inRoom(it.position));
     const hasVent = hvac.some(
       (it) =>
         (it.type === "ventilation" || it.type === "wtw") &&
-        (inRoom(room, it.position) || it.path?.some((p) => pointInPolygon(p, room.polygon))),
+        (inRoom(it.position) || it.path?.some((p) => inRoom(p))),
     );
+    const hasSocket = elec.some((e) => e.type === "socket" || e.type === "socket-double");
+
+    const add = (severity: ValidationIssue["severity"], msg: string) =>
+      issues.push({ severity, message: `"${room.name}": ${msg}`, entityId: room.id });
 
     // Keuken: warm + koud water, afvoer en kookgroep (Perilex 2-fase).
     if (isFuncMatch(room, FUNC_KEUKEN)) {
       if (!hasFixture("kitchen-tap") && !hasFixture("sink")) {
-        issues.push({
-          severity: "warn",
-          message: `"${room.name}": nog geen kraan/tappunt — keuken heeft warm én koud water nodig`,
-          entityId: room.id,
-        });
+        add("warn", "nog geen kraan/tappunt — keuken heeft warm én koud water nodig");
       } else {
-        if (!hasPipe("supply-hot")) {
-          issues.push({
-            severity: "info",
-            message: `"${room.name}": teken de warmwater-aanvoer (rode leiding) naar de keukenkraan`,
-            entityId: room.id,
-          });
-        }
-        if (!hasPipe("supply-cold")) {
-          issues.push({
-            severity: "info",
-            message: `"${room.name}": teken de koudwater-aanvoer (blauwe leiding) naar de keukenkraan`,
-            entityId: room.id,
-          });
-        }
-        if (!hasPipe("drain")) {
-          issues.push({
-            severity: "warn",
-            message: `"${room.name}": afvoer ontbreekt nog (spoelbak/vaatwasser)`,
-            entityId: room.id,
-          });
-        }
+        if (!hasPipe("supply-hot"))
+          add("info", "teken de warmwater-aanvoer (rode leiding) naar de keukenkraan");
+        if (!hasPipe("supply-cold"))
+          add("info", "teken de koudwater-aanvoer (blauwe leiding) naar de keukenkraan");
+        if (!hasPipe("drain")) add("warn", "afvoer ontbreekt nog (spoelbak/vaatwasser)");
       }
       if (!elec.some((e) => e.type === "perilex")) {
-        issues.push({
-          severity: "warn",
-          message: `"${room.name}": elektrisch koken vereist een Perilex-aansluiting (2-fase kookgroep) — plaats deze via Installatie → Elektra`,
-          entityId: room.id,
-        });
+        add(
+          "warn",
+          "elektrisch koken vereist een Perilex-aansluiting (2-fase kookgroep) — plaats deze via Installatie → Elektra",
+        );
       }
       if (elec.filter((e) => e.type === "socket" || e.type === "socket-double").length < 2) {
-        issues.push({
-          severity: "info",
-          message: `"${room.name}": reken op aparte groepen voor vaatwasser, oven en combimagnetron (NEN 1010)`,
-          entityId: room.id,
-        });
+        add("info", "reken op aparte groepen voor vaatwasser, oven en combimagnetron (NEN 1010)");
       }
     }
 
     // Badkamer: warm + koud water, afvoer, ventilatie, elektra-zones.
     if (isFuncMatch(room, FUNC_BADKAMER)) {
-      const wetFixtures = fixtures.filter((f) =>
-        ["shower", "bath", "sink"].includes(f.fixture ?? ""),
-      );
-      if (wetFixtures.length > 0) {
-        if (!hasPipe("supply-hot")) {
-          issues.push({
-            severity: "info",
-            message: `"${room.name}": warmwater-aanvoer naar douche/bad/wastafel nog niet getekend`,
-            entityId: room.id,
-          });
-        }
-        if (!hasPipe("drain")) {
-          issues.push({
-            severity: "warn",
-            message: `"${room.name}": afvoerleiding ontbreekt nog`,
-            entityId: room.id,
-          });
-        }
+      const hasWet = fixtures.some((f) => ["shower", "bath", "sink"].includes(f.fixture ?? ""));
+      if (hasWet) {
+        if (!hasPipe("supply-hot"))
+          add("info", "warmwater-aanvoer naar douche/bad/wastafel nog niet getekend");
+        if (!hasPipe("drain")) add("warn", "afvoerleiding ontbreekt nog");
       }
       if (!hasVent) {
-        issues.push({
-          severity: "warn",
-          message: `"${room.name}": badkamer vereist mechanische ventilatie (Bouwbesluit, min. 14 dm³/s)`,
-          entityId: room.id,
-        });
+        add("warn", "badkamer vereist mechanische ventilatie (Bouwbesluit, min. 14 dm³/s)");
       }
-      if (elec.some((e) => e.type === "socket" || e.type === "socket-double")) {
-        issues.push({
-          severity: "info",
-          message: `"${room.name}": stopcontacten in badkamer — let op zone-indeling NEN 1010 (min. 60 cm van bad/douche, 30 mA aardlek)`,
-          entityId: room.id,
-        });
+      if (hasSocket) {
+        add(
+          "info",
+          "stopcontacten in badkamer — let op zone-indeling NEN 1010 (min. 60 cm van bad/douche, 30 mA aardlek)",
+        );
       }
     }
 
     // Toilet: koud water, afvoer, ventilatie.
     if (isFuncMatch(room, FUNC_TOILET)) {
       if (hasFixture("toilet")) {
-        if (!hasPipe("supply-cold")) {
-          issues.push({
-            severity: "info",
-            message: `"${room.name}": koudwater-aanvoer naar het toilet nog niet getekend`,
-            entityId: room.id,
-          });
-        }
-        if (!hasPipe("drain")) {
-          issues.push({
-            severity: "warn",
-            message: `"${room.name}": afvoer (110 mm standleiding) ontbreekt nog`,
-            entityId: room.id,
-          });
-        }
+        if (!hasPipe("supply-cold"))
+          add("info", "koudwater-aanvoer naar het toilet nog niet getekend");
+        if (!hasPipe("drain")) add("warn", "afvoer (110 mm standleiding) ontbreekt nog");
       }
       if (!hasVent) {
-        issues.push({
-          severity: "info",
-          message: `"${room.name}": toiletruimte heeft ventilatie nodig (Bouwbesluit, min. 7 dm³/s)`,
-          entityId: room.id,
-        });
+        add("info", "toiletruimte heeft ventilatie nodig (Bouwbesluit, min. 7 dm³/s)");
       }
     }
 
     // Wasruimte / wasmachine-opstelplaats.
-    const wm = fixtures.find((f) => f.fixture === "washing-machine");
-    if (wm || isFuncMatch(room, FUNC_WASRUIMTE)) {
-      if (wm) {
-        if (!hasPipe("drain")) {
-          issues.push({
-            severity: "warn",
-            message: `"${room.name}": wasmachine heeft een afvoer nodig`,
-            entityId: room.id,
-          });
-        }
-        if (!elec.some((e) => e.type === "socket" || e.type === "socket-double")) {
-          issues.push({
-            severity: "info",
-            message: `"${room.name}": wasmachine vereist een eigen eindgroep met stopcontact (NEN 1010)`,
-            entityId: room.id,
-          });
-        }
+    if (hasFixture("washing-machine")) {
+      if (!hasPipe("drain")) add("warn", "wasmachine heeft een afvoer nodig");
+      if (!hasSocket) {
+        add("info", "wasmachine vereist een eigen eindgroep met stopcontact (NEN 1010)");
       }
+    } else if (isFuncMatch(room, FUNC_WASRUIMTE)) {
+      add("info", "nog geen wasmachine-aansluitpunt geplaatst (Installatie → Water → Wasmachine)");
     }
 
     // CV-ketel / boiler: condensafvoer.
-    if (fixtures.some((f) => f.fixture === "boiler") && !hasPipe("drain")) {
-      issues.push({
-        severity: "info",
-        message: `"${room.name}": CV-ketel heeft een condensafvoer nodig`,
-        entityId: room.id,
-      });
+    if (hasFixture("boiler") && !hasPipe("drain")) {
+      add("info", "CV-ketel heeft een condensafvoer nodig");
     }
   }
 

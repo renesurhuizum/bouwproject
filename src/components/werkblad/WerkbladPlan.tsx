@@ -10,42 +10,25 @@ import type {
   Room,
   Opening,
   ElectricalItem,
-  ElectricalType,
   PlumbingItem,
   Furniture,
   FurnitureKind,
   FixtureKind,
   Point,
 } from "@/lib/domain/types";
-import { WALL_STATUS_COLOR, FIXTURE_CODE, PLUMBING_COLOR } from "@/lib/domain/constants";
+import {
+  WALL_STATUS_COLOR,
+  ELECTRICAL_CODE,
+  FIXTURE_CODE,
+  FIXTURE_FOOTPRINT,
+  PLUMBING_COLOR,
+} from "@/lib/domain/constants";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { bounds, dist, polygonArea, polygonCentroid } from "@/lib/geometry";
 import { formatLength, formatArea, formatHeight } from "@/lib/format";
 
-const ELEC_CODE: Record<ElectricalType, string> = {
-  socket: "S",
-  "socket-double": "S²",
-  switch: "W",
-  light: "L",
-  spot: "·",
-  "wall-light": "WL",
-  data: "D",
-  panel: "▣",
-  perilex: "P",
-  outdoor: "B",
-};
-
-// Bovenaanzicht-afmetingen sanitair (m) — voor symboolgrootte en code-positie.
-const FIXTURE_DIMS: Record<FixtureKind, { w: number; h: number }> = {
-  toilet: { w: 0.42, h: 0.68 },
-  sink: { w: 0.55, h: 0.45 },
-  shower: { w: 0.9, h: 0.9 },
-  bath: { w: 1.7, h: 0.75 },
-  "kitchen-tap": { w: 0.3, h: 0.3 },
-  "washing-machine": { w: 0.6, h: 0.6 },
-  boiler: { w: 0.45, h: 0.45 },
-  "outdoor-tap": { w: 0.3, h: 0.3 },
-};
+const ELEC_CODE = ELECTRICAL_CODE;
+const FIXTURE_DIMS = FIXTURE_FOOTPRINT;
 
 // Sanitair-symbool op ware grootte, gecentreerd rond (0,0). w/h in px.
 // Stijl (stroke/fill) komt van de omhullende <g>; alleen afwijkingen lokaal.

@@ -5,21 +5,9 @@
 import { Fragment } from "react";
 import { Layer, Line, Circle, Ellipse, Rect, Group, Text, Label, Tag } from "react-konva";
 import type { PlumbingItem, FixtureKind } from "@/lib/domain/types";
-import { FIXTURE_CODE, PLUMBING_COLOR } from "@/lib/domain/constants";
+import { FIXTURE_CODE, FIXTURE_FOOTPRINT, PLUMBING_COLOR } from "@/lib/domain/constants";
 import { formatHeight } from "@/lib/format";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
-
-// Werkelijke voetafdruk (m) per sanitair-soort, voor het bouwtekening-symbool.
-const FIXTURE_SIZE: Record<FixtureKind, { w: number; h: number }> = {
-  toilet:            { w: 0.42, h: 0.68 },
-  sink:              { w: 0.55, h: 0.45 },
-  shower:            { w: 0.90, h: 0.90 },
-  bath:              { w: 1.70, h: 0.75 },
-  "kitchen-tap":     { w: 0.30, h: 0.30 },
-  "washing-machine": { w: 0.60, h: 0.60 },
-  boiler:            { w: 0.45, h: 0.45 },
-  "outdoor-tap":     { w: 0.25, h: 0.25 },
-};
 
 // Bovenaanzicht-symbool per sanitair-soort, getekend in (0,0)–(w,h) px.
 // Puur tekenwerk; alle shapes listening={false} — de hit-Rect van de caller vangt clicks.
@@ -210,7 +198,7 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
         if (!item.position) return null;
         const p = metersToScreen(item.position, view);
         const selected = item.id === selectedId;
-        const size = item.fixture ? FIXTURE_SIZE[item.fixture] : null;
+        const size = item.fixture ? FIXTURE_FOOTPRINT[item.fixture] : null;
         const sw = size ? metersToPx(size.w, view) : 0;
         const sh = size ? metersToPx(size.h, view) : 0;
         // Bij ver uitzoomen is het symbool onleesbaar → cirkel-marker als terugval.

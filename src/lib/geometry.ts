@@ -132,14 +132,21 @@ export function bounds(points: Point[]): { min: Point; max: Point } {
   return { min: { x: minX, y: minY }, max: { x: maxX, y: maxY } };
 }
 
-// Punt-in-polygon (ray casting). Randpunten tellen als binnen.
+// Punt-in-polygon (ray casting). Randpunten tellen als binnen
+// (kwadratische afstand, tolerantie 1 mm — geen sqrt in de hot loop).
 export function pointInPolygon(p: Point, poly: Point[]): boolean {
   if (poly.length < 3) return false;
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const a = poly[i];
     const b = poly[j];
-    if (distToSegment(p, a, b) < 1e-9) return true;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+    const ex = p.x - (a.x + t * dx);
+    const ey = p.y - (a.y + t * dy);
+    if (ex * ex + ey * ey < 1e-6) return true;
     const intersects =
       a.y > p.y !== b.y > p.y &&
       p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x;

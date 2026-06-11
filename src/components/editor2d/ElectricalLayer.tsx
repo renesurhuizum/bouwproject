@@ -4,22 +4,12 @@
 
 import { Fragment } from "react";
 import { Layer, Circle, Rect, Label, Tag, Text, Line } from "react-konva";
-import type { ElectricalItem, ElectricalType } from "@/lib/domain/types";
+import type { ElectricalItem } from "@/lib/domain/types";
+import { ELECTRICAL_CODE } from "@/lib/domain/constants";
 import { formatHeight } from "@/lib/format";
 import { metersToScreen, type ViewState } from "./viewport";
 
-const CODE: Record<ElectricalType, string> = {
-  socket: "S",
-  "socket-double": "S²",
-  switch: "W",
-  light: "L",
-  spot: "·",
-  "wall-light": "WL",
-  data: "D",
-  panel: "▣",
-  perilex: "P",
-  outdoor: "B",
-};
+const CODE = ELECTRICAL_CODE;
 
 interface Props {
   view: ViewState;

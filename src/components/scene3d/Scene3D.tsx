@@ -13,6 +13,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem } from "@/lib/domain/types";
 import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
+import { ELECTRICAL_LABEL } from "@/lib/domain/constants";
 import { getDB } from "@/lib/db/db";
 import { create as dbCreate } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
@@ -140,11 +141,7 @@ function RoomCeiling3D({ room, height }: { room: Room; height: number }) {
   );
 }
 
-const ELECTRICAL_LABELS: Record<string, string> = {
-  socket: "Stopcontact", "socket-double": "Dubbel stop.", switch: "Schakelaar",
-  light: "Lichtpunt", spot: "Inbouwspot", data: "Data/UTP",
-  panel: "Meterkast", "wall-light": "Wandlamp", perilex: "Perilex (kookgroep)", outdoor: "Buitenpunt",
-};
+const ELECTRICAL_LABELS = ELECTRICAL_LABEL;
 
 function handleElectricalClick(e: ThreeEvent<MouseEvent>, item: ElectricalItem) {
   e.stopPropagation();

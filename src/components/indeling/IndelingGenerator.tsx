@@ -17,7 +17,7 @@ import {
   type DoorSide,
   type Layout,
 } from "@/lib/layoutGenerator";
-import { dist, polygonArea } from "@/lib/geometry";
+import { bounds, dist, polygonArea } from "@/lib/geometry";
 
 // Welke buitenmuur hoort bij de voordeur-zijde (volgorde: top, rechts, onder, links).
 const DOOR_OUTER_INDEX: Record<DoorSide, number> = { achter: 0, rechts: 1, voor: 2, links: 3 };
@@ -37,16 +37,11 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
   // Footprint uit de getekende muren: bounding box van alle muur-eindpunten.
   const footprint = useMemo(() => {
     if (walls.length === 0) return null;
-    const xs = walls.flatMap((w) => [w.start.x, w.end.x]);
-    const ys = walls.flatMap((w) => [w.start.y, w.end.y]);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const w = maxX - minX;
-    const h = maxY - minY;
+    const { min, max } = bounds(walls.flatMap((w) => [w.start, w.end]));
+    const w = max.x - min.x;
+    const h = max.y - min.y;
     if (w < 3 || h < 3) return null;
-    return { x: minX, y: minY, w, h };
+    return { x: min.x, y: min.y, w, h };
   }, [walls]);
 
   // Bron: bestaande plattegrond (indien aanwezig) of een nieuwe rechthoek.

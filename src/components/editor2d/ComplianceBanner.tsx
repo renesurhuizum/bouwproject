@@ -3,7 +3,7 @@
 // Compliance-hints: NEN 1010 (elektra) + Bouwbesluit 2012 (ruimtes).
 // Verschijnt als inklapbare banner linksonder zodra er meldingen zijn.
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { AlertTriangle, Info, ShieldCheck, ChevronDown, ChevronUp } from "lucide-react";
 import {
   useProject,
@@ -36,15 +36,23 @@ export function ComplianceBanner() {
   const hvac = useHvac(level?.id ?? null) ?? [];
   const [open, setOpen] = useState(false);
 
+  // Deferred: tijdens continue edits (slider/sleep) coalescen de validatie-runs
+  // zodat de editor responsief blijft; de banner loopt hooguit een tel achter.
+  const dWalls = useDeferredValue(walls);
+  const dElectrical = useDeferredValue(electrical);
+  const dRooms = useDeferredValue(rooms);
+  const dPlumbing = useDeferredValue(plumbing);
+  const dHvac = useDeferredValue(hvac);
+
   const issues = useMemo<ValidationIssue[]>(() => {
     if (!level) return [];
     return [
-      ...validateWalls(walls),
-      ...validateElectrical(electrical),
-      ...validateRooms(rooms, [level]),
-      ...validateRoomServices(rooms, plumbing, electrical, hvac),
+      ...validateWalls(dWalls),
+      ...validateElectrical(dElectrical),
+      ...validateRooms(dRooms, [level]),
+      ...validateRoomServices(dRooms, dPlumbing, dElectrical, dHvac),
     ];
-  }, [walls, electrical, rooms, plumbing, hvac, level]);
+  }, [dWalls, dElectrical, dRooms, dPlumbing, dHvac, level]);
 
   if (issues.length === 0) return null;
 
