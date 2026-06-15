@@ -20,6 +20,7 @@ import {
   LockOpen,
   Building2,
   Triangle,
+  Scissors,
 } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import { useHistory } from "@/lib/history";
@@ -460,6 +461,13 @@ export function Toolbar() {
         </div>
       )}
 
+      {/* Doorsnede-hint */}
+      {tool === "section" && (
+        <div className="pointer-events-auto rounded-xl border border-line bg-paper-raised/95 px-3 py-2 text-[11px] text-ink-600 shadow-lg backdrop-blur">
+          Klik twee punten om een doorsnedelijn (A-A) te tekenen · zie <strong>Aanzichten → Doorsneden</strong>
+        </div>
+      )}
+
       {/* Lagen-paneel */}
       {showLayers && (
         <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
@@ -584,6 +592,13 @@ export function Toolbar() {
           label="Dak"
         >
           <Triangle size={20} />
+        </ToolBtn>
+        <ToolBtn
+          active={tool === "section"}
+          onClick={() => setTool(tool === "section" ? "select" : "section")}
+          label="Doorsnede"
+        >
+          <Scissors size={20} />
         </ToolBtn>
         <div className="mx-0.5 h-7 w-px bg-line" />
         <ToolBtn active={showLayers} onClick={() => setShowLayers((v) => !v)} label="Lagen">

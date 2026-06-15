@@ -22,6 +22,7 @@ import type {
   Column,
   Beam,
   Roof,
+  SectionLine,
 } from "@/lib/domain/types";
 import { create, remove, update } from "@/lib/db/repo";
 import type { TableName } from "@/lib/db/repo";
@@ -29,7 +30,7 @@ import { getDB } from "@/lib/db/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useHistory } from "@/lib/history";
 import { useEditor, type SelKind, type Selection } from "@/lib/store/editor";
-import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers } from "@/lib/hooks";
+import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers, useSections } from "@/lib/hooks";
 import {
   ELECTRICAL_DEFAULT_HEIGHT,
   FIXTURE_DEFAULT_HEIGHT,
@@ -72,6 +73,7 @@ import { StairsLayer } from "./StairsLayer";
 import { ColumnsLayer } from "./ColumnsLayer";
 import { BeamsLayer } from "./BeamsLayer";
 import { RoofLayer } from "./RoofLayer";
+import { SectionLayer } from "./SectionLayer";
 import { RoomDivider } from "./RoomDivider";
 import { ElectricalLegend } from "./ElectricalLegend";
 import { Minimap } from "./Minimap";
@@ -120,6 +122,7 @@ export function PlanEditor() {
   const roofs = useRoofs(activeLevelId) ?? [];
   const roofIds = useMemo(() => roofs.map((r) => r.id), [roofs]);
   const dormers = useDormers(roofIds) ?? [];
+  const sections = useSections(activeLevelId) ?? [];
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
@@ -137,9 +140,9 @@ export function PlanEditor() {
   // Spiegel altijd de meest actuele entiteiten naar een ref, zodat
   // sneltoets-handlers (lasso/copy/nudge/mirror) niet op stale closures leunen.
   const entitiesRef = useRef<ClipboardData>({
-    walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams, roofs, dormers,
+    walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams, roofs, dormers, sections,
   });
-  entitiesRef.current = { walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams, roofs, dormers };
+  entitiesRef.current = { walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams, roofs, dormers, sections };
 
   // Shift-toets tracking voor orthogonaal tekenen
   const shiftRef = useRef(false);
@@ -317,6 +320,7 @@ export function PlanEditor() {
     beam: "beams",
     roof: "roofs",
     dormer: "dormers",
+    section: "sections",
   };
 
   async function deleteEntity(kind: SelKind, id: string) {
@@ -349,6 +353,7 @@ export function PlanEditor() {
       case "beam": return e.beams.find((x) => x.id === id) ?? null;
       case "roof": return e.roofs.find((x) => x.id === id) ?? null;
       case "dormer": return e.dormers.find((x) => x.id === id) ?? null;
+      case "section": return e.sections.find((x) => x.id === id) ?? null;
       default: return null;
     }
   }
@@ -449,6 +454,7 @@ export function PlanEditor() {
     add("column", e.columns);
     add("beam", e.beams);
     add("dormer", e.dormers);
+    add("section", e.sections);
     selectResult(res);
   }
 
@@ -606,6 +612,19 @@ export function PlanEditor() {
     select({ kind: "beam", id: bm.id });
   }
 
+  async function createSection(start: Point, end: Point) {
+    if (!activeLevelId || dist(start, end) < 0.2) return;
+    const letter = String.fromCharCode(65 + (entitiesRef.current.sections.length % 26));
+    const sec = await create<SectionLine>("sections", {
+      levelId: activeLevelId,
+      start,
+      end,
+      label: `${letter}-${letter}`,
+    });
+    pushAction({ type: "create", table: "sections", id: sec.id });
+    select({ kind: "section", id: sec.id });
+  }
+
   async function placeRoof() {
     if (!activeLevelId) return;
     // Eén dak per verdieping: bestaat er al een, selecteer dat (type via paneel).
@@ -729,6 +748,15 @@ export function PlanEditor() {
       void placeRoof();
       return;
     }
+    if (tool === "section") {
+      if (!draftStart) {
+        setDraftStart(snapped);
+      } else {
+        void createSection(draftStart, snapped);
+        setDraftStart(null);
+      }
+      return;
+    }
     if (tool === "draw-pipe" && activeLevelId) {
       setPipePoints((prev) => [...prev, snapped]);
       return;
@@ -788,7 +816,7 @@ export function PlanEditor() {
     const evt = e.evt;
     if (!pointers.current.has(evt.pointerId)) {
       // cursor voor rubber-band tonen ook zonder ingedrukt
-      if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction") {
+      if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction" || tool === "section") {
         setCursor(snapPoint(screenToMeters(posFromEvent(evt, stage), view)));
       }
       return;
@@ -829,7 +857,7 @@ export function PlanEditor() {
       if (tapRef.current) tapRef.current.moved = true;
       return;
     }
-    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction") {
+    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction" || tool === "section") {
       setCursor(snapPoint(screenToMeters(pos, view)));
     }
     if (tool === "divide") {
@@ -1072,6 +1100,13 @@ export function PlanEditor() {
             />
           )}
 
+          <SectionLayer
+            view={view}
+            sections={sections}
+            selectedId={selection?.kind === "section" ? selection.id : null}
+            onSelect={(id) => onSelectEntity("section", id)}
+          />
+
           {visibleLayers.furniture && (
             <FurnitureLayer
               view={view}
@@ -1143,6 +1178,19 @@ export function PlanEditor() {
                 y={metersToScreen(draftStart, view).y}
                 radius={5}
                 fill="#ea580c"
+              />
+            )}
+
+            {/* Doorsnedelijn rubber-band (twee punten) */}
+            {tool === "section" && draftStart && cursor && (
+              <Line
+                points={[
+                  ...Object.values(metersToScreen(draftStart, view)),
+                  ...Object.values(metersToScreen(cursor, view)),
+                ]}
+                stroke="#1c1917"
+                strokeWidth={2}
+                dash={[12, 4, 3, 4]}
               />
             )}
 

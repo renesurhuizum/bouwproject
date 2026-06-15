@@ -224,6 +224,13 @@ export interface Roof extends Entity {
   polygon?: Point[]; // optioneel dakvoet-polygoon; anders bounding box van de muren
 }
 
+export interface SectionLine extends Entity {
+  levelId: string;
+  start: Point;
+  end: Point;
+  label: string; // "A-A", "B-B"…
+}
+
 export type DormerType = "gable-dormer" | "shed-dormer" | "velux";
 
 export interface Dormer extends Entity {
