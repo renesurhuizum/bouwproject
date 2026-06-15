@@ -146,7 +146,7 @@ export interface Furniture extends Entity {
   levelId: string;
   kind: FurnitureKind;
   position: Point;
-  rotation: number;      // graden: 0, 90, 180, 270
+  rotation: number;      // graden, vrij (0–360); presets 0/90/180/270 in de UI
   width?: number;        // m (override)
   depth?: number;        // m (override)
   color?: string;

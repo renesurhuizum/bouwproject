@@ -6,7 +6,7 @@
 // - Muren tekenen met snapping op raster en bestaande eindpunten.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Stage, Layer, Line, Circle, Label, Tag, Text } from "react-konva";
+import { Stage, Layer, Line, Circle, Rect, Label, Tag, Text } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type {
   Point,
@@ -20,10 +20,11 @@ import type {
   Level,
 } from "@/lib/domain/types";
 import { create, remove, update } from "@/lib/db/repo";
+import type { TableName } from "@/lib/db/repo";
 import { getDB } from "@/lib/db/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useHistory } from "@/lib/history";
-import { useEditor, type SelKind } from "@/lib/store/editor";
+import { useEditor, type SelKind, type Selection } from "@/lib/store/editor";
 import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac } from "@/lib/hooks";
 import {
   ELECTRICAL_DEFAULT_HEIGHT,
@@ -31,7 +32,16 @@ import {
   OPENING_DEFAULTS,
   OPENING_SNAP_M,
 } from "@/lib/domain/constants";
-import { dist, snapToGrid, snapToPoints, projectOnSegment, constrainToAngle } from "@/lib/geometry";
+import { dist, snapToGrid, snapToPoints, projectOnSegment, constrainToAngle, bounds, pointInRect } from "@/lib/geometry";
+import { copySelection, pasteClipboard, type ClipboardData } from "@/lib/clipboard";
+import {
+  LAYER_FOR,
+  entityPoints,
+  translatePatch,
+  mirrorPatch,
+  selectionBounds,
+  type AnyEntity,
+} from "@/lib/selectionOps";
 import { GRID_SNAP_M } from "@/lib/store/editor";
 import { formatLength } from "@/lib/format";
 import {
@@ -79,6 +89,10 @@ export function PlanEditor() {
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const selection = useEditor((s) => s.selection);
   const select = useEditor((s) => s.select);
+  const multi = useEditor((s) => s.multi);
+  const setMulti = useEditor((s) => s.setMulti);
+  const setClipboard = useEditor((s) => s.setClipboard);
+  const lockedLayers = useEditor((s) => s.lockedLayers);
 
   const walls = useWalls(activeLevelId) ?? [];
   const rooms = useRooms(activeLevelId) ?? [];
@@ -96,6 +110,17 @@ export function PlanEditor() {
   const [menu, setMenu] = useState<{ x: number; y: number; kind: SelKind; id: string } | null>(null);
   const [divideRect, setDivideRect] = useState<LayoutRect | null>(null);
   const divideStartRef = useRef<Point | null>(null);
+
+  // Lasso (rubber-band) multi-selectie — alleen muis in select-tool op leeg canvas.
+  const [lassoBox, setLassoBox] = useState<{ start: Point; current: Point } | null>(null);
+  const lassoRef = useRef<{ id: number; start: Point } | null>(null);
+
+  // Spiegel altijd de meest actuele entiteiten naar een ref, zodat
+  // sneltoets-handlers (lasso/copy/nudge/mirror) niet op stale closures leunen.
+  const entitiesRef = useRef<ClipboardData>({
+    walls, rooms, openings, electrical, plumbing, hvac, furniture,
+  });
+  entitiesRef.current = { walls, rooms, openings, electrical, plumbing, hvac, furniture };
 
   // Shift-toets tracking voor orthogonaal tekenen
   const shiftRef = useRef(false);
@@ -184,9 +209,28 @@ export function PlanEditor() {
       const el = document.activeElement;
       if (el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
       if (e.key === "Delete" || e.key === "Backspace") {
-        if (selection) {
+        const sels = currentSels();
+        if (sels.length) {
           e.preventDefault();
-          void deleteEntity(selection.kind, selection.id);
+          void doDeleteSelection(sels);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        doCopy();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        doPaste({ x: 0.5, y: 0.5 });
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        doDuplicate();
+      } else if (e.key.startsWith("Arrow")) {
+        const sels = currentSels();
+        if (sels.length) {
+          e.preventDefault();
+          const step = e.shiftKey ? 1.0 : 0.1;
+          const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+          const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+          void doNudge(dx, dy);
         }
       } else if (e.key === "Enter" && tool === "draw-pipe" && pipePoints.length >= 2 && activeLevelId) {
         e.preventDefault();
@@ -216,7 +260,17 @@ export function PlanEditor() {
         switch (e.key.toLowerCase()) {
           case "w": setTool("wall"); break;
           case "v": setTool("select"); break;
-          case "r": setTool("room"); break;
+          case "r":
+            // Met een geselecteerd meubel: roteren in 15°-stappen i.p.v. ruimte-tool.
+            if (currentSels().some((s) => s.kind === "furniture")) {
+              void doRotateFurniture(e.shiftKey ? -15 : 15);
+            } else {
+              setTool("room");
+            }
+            break;
+          case "m":
+            if (currentSels().length) void doMirror(e.shiftKey ? "v" : "h");
+            break;
           case "e": setPlaceKind({ domain: "electrical", type: "socket" }); break;
           case "f":
             setTool("place-furniture");
@@ -248,6 +302,121 @@ export function PlanEditor() {
     await remove(tbl, id);
     setMenu(null);
     if (selection?.id === id) select(null);
+  }
+
+  // ── Selectie-bewerkingen (multi-select, copy/paste, nudge, spiegel) ──────────
+  // Lezen verse state via getState() zodat sneltoetsen niet op stale closures leunen.
+  function currentSels(): Selection[] {
+    const st = useEditor.getState();
+    return st.multi.length ? st.multi : st.selection ? [st.selection] : [];
+  }
+
+  function findEntity(kind: SelKind, id: string): AnyEntity | null {
+    const e = entitiesRef.current;
+    switch (kind) {
+      case "wall": return e.walls.find((w) => w.id === id) ?? null;
+      case "room": return e.rooms.find((r) => r.id === id) ?? null;
+      case "electrical": return e.electrical.find((x) => x.id === id) ?? null;
+      case "plumbing": return e.plumbing.find((x) => x.id === id) ?? null;
+      case "hvac": return e.hvac.find((x) => x.id === id) ?? null;
+      case "furniture": return e.furniture.find((x) => x.id === id) ?? null;
+      default: return null;
+    }
+  }
+
+  function selectResult(sels: Selection[]) {
+    if (sels.length === 0) select(null);
+    else if (sels.length === 1) select(sels[0]);
+    else setMulti(sels);
+  }
+
+  function doCopy() {
+    const sels = currentSels();
+    if (!sels.length) return;
+    setClipboard(copySelection(sels, entitiesRef.current));
+  }
+
+  async function pasteClip(clip: ReturnType<typeof copySelection>, offset: Point) {
+    const st = useEditor.getState();
+    if (!st.activeLevelId) return;
+    const { selections, created } = await pasteClipboard(clip, offset, st.activeLevelId);
+    for (const c of created) pushAction({ type: "create", table: c.table as TableName, id: c.id });
+    selectResult(selections);
+  }
+
+  function doPaste(offset: Point) {
+    const st = useEditor.getState();
+    if (st.clipboard) void pasteClip(st.clipboard, offset);
+  }
+
+  function doDuplicate() {
+    const sels = currentSels();
+    if (!sels.length) return;
+    void pasteClip(copySelection(sels, entitiesRef.current), { x: 0.3, y: 0.3 });
+  }
+
+  async function doNudge(dx: number, dy: number) {
+    for (const s of currentSels()) {
+      const ent = findEntity(s.kind, s.id);
+      if (!ent) continue;
+      const patch = translatePatch(s.kind, ent, dx, dy);
+      if (Object.keys(patch).length) await update(TABLE_FOR[s.kind], s.id, patch);
+    }
+  }
+
+  async function doMirror(axis: "h" | "v") {
+    const ents = currentSels()
+      .map((s) => ({ kind: s.kind, id: s.id, entity: findEntity(s.kind, s.id) }))
+      .filter((x): x is { kind: SelKind; id: string; entity: AnyEntity } => x.entity !== null);
+    if (!ents.length) return;
+    const bb = selectionBounds(ents);
+    const pivot = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2 };
+    for (const { kind, id, entity } of ents) {
+      const patch = mirrorPatch(kind, entity, axis, pivot);
+      if (Object.keys(patch).length) await update(TABLE_FOR[kind], id, patch);
+    }
+  }
+
+  async function doRotateFurniture(delta: number) {
+    for (const s of currentSels()) {
+      if (s.kind !== "furniture") continue;
+      const f = findEntity("furniture", s.id) as Furniture | null;
+      if (!f) continue;
+      await update("furniture", s.id, { rotation: (((f.rotation + delta) % 360) + 360) % 360 });
+    }
+  }
+
+  async function doDeleteSelection(sels: Selection[]) {
+    for (const s of sels) {
+      const tbl = TABLE_FOR[s.kind];
+      const snapshot = await (getDB()[tbl] as import("dexie").Table).get(s.id);
+      if (snapshot) pushAction({ type: "remove", table: tbl, snapshot });
+      await remove(tbl, s.id);
+    }
+    setMenu(null);
+    select(null);
+  }
+
+  function commitLasso(min: Point, max: Point) {
+    const st = useEditor.getState();
+    const e = entitiesRef.current;
+    const res: Selection[] = [];
+    const add = (kind: SelKind, arr: AnyEntity[]) => {
+      if (st.lockedLayers[LAYER_FOR[kind]] || !st.visibleLayers[LAYER_FOR[kind]]) return;
+      for (const it of arr) {
+        if ((it as { deleted?: boolean }).deleted) continue;
+        if (entityPoints(kind, it).some((p) => pointInRect(p, min, max))) {
+          res.push({ kind, id: it.id });
+        }
+      }
+    };
+    add("wall", e.walls);
+    add("room", e.rooms);
+    add("furniture", e.furniture);
+    add("electrical", e.electrical);
+    add("plumbing", e.plumbing);
+    add("hvac", e.hvac);
+    selectResult(res);
   }
 
   const endpoints = useMemo<Point[]>(
@@ -471,7 +640,19 @@ export function PlanEditor() {
         moved: false,
         onStage: e.target === stage,
       };
-      if (tool === "select") panPointer.current = { id: evt.pointerId, last: pos };
+      // Muis + select-tool op leeg canvas = lasso starten; anders pannen.
+      const startLasso =
+        tool === "select" &&
+        e.target === stage &&
+        evt.pointerType === "mouse" &&
+        evt.button === 0;
+      if (startLasso) {
+        const startM = screenToMeters(pos, view);
+        lassoRef.current = { id: evt.pointerId, start: startM };
+        setLassoBox({ start: startM, current: startM });
+      } else if (tool === "select") {
+        panPointer.current = { id: evt.pointerId, last: pos };
+      }
       if (tool === "divide") {
         divideStartRef.current = screenToMeters(pos, view);
         setCursor(screenToMeters(pos, view));
@@ -525,6 +706,12 @@ export function PlanEditor() {
     if (tapRef.current && evt.pointerId === tapRef.current.id) {
       if (dist(pos, tapRef.current.start) > 8) tapRef.current.moved = true;
     }
+    // Lasso slepen: rechthoek bijwerken, niet pannen.
+    if (lassoRef.current && evt.pointerId === lassoRef.current.id) {
+      setLassoBox({ start: lassoRef.current.start, current: screenToMeters(pos, view) });
+      if (tapRef.current) tapRef.current.moved = true;
+      return;
+    }
     if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture") {
       setCursor(snapPoint(screenToMeters(pos, view)));
     }
@@ -545,6 +732,26 @@ export function PlanEditor() {
     if (!stage) return;
     const evt = e.evt;
     const pos = posFromEvent(evt, stage);
+
+    // Lasso afronden: selecteer entiteiten binnen de rechthoek.
+    if (lassoRef.current && evt.pointerId === lassoRef.current.id) {
+      const startM = lassoRef.current.start;
+      const endM = screenToMeters(pos, view);
+      lassoRef.current = null;
+      setLassoBox(null);
+      pointers.current.delete(evt.pointerId);
+      gesture.current = {};
+      tapRef.current = null;
+      const min = { x: Math.min(startM.x, endM.x), y: Math.min(startM.y, endM.y) };
+      const max = { x: Math.max(startM.x, endM.x), y: Math.max(startM.y, endM.y) };
+      if (Math.abs(max.x - min.x) > 0.05 && Math.abs(max.y - min.y) > 0.05) {
+        commitLasso(min, max);
+      } else {
+        select(null); // klik op leeg vlak = deselecteren
+      }
+      return;
+    }
+
     const t = tapRef.current;
     const wasTap =
       !!t &&
@@ -594,6 +801,7 @@ export function PlanEditor() {
     const id = node.id();
     const name = node.name();
     if (id && name) {
+      if (lockedLayers[LAYER_FOR[name as SelKind]]) return; // vergrendeld
       const rect = stage.container().getBoundingClientRect();
       const pos = { x: e.evt.clientX - rect.left, y: e.evt.clientY - rect.top };
       select({ kind: name as SelKind, id });
@@ -603,12 +811,20 @@ export function PlanEditor() {
     }
   }
 
-  function onSelectEntity(
-    kind: "wall" | "room" | "electrical" | "opening" | "plumbing",
-    id: string,
-  ) {
+  function onSelectEntity(kind: SelKind, id: string) {
     if (tool !== "select") return; // bij tekenen niet selecteren
-    select({ kind, id });
+    if (lockedLayers[LAYER_FOR[kind]]) return; // vergrendelde laag: niet selecteerbaar
+    if (shiftRef.current) {
+      // Shift-klik: toggle in/uit de meervoudige selectie.
+      const cur = multi.length ? multi : selection ? [selection] : [];
+      const exists = cur.some((s) => s.id === id && s.kind === kind);
+      const next = exists
+        ? cur.filter((s) => !(s.id === id && s.kind === kind))
+        : [...cur, { kind, id }];
+      selectResult(next);
+    } else {
+      select({ kind, id });
+    }
   }
 
   // Draft (rubber-band) lengte.
@@ -695,7 +911,7 @@ export function PlanEditor() {
               view={view}
               items={hvac}
               selectedId={selection?.kind === "hvac" ? selection.id : null}
-              onSelect={(id) => select({ kind: "hvac", id })}
+              onSelect={(id) => onSelectEntity("hvac", id)}
             />
           )}
 
@@ -704,9 +920,12 @@ export function PlanEditor() {
               view={view}
               furniture={furniture}
               selectedId={selection?.kind === "furniture" ? selection.id : null}
-              onSelect={(id) => select({ kind: "furniture", id })}
+              onSelect={(id) => onSelectEntity("furniture", id)}
               onMove={async (id, x, y) => {
                 await update("furniture", id, { position: { x, y } });
+              }}
+              onRotate={async (id, rotation) => {
+                await update("furniture", id, { rotation });
               }}
             />
           )}
@@ -831,6 +1050,52 @@ export function PlanEditor() {
                 })}
               </>
             )}
+
+            {/* Lasso rubber-band */}
+            {lassoBox && (() => {
+              const a = metersToScreen(lassoBox.start, view);
+              const b = metersToScreen(lassoBox.current, view);
+              return (
+                <Rect
+                  x={Math.min(a.x, b.x)}
+                  y={Math.min(a.y, b.y)}
+                  width={Math.abs(b.x - a.x)}
+                  height={Math.abs(b.y - a.y)}
+                  fill="rgba(59,130,246,0.12)"
+                  stroke="#3b82f6"
+                  strokeWidth={1.5}
+                  dash={[6, 4]}
+                  listening={false}
+                />
+              );
+            })()}
+
+            {/* Meervoudige-selectie highlight */}
+            {multi.map((s) => {
+              const ent = findEntity(s.kind, s.id);
+              if (!ent) return null;
+              const pts = entityPoints(s.kind, ent);
+              if (pts.length === 0) return null;
+              const bb = bounds(pts);
+              const a = metersToScreen(bb.min, view);
+              const b = metersToScreen(bb.max, view);
+              const PAD = 6;
+              return (
+                <Rect
+                  key={`${s.kind}-${s.id}`}
+                  x={Math.min(a.x, b.x) - PAD}
+                  y={Math.min(a.y, b.y) - PAD}
+                  width={Math.abs(b.x - a.x) + PAD * 2}
+                  height={Math.abs(b.y - a.y) + PAD * 2}
+                  stroke="#ea580c"
+                  strokeWidth={2}
+                  dash={[4, 3]}
+                  fill="rgba(234,88,12,0.10)"
+                  cornerRadius={3}
+                  listening={false}
+                />
+              );
+            })}
           </Layer>
         </Stage>
       )}
