@@ -141,7 +141,8 @@ export type FurnitureKind =
   | "sofa-2" | "sofa-3" | "sofa-l"
   | "dining-table" | "dining-chair" | "desk" | "office-chair"
   | "wardrobe" | "bookshelf" | "tv-unit" | "coffee-table"
-  | "bathtub" | "shower-cabin" | "kitchen-island";
+  | "bathtub" | "shower-cabin" | "kitchen-island"
+  | "kitchen-base" | "kitchen-high" | "kitchen-upper" | "kitchen-corner";
 
 export interface Furniture extends Entity {
   levelId: string;
@@ -167,6 +168,44 @@ export interface HvacItem extends Entity {
   position?: Point;
   heightZ?: number;
   note?: string;
+}
+
+// ── Bouwkundige elementen (constructie) ──────────────────────────────────────
+
+export type StaircaseKind = "straight" | "l-shape" | "spiral";
+
+export interface Staircase extends Entity {
+  levelId: string;
+  kind: StaircaseKind;
+  position: Point; // linkerbovenhoek van de omhullende rechthoek
+  width: number; // m (trapbreedte)
+  run: number; // m (horizontale looplengte)
+  steps: number; // aantal treden
+  rotation: number; // graden
+  direction: "up" | "down"; // looprichting (op/af)
+}
+
+export type ColumnShape = "round" | "square";
+
+export interface Column extends Entity {
+  levelId: string;
+  position: Point;
+  shape: ColumnShape;
+  size: number; // diameter (rond) of zijde (vierkant), m
+  height?: number; // m (default = verdiepingshoogte)
+  material: WallMaterial;
+  loadBearing: boolean;
+}
+
+export type BeamProfile = "HEA100" | "HEA140" | "HEA160" | "HEB200" | "custom";
+
+export interface Beam extends Entity {
+  levelId: string;
+  start: Point;
+  end: Point;
+  profile: BeamProfile;
+  height: number; // m boven vloer (positie in de gevel, voor 3D)
+  width?: number; // flensbreedte m (override bij custom)
 }
 
 // ── Planning & uitvoering ─────────────────────────────────────────────────────
@@ -235,4 +274,11 @@ export interface Photo extends Entity {
 }
 
 // Layer-zichtbaarheid in de editor
-export type EditorLayer = "structure" | "electrical" | "plumbing" | "hvac" | "rooms" | "furniture";
+export type EditorLayer =
+  | "structure"
+  | "construction"
+  | "electrical"
+  | "plumbing"
+  | "hvac"
+  | "rooms"
+  | "furniture";

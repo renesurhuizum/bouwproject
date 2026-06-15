@@ -9,6 +9,9 @@ import type {
   WallStatus,
   PhaseStatus,
   MaterialStatus,
+  StaircaseKind,
+  ColumnShape,
+  BeamProfile,
 } from "./types";
 
 // ── Verwarming / HVAC ─────────────────────────────────────────────────────────
@@ -340,6 +343,48 @@ export const FIXTURE_FOOTPRINT: Record<FixtureKind, { w: number; h: number }> = 
   "washing-machine": { w: 0.60, h: 0.60 },
   boiler:            { w: 0.45, h: 0.45 },
   "outdoor-tap":     { w: 0.30, h: 0.30 },
+};
+
+// ── Bouwkundige elementen (constructie) ──────────────────────────────────────
+
+export const STAIRCASE_LABEL: Record<StaircaseKind, string> = {
+  straight: "Rechte trap",
+  "l-shape": "Kwartslag (L)",
+  spiral: "Spiltrap",
+};
+
+// Standaardafmetingen per traptype (m / aantal treden).
+export const STAIRCASE_DEFAULTS: Record<
+  StaircaseKind,
+  { width: number; run: number; steps: number }
+> = {
+  straight: { width: 1.0, run: 3.0, steps: 16 },
+  "l-shape": { width: 1.0, run: 2.4, steps: 16 },
+  spiral: { width: 1.6, run: 1.6, steps: 14 },
+};
+
+export const COLUMN_SHAPE_LABEL: Record<ColumnShape, string> = {
+  round: "Rond",
+  square: "Vierkant",
+};
+
+export const COLUMN_DEFAULT_SIZE = 0.3; // m
+
+// Stalen profielen: hoogte × flensbreedte (m), afgerond op standaard HEA/HEB.
+export const BEAM_PROFILE_LABEL: Record<BeamProfile, string> = {
+  HEA100: "HEA 100",
+  HEA140: "HEA 140",
+  HEA160: "HEA 160",
+  HEB200: "HEB 200",
+  custom: "Aangepast",
+};
+
+export const BEAM_PROFILE_DIMS: Record<BeamProfile, { h: number; w: number }> = {
+  HEA100: { h: 0.096, w: 0.1 },
+  HEA140: { h: 0.133, w: 0.14 },
+  HEA160: { h: 0.152, w: 0.16 },
+  HEB200: { h: 0.2, w: 0.2 },
+  custom: { h: 0.16, w: 0.16 },
 };
 
 // ── Materialen ────────────────────────────────────────────────────────────────

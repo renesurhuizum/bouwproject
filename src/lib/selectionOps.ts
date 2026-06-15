@@ -10,6 +10,9 @@ import type {
   PlumbingItem,
   HvacItem,
   Furniture,
+  Staircase,
+  Column,
+  Beam,
 } from "./domain/types";
 import type { SelKind } from "./store/editor";
 import type { EditorLayer } from "./domain/types";
@@ -21,7 +24,10 @@ export type AnyEntity =
   | ElectricalItem
   | PlumbingItem
   | HvacItem
-  | Furniture;
+  | Furniture
+  | Staircase
+  | Column
+  | Beam;
 
 // Welke editor-laag (zichtbaarheid/lock) hoort bij een selectie-soort.
 export const LAYER_FOR: Record<SelKind, EditorLayer> = {
@@ -32,6 +38,9 @@ export const LAYER_FOR: Record<SelKind, EditorLayer> = {
   plumbing: "plumbing",
   hvac: "hvac",
   furniture: "furniture",
+  staircase: "construction",
+  column: "construction",
+  beam: "construction",
 };
 
 // De relevante geometrie-punten van een entiteit (voor hit-test & bbox).
@@ -53,6 +62,12 @@ export function entityPoints(kind: SelKind, e: AnyEntity): Point[] {
       const h = e as HvacItem;
       return h.path ?? (h.position ? [h.position] : []);
     }
+    case "staircase":
+      return [(e as Staircase).position];
+    case "column":
+      return [(e as Column).position];
+    case "beam":
+      return [(e as Beam).start, (e as Beam).end];
     default:
       return [];
   }
@@ -85,6 +100,12 @@ export function translatePatch(
       if (h.path) return { path: h.path.map(t) };
       return h.position ? { position: t(h.position) } : {};
     }
+    case "staircase":
+      return { position: t((e as Staircase).position) };
+    case "column":
+      return { position: t((e as Column).position) };
+    case "beam":
+      return { start: t((e as Beam).start), end: t((e as Beam).end) };
     default:
       return {};
   }
@@ -124,6 +145,15 @@ export function mirrorPatch(
       if (h.path) return { path: h.path.map(m) };
       return h.position ? { position: m(h.position) } : {};
     }
+    case "staircase": {
+      const s = e as Staircase;
+      const rot = axis === "h" ? 180 - s.rotation : -s.rotation;
+      return { position: m(s.position), rotation: ((rot % 360) + 360) % 360 };
+    }
+    case "column":
+      return { position: m((e as Column).position) };
+    case "beam":
+      return { start: m((e as Beam).start), end: m((e as Beam).end) };
     default:
       return {};
   }

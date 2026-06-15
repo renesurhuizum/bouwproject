@@ -24,8 +24,20 @@ import {
   OPENING_COLOR,
   FIXTURE_LABEL,
   HVAC_LABEL,
+  STAIRCASE_LABEL,
+  COLUMN_SHAPE_LABEL,
+  BEAM_PROFILE_LABEL,
 } from "@/lib/domain/constants";
-import type { Wall, WallMaterial, WallStatus, OpeningType, FloorMaterial } from "@/lib/domain/types";
+import type {
+  Wall,
+  WallMaterial,
+  WallStatus,
+  OpeningType,
+  FloorMaterial,
+  StaircaseKind,
+  ColumnShape,
+  BeamProfile,
+} from "@/lib/domain/types";
 import { polygonArea as polyArea } from "@/lib/geometry";
 import { nvoArea } from "@/lib/validation";
 
@@ -114,6 +126,18 @@ export function SelectionPanel() {
       selection?.kind === "hvac" ? await getDB().hvac.get(selection.id) : null,
     [selection?.kind, selection?.id],
   );
+  const staircase = useLiveQuery(
+    async () => (selection?.kind === "staircase" ? await getDB().stairs.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
+  const column = useLiveQuery(
+    async () => (selection?.kind === "column" ? await getDB().columns.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
+  const beam = useLiveQuery(
+    async () => (selection?.kind === "beam" ? await getDB().beams.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
 
   const tool = useEditor((s) => s.tool);
   const isPlacementMode = tool === "place" || tool === "draw-pipe";
@@ -135,6 +159,7 @@ export function SelectionPanel() {
     const db = getDB();
     const data: ClipboardData = {
       walls: [], rooms: [], openings: [], electrical: [], plumbing: [], hvac: [], furniture: [],
+      stairs: [], columns: [], beams: [],
     };
     for (const s of sels) {
       const ent = await (db[TABLE_FOR_KIND[s.kind] as keyof typeof db] as import("dexie").Table).get(s.id);
@@ -193,7 +218,13 @@ export function SelectionPanel() {
                       ? (selectedFurniture ? FURNITURE_DEFAULTS[selectedFurniture.kind].label : "Meubel")
                       : selection.kind === "hvac"
                         ? "Verwarming"
-                        : "Elektra"}
+                        : selection.kind === "staircase"
+                          ? "Trap"
+                          : selection.kind === "column"
+                            ? "Kolom"
+                            : selection.kind === "beam"
+                              ? "Stalen balk"
+                              : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -592,6 +623,119 @@ export function SelectionPanel() {
           </div>
         )}
 
+        {staircase && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <div className="flex gap-1">
+                {(["straight", "l-shape", "spiral"] as StaircaseKind[]).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => update("stairs", staircase.id, { kind: k })}
+                    className={`rounded-md px-2 py-1 text-[10px] font-medium ${
+                      staircase.kind === k ? "bg-[#0f766e] text-white" : "bg-paper-sunken text-ink-700"
+                    }`}
+                  >
+                    {STAIRCASE_LABEL[k]}
+                  </button>
+                ))}
+              </div>
+            </Row>
+            <Row label="Breedte">
+              <NumberField value={Math.round(staircase.width * 100)} unit="cm" onChange={(v) => update("stairs", staircase.id, { width: v / 100 })} />
+            </Row>
+            <Row label="Looplengte">
+              <NumberField value={Math.round(staircase.run * 100)} unit="cm" onChange={(v) => update("stairs", staircase.id, { run: v / 100 })} />
+            </Row>
+            <Row label="Treden">
+              <NumberField value={staircase.steps} unit="st" onChange={(v) => update("stairs", staircase.id, { steps: Math.max(2, Math.round(v)) })} />
+            </Row>
+            <Row label="Rotatie">
+              <NumberField value={Math.round(staircase.rotation)} unit="°" onChange={(v) => update("stairs", staircase.id, { rotation: ((Math.round(v) % 360) + 360) % 360 })} />
+            </Row>
+            <Row label="Richting">
+              <div className="flex gap-1">
+                {(["up", "down"] as const).map((dir) => (
+                  <button
+                    key={dir}
+                    onClick={() => update("stairs", staircase.id, { direction: dir })}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                      staircase.direction === dir ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"
+                    }`}
+                  >
+                    {dir === "up" ? "Op" : "Af"}
+                  </button>
+                ))}
+              </div>
+            </Row>
+            <DeleteButton onClick={() => removeAnd("stairs", staircase.id, () => select(null))} />
+          </div>
+        )}
+
+        {column && (
+          <div className="space-y-2.5">
+            <Row label="Vorm">
+              <div className="flex gap-1">
+                {(["square", "round"] as ColumnShape[]).map((sh) => (
+                  <button
+                    key={sh}
+                    onClick={() => update("columns", column.id, { shape: sh })}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                      column.shape === sh ? "bg-[#0f766e] text-white" : "bg-paper-sunken text-ink-700"
+                    }`}
+                  >
+                    {COLUMN_SHAPE_LABEL[sh]}
+                  </button>
+                ))}
+              </div>
+            </Row>
+            <Row label={column.shape === "round" ? "Diameter" : "Zijde"}>
+              <NumberField value={Math.round(column.size * 100)} unit="cm" onChange={(v) => update("columns", column.id, { size: Math.max(0.05, v / 100) })} />
+            </Row>
+            <Row label="Materiaal">
+              <select
+                value={column.material}
+                onChange={(e) => update("columns", column.id, { material: e.target.value as WallMaterial })}
+                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              >
+                {MATERIALS.map((m) => (
+                  <option key={m} value={m}>{WALL_MATERIAL_LABEL[m]}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Dragend">
+              <button
+                onClick={() => update("columns", column.id, { loadBearing: !column.loadBearing })}
+                className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                  column.loadBearing ? "bg-danger text-white" : "bg-paper-sunken text-ink-700"
+                }`}
+              >
+                {column.loadBearing ? "Ja" : "Nee"}
+              </button>
+            </Row>
+            <DeleteButton onClick={() => removeAnd("columns", column.id, () => select(null))} />
+          </div>
+        )}
+
+        {beam && (
+          <div className="space-y-2.5">
+            <Row label="Profiel">
+              <select
+                value={beam.profile}
+                onChange={(e) => update("beams", beam.id, { profile: e.target.value as BeamProfile })}
+                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              >
+                {(["HEA100", "HEA140", "HEA160", "HEB200", "custom"] as BeamProfile[]).map((p) => (
+                  <option key={p} value={p}>{BEAM_PROFILE_LABEL[p]}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Hoogte in gevel">
+              <NumberField value={Math.round(beam.height * 100)} unit="cm" onChange={(v) => update("beams", beam.id, { height: v / 100 })} />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("beams", beam.id, () => select(null))} />
+          </div>
+        )}
+
         {lightboxPhoto && (
           <Lightbox photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />
         )}
@@ -735,7 +879,7 @@ export function SelectionPanel() {
 }
 
 async function removeAnd(
-  table: "walls" | "electrical" | "openings" | "rooms" | "plumbing" | "furniture" | "hvac",
+  table: TableName,
   id: string,
   after: () => void,
 ) {

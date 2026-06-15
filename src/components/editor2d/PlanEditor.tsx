@@ -18,6 +18,9 @@ import type {
   Furniture,
   PlumbingType,
   Level,
+  Staircase,
+  Column,
+  Beam,
 } from "@/lib/domain/types";
 import { create, remove, update } from "@/lib/db/repo";
 import type { TableName } from "@/lib/db/repo";
@@ -25,12 +28,14 @@ import { getDB } from "@/lib/db/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useHistory } from "@/lib/history";
 import { useEditor, type SelKind, type Selection } from "@/lib/store/editor";
-import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac } from "@/lib/hooks";
+import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac, useStairs, useColumns, useBeams } from "@/lib/hooks";
 import {
   ELECTRICAL_DEFAULT_HEIGHT,
   FIXTURE_DEFAULT_HEIGHT,
   OPENING_DEFAULTS,
   OPENING_SNAP_M,
+  STAIRCASE_DEFAULTS,
+  COLUMN_DEFAULT_SIZE,
 } from "@/lib/domain/constants";
 import { dist, snapToGrid, snapToPoints, projectOnSegment, constrainToAngle, bounds, pointInRect } from "@/lib/geometry";
 import { copySelection, pasteClipboard, type ClipboardData } from "@/lib/clipboard";
@@ -61,6 +66,9 @@ import { ElectricalLayer } from "./ElectricalLayer";
 import { PlumbingLayer } from "./PlumbingLayer";
 import { FurnitureLayer } from "./FurnitureLayer";
 import { HvacLayer } from "./HvacLayer";
+import { StairsLayer } from "./StairsLayer";
+import { ColumnsLayer } from "./ColumnsLayer";
+import { BeamsLayer } from "./BeamsLayer";
 import { RoomDivider } from "./RoomDivider";
 import { ElectricalLegend } from "./ElectricalLegend";
 import { Minimap } from "./Minimap";
@@ -79,6 +87,7 @@ export function PlanEditor() {
   const setTool = useEditor((s) => s.setTool);
   const placeKind = useEditor((s) => s.placeKind);
   const setPlaceKind = useEditor((s) => s.setPlaceKind);
+  const constructionKind = useEditor((s) => s.constructionKind);
   const furniturePaletteKind = useEditor((s) => s.furniturePaletteKind);
   const setFurniturePaletteKind = useEditor((s) => s.setFurniturePaletteKind);
   const pipeType = useEditor((s) => s.pipeType);
@@ -101,6 +110,9 @@ export function PlanEditor() {
   const openings = useOpenings(activeLevelId) ?? [];
   const furniture = useFurniture(activeLevelId) ?? [];
   const hvac = useHvac(activeLevelId) ?? [];
+  const stairs = useStairs(activeLevelId) ?? [];
+  const columns = useColumns(activeLevelId) ?? [];
+  const beams = useBeams(activeLevelId) ?? [];
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
@@ -118,9 +130,9 @@ export function PlanEditor() {
   // Spiegel altijd de meest actuele entiteiten naar een ref, zodat
   // sneltoets-handlers (lasso/copy/nudge/mirror) niet op stale closures leunen.
   const entitiesRef = useRef<ClipboardData>({
-    walls, rooms, openings, electrical, plumbing, hvac, furniture,
+    walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams,
   });
-  entitiesRef.current = { walls, rooms, openings, electrical, plumbing, hvac, furniture };
+  entitiesRef.current = { walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams };
 
   // Shift-toets tracking voor orthogonaal tekenen
   const shiftRef = useRef(false);
@@ -190,7 +202,7 @@ export function PlanEditor() {
   // State-reset tijdens render (React-patroon "adjusting state during render")
   // i.p.v. in een effect, om een extra render-cascade te vermijden.
   const [prevToolKey, setPrevToolKey] = useState(`${tool}|${activeLevelId}`);
-  const toolKey = `${tool}|${activeLevelId}`;
+  const toolKey = `${tool}|${activeLevelId}|${constructionKind?.domain ?? ""}`;
   if (toolKey !== prevToolKey) {
     setPrevToolKey(toolKey);
     setDraftStart(null);
@@ -285,7 +297,7 @@ export function PlanEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, undo, redo]);
 
-  const TABLE_FOR: Record<SelKind, "walls" | "openings" | "electrical" | "rooms" | "plumbing" | "hvac" | "furniture"> = {
+  const TABLE_FOR: Record<SelKind, TableName> = {
     wall: "walls",
     opening: "openings",
     electrical: "electrical",
@@ -293,6 +305,9 @@ export function PlanEditor() {
     plumbing: "plumbing",
     hvac: "hvac",
     furniture: "furniture",
+    staircase: "stairs",
+    column: "columns",
+    beam: "beams",
   };
 
   async function deleteEntity(kind: SelKind, id: string) {
@@ -320,6 +335,9 @@ export function PlanEditor() {
       case "plumbing": return e.plumbing.find((x) => x.id === id) ?? null;
       case "hvac": return e.hvac.find((x) => x.id === id) ?? null;
       case "furniture": return e.furniture.find((x) => x.id === id) ?? null;
+      case "staircase": return e.stairs.find((x) => x.id === id) ?? null;
+      case "column": return e.columns.find((x) => x.id === id) ?? null;
+      case "beam": return e.beams.find((x) => x.id === id) ?? null;
       default: return null;
     }
   }
@@ -416,6 +434,9 @@ export function PlanEditor() {
     add("electrical", e.electrical);
     add("plumbing", e.plumbing);
     add("hvac", e.hvac);
+    add("staircase", e.stairs);
+    add("column", e.columns);
+    add("beam", e.beams);
     selectResult(res);
   }
 
@@ -528,6 +549,51 @@ export function PlanEditor() {
     select({ kind: "hvac", id: item.id });
   }
 
+  async function placeStaircase(at: Point) {
+    if (!activeLevelId || constructionKind?.domain !== "staircase") return;
+    const def = STAIRCASE_DEFAULTS[constructionKind.kind];
+    const st = await create<Staircase>("stairs", {
+      levelId: activeLevelId,
+      kind: constructionKind.kind,
+      position: at,
+      width: def.width,
+      run: def.run,
+      steps: def.steps,
+      rotation: 0,
+      direction: "up",
+    });
+    pushAction({ type: "create", table: "stairs", id: st.id });
+    select({ kind: "staircase", id: st.id });
+  }
+
+  async function placeColumn(at: Point) {
+    if (!activeLevelId || constructionKind?.domain !== "column") return;
+    const col = await create<Column>("columns", {
+      levelId: activeLevelId,
+      position: at,
+      shape: constructionKind.shape,
+      size: COLUMN_DEFAULT_SIZE,
+      material: "concrete",
+      loadBearing: true,
+    });
+    pushAction({ type: "create", table: "columns", id: col.id });
+    select({ kind: "column", id: col.id });
+  }
+
+  async function createBeam(start: Point, end: Point) {
+    if (!activeLevelId || constructionKind?.domain !== "beam") return;
+    if (dist(start, end) < 0.05) return;
+    const bm = await create<Beam>("beams", {
+      levelId: activeLevelId,
+      start,
+      end,
+      profile: constructionKind.profile,
+      height: 2.4,
+    });
+    pushAction({ type: "create", table: "beams", id: bm.id });
+    select({ kind: "beam", id: bm.id });
+  }
+
   // Plaats een deur/raam op de dichtstbijzijnde muur (binnen tolerantie).
   async function placeOpening(at: Point) {
     if (!placeKind || placeKind.domain !== "opening") return;
@@ -612,6 +678,21 @@ export function PlanEditor() {
       })();
       return;
     }
+    if (tool === "construction" && constructionKind) {
+      if (constructionKind.domain === "beam") {
+        if (!draftStart) {
+          setDraftStart(snapped);
+        } else {
+          void createBeam(draftStart, snapped);
+          setDraftStart(null);
+        }
+      } else if (constructionKind.domain === "staircase") {
+        void placeStaircase(snapped);
+      } else {
+        void placeColumn(snapped);
+      }
+      return;
+    }
     if (tool === "draw-pipe" && activeLevelId) {
       setPipePoints((prev) => [...prev, snapped]);
       return;
@@ -671,7 +752,7 @@ export function PlanEditor() {
     const evt = e.evt;
     if (!pointers.current.has(evt.pointerId)) {
       // cursor voor rubber-band tonen ook zonder ingedrukt
-      if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture") {
+      if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction") {
         setCursor(snapPoint(screenToMeters(posFromEvent(evt, stage), view)));
       }
       return;
@@ -712,7 +793,7 @@ export function PlanEditor() {
       if (tapRef.current) tapRef.current.moved = true;
       return;
     }
-    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture") {
+    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction") {
       setCursor(snapPoint(screenToMeters(pos, view)));
     }
     if (tool === "divide") {
@@ -915,6 +996,33 @@ export function PlanEditor() {
             />
           )}
 
+          {visibleLayers.construction && (
+            <BeamsLayer
+              view={view}
+              beams={beams}
+              selectedId={selection?.kind === "beam" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("beam", id)}
+            />
+          )}
+
+          {visibleLayers.construction && (
+            <StairsLayer
+              view={view}
+              stairs={stairs}
+              selectedId={selection?.kind === "staircase" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("staircase", id)}
+            />
+          )}
+
+          {visibleLayers.construction && (
+            <ColumnsLayer
+              view={view}
+              columns={columns}
+              selectedId={selection?.kind === "column" ? selection.id : null}
+              onSelect={(id) => onSelectEntity("column", id)}
+            />
+          )}
+
           {visibleLayers.furniture && (
             <FurnitureLayer
               view={view}
@@ -987,6 +1095,27 @@ export function PlanEditor() {
                 radius={5}
                 fill="#ea580c"
               />
+            )}
+
+            {/* Stalen-balk rubber-band (twee punten) */}
+            {tool === "construction" && constructionKind?.domain === "beam" && draftStart && cursor && (
+              <>
+                <Line
+                  points={[
+                    ...Object.values(metersToScreen(draftStart, view)),
+                    ...Object.values(metersToScreen(cursor, view)),
+                  ]}
+                  stroke="#475569"
+                  strokeWidth={3}
+                  dash={[8, 6]}
+                />
+                <Circle
+                  x={metersToScreen(draftStart, view).x}
+                  y={metersToScreen(draftStart, view).y}
+                  radius={5}
+                  fill="#475569"
+                />
+              </>
             )}
 
             {/* Divide-rechthoek preview */}
