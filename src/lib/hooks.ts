@@ -4,7 +4,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { getDB } from "./db/db";
-import type { Furniture, HvacItem, Staircase, Column, Beam } from "./domain/types";
+import type { Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer } from "./domain/types";
 
 function notDeleted<T extends { deleted?: boolean }>(rows: T[] | undefined): T[] {
   return (rows ?? []).filter((r) => !r.deleted);
@@ -214,5 +214,30 @@ export function useBeams(levelId?: string | null) {
     },
     [levelId],
     [] as Beam[],
+  );
+}
+
+export function useRoofs(levelId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      return notDeleted(await getDB().roofs.where("levelId").equals(levelId).toArray());
+    },
+    [levelId],
+    [] as Roof[],
+  );
+}
+
+export function useDormers(roofIds: string[]) {
+  const key = roofIds.join(",");
+  return useLiveQuery(
+    async () => {
+      if (roofIds.length === 0) return [];
+      const all = notDeleted(await getDB().dormers.toArray());
+      const set = new Set(roofIds);
+      return all.filter((d) => set.has(d.roofId));
+    },
+    [key],
+    [] as Dormer[],
   );
 }

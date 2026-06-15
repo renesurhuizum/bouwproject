@@ -15,6 +15,7 @@ import type {
   StaircaseKind,
   ColumnShape,
   BeamProfile,
+  RoofType,
 } from "../domain/types";
 
 export type Tool =
@@ -25,7 +26,8 @@ export type Tool =
   | "divide"
   | "place-furniture"
   | "draw-pipe"
-  | "construction";
+  | "construction"
+  | "roof";
 
 export type GridSnap = "fine" | "normal" | "coarse";
 // fine = 10 cm, normal = 50 cm, coarse = 100 cm
@@ -57,7 +59,9 @@ export type SelKind =
   | "furniture"
   | "staircase"
   | "column"
-  | "beam";
+  | "beam"
+  | "roof"
+  | "dormer";
 
 export interface Selection {
   kind: SelKind;
@@ -89,6 +93,7 @@ interface EditorState {
   tool: Tool;
   placeKind: PlaceKind | null;
   constructionKind: ConstructionKind | null;
+  roofType: RoofType;
   furniturePaletteKind: FurnitureKind | null;
   pipeType: "supply-cold" | "supply-hot" | "drain" | "cv-pipe";
   selection: Selection | null;
@@ -105,6 +110,7 @@ interface EditorState {
   setTool: (t: Tool) => void;
   setPlaceKind: (p: PlaceKind | null) => void;
   setConstructionKind: (k: ConstructionKind | null) => void;
+  setRoofType: (t: RoofType) => void;
   setFurniturePaletteKind: (kind: FurnitureKind | null) => void;
   setPipeType: (t: "supply-cold" | "supply-hot" | "drain" | "cv-pipe") => void;
   select: (s: Selection | null) => void;
@@ -125,6 +131,7 @@ export const useEditor = create<EditorState>()(
       tool: "select",
       placeKind: null,
       constructionKind: null,
+      roofType: "gable",
       furniturePaletteKind: null,
       pipeType: "supply-cold",
       selection: null,
@@ -133,6 +140,7 @@ export const useEditor = create<EditorState>()(
       visibleLayers: {
         structure: true,
         construction: true,
+        roof: true,
         electrical: true,
         plumbing: true,
         hvac: true,
@@ -142,6 +150,7 @@ export const useEditor = create<EditorState>()(
       lockedLayers: {
         structure: false,
         construction: false,
+        roof: false,
         electrical: false,
         plumbing: false,
         hvac: false,
@@ -170,6 +179,7 @@ export const useEditor = create<EditorState>()(
         })),
       setPlaceKind: (placeKind) => set({ placeKind, tool: "place" }),
       setConstructionKind: (constructionKind) => set({ constructionKind, tool: "construction" }),
+      setRoofType: (roofType) => set({ roofType, tool: "roof" }),
       setFurniturePaletteKind: (kind) =>
         set({ furniturePaletteKind: kind, tool: kind ? "place-furniture" : "select" }),
       setPipeType: (pipeType) => set({ pipeType }),

@@ -12,6 +12,8 @@ import type {
   StaircaseKind,
   ColumnShape,
   BeamProfile,
+  RoofType,
+  DormerType,
 } from "./types";
 
 // ── Verwarming / HVAC ─────────────────────────────────────────────────────────
@@ -385,6 +387,36 @@ export const BEAM_PROFILE_DIMS: Record<BeamProfile, { h: number; w: number }> = 
   HEA160: { h: 0.152, w: 0.16 },
   HEB200: { h: 0.2, w: 0.2 },
   custom: { h: 0.16, w: 0.16 },
+};
+
+// ── Dak ───────────────────────────────────────────────────────────────────────
+
+export const ROOF_TYPE_LABEL: Record<RoofType, string> = {
+  gable: "Zadeldak",
+  hip: "Schilddak",
+  shed: "Lessenaarsdak",
+  flat: "Plat dak",
+  mansard: "Mansardedak",
+};
+
+export const ROOF_DEFAULTS: Record<RoofType, { pitch: number; overhang: number }> = {
+  gable: { pitch: 45, overhang: 0.5 },
+  hip: { pitch: 40, overhang: 0.5 },
+  shed: { pitch: 15, overhang: 0.4 },
+  flat: { pitch: 3, overhang: 0.3 },
+  mansard: { pitch: 60, overhang: 0.4 },
+};
+
+export const DORMER_TYPE_LABEL: Record<DormerType, string> = {
+  "gable-dormer": "Dakkapel (zadel)",
+  "shed-dormer": "Dakkapel (lessenaar)",
+  velux: "Dakraam (Velux)",
+};
+
+export const DORMER_DEFAULTS: Record<DormerType, { width: number; height: number }> = {
+  "gable-dormer": { width: 1.8, height: 1.4 },
+  "shed-dormer": { width: 2.4, height: 1.4 },
+  velux: { width: 0.8, height: 1.2 },
 };
 
 // ── Materialen ────────────────────────────────────────────────────────────────

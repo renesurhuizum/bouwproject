@@ -17,6 +17,8 @@ import type {
   Staircase,
   Column,
   Beam,
+  Roof,
+  Dormer,
 } from "./domain/types";
 
 export interface ClipboardData {
@@ -30,6 +32,8 @@ export interface ClipboardData {
   stairs: Staircase[];
   columns: Column[];
   beams: Beam[];
+  roofs: Roof[];
+  dormers: Dormer[];
 }
 
 const find = <T extends { id: string }>(arr: T[], id: string) =>
@@ -198,6 +202,25 @@ export function copySelection(sels: Selection[], data: ClipboardData): Clipboard
         });
         break;
       }
+      case "dormer": {
+        const dm = find(data.dormers, s.id);
+        if (!dm) break;
+        items.push({
+          kind: "dormer",
+          srcId: dm.id,
+          data: {
+            roofId: dm.roofId,
+            type: dm.type,
+            position: dm.position,
+            width: dm.width,
+            height: dm.height,
+          },
+        });
+        break;
+      }
+      case "roof":
+        // Daken zijn verdieping-gebonden; niet via klembord dupliceren.
+        break;
       case "opening":
         // Openingen worden via hun muur meegekopieerd (zie hieronder).
         break;
@@ -398,6 +421,21 @@ export async function pasteClipboard(
         created.push({ table: "beams", id: bm.id });
         break;
       }
+      case "dormer": {
+        const d = it.data as { roofId: string } & Omit<Dormer, "id" | "updatedAt" | "roofId">;
+        const dm = await create<Dormer>("dormers", {
+          roofId: d.roofId,
+          type: d.type,
+          position: off(d.position, offset),
+          width: d.width,
+          height: d.height,
+        });
+        selections.push({ kind: "dormer", id: dm.id });
+        created.push({ table: "dormers", id: dm.id });
+        break;
+      }
+      case "roof":
+        break; // niet dupliceerbaar via klembord
     }
   }
 
@@ -416,4 +454,6 @@ export const TABLE_FOR_KIND: Record<SelKind, string> = {
   staircase: "stairs",
   column: "columns",
   beam: "beams",
+  roof: "roofs",
+  dormer: "dormers",
 };

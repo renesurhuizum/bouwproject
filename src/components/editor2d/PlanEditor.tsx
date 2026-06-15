@@ -21,6 +21,7 @@ import type {
   Staircase,
   Column,
   Beam,
+  Roof,
 } from "@/lib/domain/types";
 import { create, remove, update } from "@/lib/db/repo";
 import type { TableName } from "@/lib/db/repo";
@@ -28,7 +29,7 @@ import { getDB } from "@/lib/db/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useHistory } from "@/lib/history";
 import { useEditor, type SelKind, type Selection } from "@/lib/store/editor";
-import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac, useStairs, useColumns, useBeams } from "@/lib/hooks";
+import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers } from "@/lib/hooks";
 import {
   ELECTRICAL_DEFAULT_HEIGHT,
   FIXTURE_DEFAULT_HEIGHT,
@@ -36,6 +37,7 @@ import {
   OPENING_SNAP_M,
   STAIRCASE_DEFAULTS,
   COLUMN_DEFAULT_SIZE,
+  ROOF_DEFAULTS,
 } from "@/lib/domain/constants";
 import { dist, snapToGrid, snapToPoints, projectOnSegment, constrainToAngle, bounds, pointInRect } from "@/lib/geometry";
 import { copySelection, pasteClipboard, type ClipboardData } from "@/lib/clipboard";
@@ -69,6 +71,7 @@ import { HvacLayer } from "./HvacLayer";
 import { StairsLayer } from "./StairsLayer";
 import { ColumnsLayer } from "./ColumnsLayer";
 import { BeamsLayer } from "./BeamsLayer";
+import { RoofLayer } from "./RoofLayer";
 import { RoomDivider } from "./RoomDivider";
 import { ElectricalLegend } from "./ElectricalLegend";
 import { Minimap } from "./Minimap";
@@ -88,6 +91,7 @@ export function PlanEditor() {
   const placeKind = useEditor((s) => s.placeKind);
   const setPlaceKind = useEditor((s) => s.setPlaceKind);
   const constructionKind = useEditor((s) => s.constructionKind);
+  const roofType = useEditor((s) => s.roofType);
   const furniturePaletteKind = useEditor((s) => s.furniturePaletteKind);
   const setFurniturePaletteKind = useEditor((s) => s.setFurniturePaletteKind);
   const pipeType = useEditor((s) => s.pipeType);
@@ -113,6 +117,9 @@ export function PlanEditor() {
   const stairs = useStairs(activeLevelId) ?? [];
   const columns = useColumns(activeLevelId) ?? [];
   const beams = useBeams(activeLevelId) ?? [];
+  const roofs = useRoofs(activeLevelId) ?? [];
+  const roofIds = useMemo(() => roofs.map((r) => r.id), [roofs]);
+  const dormers = useDormers(roofIds) ?? [];
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
@@ -130,9 +137,9 @@ export function PlanEditor() {
   // Spiegel altijd de meest actuele entiteiten naar een ref, zodat
   // sneltoets-handlers (lasso/copy/nudge/mirror) niet op stale closures leunen.
   const entitiesRef = useRef<ClipboardData>({
-    walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams,
+    walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams, roofs, dormers,
   });
-  entitiesRef.current = { walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams };
+  entitiesRef.current = { walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams, roofs, dormers };
 
   // Shift-toets tracking voor orthogonaal tekenen
   const shiftRef = useRef(false);
@@ -308,6 +315,8 @@ export function PlanEditor() {
     staircase: "stairs",
     column: "columns",
     beam: "beams",
+    roof: "roofs",
+    dormer: "dormers",
   };
 
   async function deleteEntity(kind: SelKind, id: string) {
@@ -338,6 +347,8 @@ export function PlanEditor() {
       case "staircase": return e.stairs.find((x) => x.id === id) ?? null;
       case "column": return e.columns.find((x) => x.id === id) ?? null;
       case "beam": return e.beams.find((x) => x.id === id) ?? null;
+      case "roof": return e.roofs.find((x) => x.id === id) ?? null;
+      case "dormer": return e.dormers.find((x) => x.id === id) ?? null;
       default: return null;
     }
   }
@@ -437,6 +448,7 @@ export function PlanEditor() {
     add("staircase", e.stairs);
     add("column", e.columns);
     add("beam", e.beams);
+    add("dormer", e.dormers);
     selectResult(res);
   }
 
@@ -594,6 +606,26 @@ export function PlanEditor() {
     select({ kind: "beam", id: bm.id });
   }
 
+  async function placeRoof() {
+    if (!activeLevelId) return;
+    // Eén dak per verdieping: bestaat er al een, selecteer dat (type via paneel).
+    const existing = entitiesRef.current.roofs[0];
+    if (existing) {
+      select({ kind: "roof", id: existing.id });
+      return;
+    }
+    const def = ROOF_DEFAULTS[roofType];
+    const r = await create<Roof>("roofs", {
+      levelId: activeLevelId,
+      type: roofType,
+      pitch: def.pitch,
+      ridgeDirection: 0,
+      overhang: def.overhang,
+    });
+    pushAction({ type: "create", table: "roofs", id: r.id });
+    select({ kind: "roof", id: r.id });
+  }
+
   // Plaats een deur/raam op de dichtstbijzijnde muur (binnen tolerantie).
   async function placeOpening(at: Point) {
     if (!placeKind || placeKind.domain !== "opening") return;
@@ -691,6 +723,10 @@ export function PlanEditor() {
       } else {
         void placeColumn(snapped);
       }
+      return;
+    }
+    if (tool === "roof") {
+      void placeRoof();
       return;
     }
     if (tool === "draw-pipe" && activeLevelId) {
@@ -1020,6 +1056,19 @@ export function PlanEditor() {
               columns={columns}
               selectedId={selection?.kind === "column" ? selection.id : null}
               onSelect={(id) => onSelectEntity("column", id)}
+            />
+          )}
+
+          {visibleLayers.roof && (
+            <RoofLayer
+              view={view}
+              roofs={roofs}
+              dormers={dormers}
+              walls={walls}
+              selectedRoofId={selection?.kind === "roof" ? selection.id : null}
+              selectedDormerId={selection?.kind === "dormer" ? selection.id : null}
+              onSelectRoof={(id) => onSelectEntity("roof", id)}
+              onSelectDormer={(id) => onSelectEntity("dormer", id)}
             />
           )}
 

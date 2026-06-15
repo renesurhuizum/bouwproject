@@ -27,7 +27,11 @@ import {
   STAIRCASE_LABEL,
   COLUMN_SHAPE_LABEL,
   BEAM_PROFILE_LABEL,
+  ROOF_TYPE_LABEL,
+  DORMER_TYPE_LABEL,
+  DORMER_DEFAULTS,
 } from "@/lib/domain/constants";
+import { bounds } from "@/lib/geometry";
 import type {
   Wall,
   WallMaterial,
@@ -37,6 +41,9 @@ import type {
   StaircaseKind,
   ColumnShape,
   BeamProfile,
+  RoofType,
+  DormerType,
+  Dormer,
 } from "@/lib/domain/types";
 import { polygonArea as polyArea } from "@/lib/geometry";
 import { nvoArea } from "@/lib/validation";
@@ -138,6 +145,14 @@ export function SelectionPanel() {
     async () => (selection?.kind === "beam" ? await getDB().beams.get(selection.id) : null),
     [selection?.kind, selection?.id],
   );
+  const roof = useLiveQuery(
+    async () => (selection?.kind === "roof" ? await getDB().roofs.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
+  const dormer = useLiveQuery(
+    async () => (selection?.kind === "dormer" ? await getDB().dormers.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
 
   const tool = useEditor((s) => s.tool);
   const isPlacementMode = tool === "place" || tool === "draw-pipe";
@@ -159,7 +174,7 @@ export function SelectionPanel() {
     const db = getDB();
     const data: ClipboardData = {
       walls: [], rooms: [], openings: [], electrical: [], plumbing: [], hvac: [], furniture: [],
-      stairs: [], columns: [], beams: [],
+      stairs: [], columns: [], beams: [], roofs: [], dormers: [],
     };
     for (const s of sels) {
       const ent = await (db[TABLE_FOR_KIND[s.kind] as keyof typeof db] as import("dexie").Table).get(s.id);
@@ -194,6 +209,20 @@ export function SelectionPanel() {
     for (const s of multi) if (s.kind === "wall") await update("walls", s.id, { status });
   }
 
+  async function addDormer(roofId: string, type: DormerType) {
+    const bb = bounds((walls ?? []).flatMap((w) => [w.start, w.end]));
+    const center = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2 };
+    const def = DORMER_DEFAULTS[type];
+    const dm = await create<Dormer>("dormers", {
+      roofId,
+      type,
+      position: center,
+      width: def.width,
+      height: def.height,
+    });
+    select({ kind: "dormer", id: dm.id });
+  }
+
   if (isPlacementMode) return null;
   if (!selection && !multiActive) return null;
 
@@ -224,7 +253,11 @@ export function SelectionPanel() {
                             ? "Kolom"
                             : selection.kind === "beam"
                               ? "Stalen balk"
-                              : "Elektra"}
+                              : selection.kind === "roof"
+                                ? "Dak"
+                                : selection.kind === "dormer"
+                                  ? "Dakkapel"
+                                  : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -733,6 +766,73 @@ export function SelectionPanel() {
               <NumberField value={Math.round(beam.height * 100)} unit="cm" onChange={(v) => update("beams", beam.id, { height: v / 100 })} />
             </Row>
             <DeleteButton onClick={() => removeAnd("beams", beam.id, () => select(null))} />
+          </div>
+        )}
+
+        {roof && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <select
+                value={roof.type}
+                onChange={(e) => update("roofs", roof.id, { type: e.target.value as RoofType })}
+                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              >
+                {(["gable", "hip", "shed", "flat", "mansard"] as RoofType[]).map((t) => (
+                  <option key={t} value={t}>{ROOF_TYPE_LABEL[t]}</option>
+                ))}
+              </select>
+            </Row>
+            {roof.type !== "flat" && (
+              <>
+                <Row label="Helling">
+                  <NumberField value={Math.round(roof.pitch)} unit="°" onChange={(v) => update("roofs", roof.id, { pitch: Math.max(1, Math.min(80, Math.round(v))) })} />
+                </Row>
+                <Row label="Nokrichting">
+                  <NumberField value={Math.round(roof.ridgeDirection)} unit="°" onChange={(v) => update("roofs", roof.id, { ridgeDirection: ((Math.round(v) % 360) + 360) % 360 })} />
+                </Row>
+              </>
+            )}
+            <Row label="Dakoverstek">
+              <NumberField value={Math.round(roof.overhang * 100)} unit="cm" onChange={(v) => update("roofs", roof.id, { overhang: Math.max(0, v / 100) })} />
+            </Row>
+            <div>
+              <span className="mb-1 block text-xs text-ink-500">Dakkapel toevoegen</span>
+              <div className="flex flex-wrap gap-1">
+                {(["gable-dormer", "shed-dormer", "velux"] as DormerType[]).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => void addDormer(roof.id, t)}
+                    className="rounded-md bg-paper-sunken px-2 py-1 text-[10px] font-medium text-ink-700 hover:bg-line"
+                  >
+                    {DORMER_TYPE_LABEL[t]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <DeleteButton onClick={() => removeAnd("roofs", roof.id, () => select(null))} />
+          </div>
+        )}
+
+        {dormer && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <select
+                value={dormer.type}
+                onChange={(e) => update("dormers", dormer.id, { type: e.target.value as DormerType })}
+                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              >
+                {(["gable-dormer", "shed-dormer", "velux"] as DormerType[]).map((t) => (
+                  <option key={t} value={t}>{DORMER_TYPE_LABEL[t]}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Breedte">
+              <NumberField value={Math.round(dormer.width * 100)} unit="cm" onChange={(v) => update("dormers", dormer.id, { width: Math.max(0.3, v / 100) })} />
+            </Row>
+            <Row label="Hoogte">
+              <NumberField value={Math.round(dormer.height * 100)} unit="cm" onChange={(v) => update("dormers", dormer.id, { height: Math.max(0.3, v / 100) })} />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("dormers", dormer.id, () => select(null))} />
           </div>
         )}
 

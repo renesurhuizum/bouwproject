@@ -19,6 +19,7 @@ import {
   Lock,
   LockOpen,
   Building2,
+  Triangle,
 } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import { useHistory } from "@/lib/history";
@@ -33,6 +34,7 @@ import type {
   StaircaseKind,
   ColumnShape,
   BeamProfile,
+  RoofType,
 } from "@/lib/domain/types";
 import {
   ELECTRICAL_LABEL,
@@ -43,6 +45,7 @@ import {
   STAIRCASE_LABEL,
   COLUMN_SHAPE_LABEL,
   BEAM_PROFILE_LABEL,
+  ROOF_TYPE_LABEL,
 } from "@/lib/domain/constants";
 import { FURNITURE_CATEGORIES, FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 
@@ -83,6 +86,7 @@ const PIPE_OPTIONS = [
 const LAYERS: { key: EditorLayer; label: string }[] = [
   { key: "structure", label: "Muren" },
   { key: "construction", label: "Constructie" },
+  { key: "roof", label: "Dak" },
   { key: "rooms", label: "Ruimtes" },
   { key: "electrical", label: "Elektra" },
   { key: "plumbing", label: "Water" },
@@ -93,6 +97,7 @@ const LAYERS: { key: EditorLayer; label: string }[] = [
 const STAIRCASE_KINDS: StaircaseKind[] = ["straight", "l-shape", "spiral"];
 const COLUMN_SHAPES: ColumnShape[] = ["square", "round"];
 const BEAM_PROFILES: BeamProfile[] = ["HEA100", "HEA140", "HEA160", "HEB200", "custom"];
+const ROOF_TYPES: RoofType[] = ["gable", "hip", "shed", "flat", "mansard"];
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
 
@@ -117,6 +122,8 @@ export function Toolbar() {
   const setPipeType = useEditor((s) => s.setPipeType);
   const constructionKind = useEditor((s) => s.constructionKind);
   const setConstructionKind = useEditor((s) => s.setConstructionKind);
+  const roofType = useEditor((s) => s.roofType);
+  const setRoofType = useEditor((s) => s.setRoofType);
 
   const undo = useHistory((s) => s.undo);
   const redo = useHistory((s) => s.redo);
@@ -430,6 +437,29 @@ export function Toolbar() {
         </div>
       )}
 
+      {/* Dak-paneel */}
+      {tool === "roof" && (
+        <div className="pointer-events-auto w-full max-w-sm rounded-xl border border-line bg-paper-raised/97 p-2 shadow-lg backdrop-blur">
+          <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-ink-400">
+            Daktype
+            <span className="ml-1 font-normal normal-case text-ink-300">· klik op de plattegrond om te plaatsen</span>
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {ROOF_TYPES.map((t) => (
+              <button
+                key={t}
+                onClick={() => setRoofType(t)}
+                className={`rounded-lg px-2 py-1.5 text-[10px] font-medium ${
+                  roofType === t ? "bg-[#7c3aed] text-white" : "bg-paper-sunken text-ink-700"
+                }`}
+              >
+                {ROOF_TYPE_LABEL[t]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Lagen-paneel */}
       {showLayers && (
         <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
@@ -544,6 +574,16 @@ export function Toolbar() {
           label="Constructie"
         >
           <Building2 size={20} />
+        </ToolBtn>
+        <ToolBtn
+          active={tool === "roof"}
+          onClick={() => {
+            if (tool === "roof") setTool("select");
+            else setRoofType(roofType);
+          }}
+          label="Dak"
+        >
+          <Triangle size={20} />
         </ToolBtn>
         <div className="mx-0.5 h-7 w-px bg-line" />
         <ToolBtn active={showLayers} onClick={() => setShowLayers((v) => !v)} label="Lagen">

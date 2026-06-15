@@ -24,7 +24,9 @@ export type TableName =
   | "furniture"
   | "stairs"
   | "columns"
-  | "beams";
+  | "beams"
+  | "roofs"
+  | "dormers";
 
 // Eén generieke tabel-handle; we casten naar Entity zodat dynamische tabelkeuze
 // typeveilig blijft zonder per-tabel overloads.
