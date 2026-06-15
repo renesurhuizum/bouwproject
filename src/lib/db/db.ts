@@ -22,6 +22,8 @@ import type {
   Staircase,
   Column,
   Beam,
+  Roof,
+  Dormer,
 } from "../domain/types";
 
 export class BouwDB extends Dexie {
@@ -43,6 +45,8 @@ export class BouwDB extends Dexie {
   stairs!: Table<Staircase, string>;
   columns!: Table<Column, string>;
   beams!: Table<Beam, string>;
+  roofs!: Table<Roof, string>;
+  dormers!: Table<Dormer, string>;
 
   constructor() {
     super("bouwproject");
@@ -68,6 +72,11 @@ export class BouwDB extends Dexie {
       stairs: "id, levelId, updatedAt, deleted",
       columns: "id, levelId, updatedAt, deleted",
       beams: "id, levelId, updatedAt, deleted",
+    });
+    // v4: dak + dakkapellen.
+    this.version(4).stores({
+      roofs: "id, levelId, updatedAt, deleted",
+      dormers: "id, roofId, updatedAt, deleted",
     });
   }
 }

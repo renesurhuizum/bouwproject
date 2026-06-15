@@ -10,10 +10,12 @@ import { Canvas } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, Grid, Sky } from "@react-three/drei";
 import { useLiveQuery } from "dexie-react-hooks";
-import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem, Staircase, Column, Beam } from "@/lib/domain/types";
-import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac, useStairs, useColumns, useBeams } from "@/lib/hooks";
+import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer } from "@/lib/domain/types";
+import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { ELECTRICAL_LABEL, BEAM_PROFILE_DIMS } from "@/lib/domain/constants";
+import { buildRoof } from "@/lib/roofGeometry";
+import { bounds } from "@/lib/geometry";
 import { getDB } from "@/lib/db/db";
 import { create as dbCreate } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
@@ -1089,6 +1091,74 @@ function BeamModel3D({ beam }: { beam: Beam }) {
   );
 }
 
+// ── Dak ───────────────────────────────────────────────────────────────────────
+
+const ROOF_COLOR = "#9b4a3a"; // terracotta
+
+function RoofMesh3D({ roof, walls, baseY }: { roof: Roof; walls: Wall[]; baseY: number }) {
+  const bb = useMemo(
+    () => (roof.polygon && roof.polygon.length >= 3 ? bounds(roof.polygon) : bounds(walls.flatMap((w) => [w.start, w.end]))),
+    [roof.polygon, walls],
+  );
+  const W = bb.max.x - bb.min.x;
+  const D = bb.max.y - bb.min.y;
+  const cx = (bb.min.x + bb.max.x) / 2;
+  const cz = (bb.min.y + bb.max.y) / 2;
+
+  const geom = useMemo(() => {
+    const m = buildRoof(roof.type, Math.max(0.5, W), Math.max(0.5, D), roof.pitch, roof.overhang);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(m.positions, 3));
+    g.setIndex(m.indices);
+    g.computeVertexNormals();
+    return g;
+  }, [roof.type, roof.pitch, roof.overhang, W, D]);
+
+  if (W <= 0.5 || D <= 0.5) return null;
+  const rotY = -(roof.ridgeDirection * Math.PI) / 180;
+
+  return (
+    <group position={[cx, baseY, cz]} rotation={[0, rotY, 0]}>
+      <mesh geometry={geom} castShadow receiveShadow>
+        <meshStandardMaterial color={ROOF_COLOR} roughness={0.85} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+}
+
+function DormerMesh3D({ dormer, baseY }: { dormer: Dormer; baseY: number }) {
+  const w = dormer.width;
+  const h = dormer.height;
+  if (dormer.type === "velux") {
+    return (
+      <mesh position={[dormer.position.x, baseY + 0.6, dormer.position.y]} rotation={[-Math.PI / 4, 0, 0]} castShadow>
+        <boxGeometry args={[w, 0.04, h]} />
+        <meshStandardMaterial color="#2b3a44" roughness={0.2} metalness={0.3} />
+      </mesh>
+    );
+  }
+  // gable / shed dakkapel: kubus met een donker dakje
+  const depth = 1.1;
+  return (
+    <group position={[dormer.position.x, baseY, dormer.position.y]}>
+      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, h, depth]} />
+        <meshStandardMaterial color="#e8e2d6" roughness={0.7} />
+      </mesh>
+      {/* venster */}
+      <mesh position={[0, h / 2, depth / 2 + 0.01]}>
+        <boxGeometry args={[w * 0.7, h * 0.6, 0.02]} />
+        <meshStandardMaterial {...GLASS} />
+      </mesh>
+      {/* dakje */}
+      <mesh position={[0, h + 0.08, 0]} castShadow>
+        <boxGeometry args={[w + 0.1, 0.06, depth + 0.1]} />
+        <meshStandardMaterial color={ROOF_COLOR} roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
 function FloorPlane({ levelId, elevation }: { levelId: string; elevation: number }) {
   const { mode, furnitureKind, electricalType, plumbingFixture, hvacType, reset } = use3DEdit();
   const active = mode !== "none";
@@ -1163,6 +1233,9 @@ function LevelScene({
   const stairs = useStairs(level.id) ?? [];
   const columns = useColumns(level.id) ?? [];
   const beams = useBeams(level.id) ?? [];
+  const roofs = useRoofs(level.id) ?? [];
+  const roofIds = useMemo(() => roofs.map((r) => r.id), [roofs]);
+  const dormers = useDormers(roofIds) ?? [];
 
   const openingsByWall = useMemo(() => {
     const m = new Map<string, Opening[]>();
@@ -1256,6 +1329,16 @@ function LevelScene({
           ))}
           {beams.map((b) => (
             <BeamModel3D key={b.id} beam={b} />
+          ))}
+        </>
+      )}
+      {visibleLayers.roof && (
+        <>
+          {roofs.map((r) => (
+            <RoofMesh3D key={r.id} roof={r} walls={walls} baseY={level.height} />
+          ))}
+          {dormers.map((dm) => (
+            <DormerMesh3D key={dm.id} dormer={dm} baseY={level.height} />
           ))}
         </>
       )}

@@ -208,6 +208,29 @@ export interface Beam extends Entity {
   width?: number; // flensbreedte m (override bij custom)
 }
 
+// ── Dak ───────────────────────────────────────────────────────────────────────
+
+export type RoofType = "gable" | "hip" | "shed" | "flat" | "mansard";
+
+export interface Roof extends Entity {
+  levelId: string; // hoort bij de bovenste verdieping
+  type: RoofType;
+  pitch: number; // hellingshoek in graden
+  ridgeDirection: number; // richting van de nok (graden, 0 = nok langs X)
+  overhang: number; // dakoversteek in m
+  polygon?: Point[]; // optioneel dakvoet-polygoon; anders bounding box van de muren
+}
+
+export type DormerType = "gable-dormer" | "shed-dormer" | "velux";
+
+export interface Dormer extends Entity {
+  roofId: string;
+  type: DormerType;
+  position: Point; // positie op het dakvlak (plan-coördinaten)
+  width: number; // m
+  height: number; // m (kapelhoogte of velux-hoogte)
+}
+
 // ── Planning & uitvoering ─────────────────────────────────────────────────────
 
 export type PhaseStatus = "todo" | "in-progress" | "done";
@@ -277,6 +300,7 @@ export interface Photo extends Entity {
 export type EditorLayer =
   | "structure"
   | "construction"
+  | "roof"
   | "electrical"
   | "plumbing"
   | "hvac"

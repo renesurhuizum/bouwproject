@@ -13,6 +13,8 @@ import type {
   Staircase,
   Column,
   Beam,
+  Roof,
+  Dormer,
 } from "./domain/types";
 import type { SelKind } from "./store/editor";
 import type { EditorLayer } from "./domain/types";
@@ -27,7 +29,9 @@ export type AnyEntity =
   | Furniture
   | Staircase
   | Column
-  | Beam;
+  | Beam
+  | Roof
+  | Dormer;
 
 // Welke editor-laag (zichtbaarheid/lock) hoort bij een selectie-soort.
 export const LAYER_FOR: Record<SelKind, EditorLayer> = {
@@ -41,6 +45,8 @@ export const LAYER_FOR: Record<SelKind, EditorLayer> = {
   staircase: "construction",
   column: "construction",
   beam: "construction",
+  roof: "roof",
+  dormer: "roof",
 };
 
 // De relevante geometrie-punten van een entiteit (voor hit-test & bbox).
@@ -68,6 +74,10 @@ export function entityPoints(kind: SelKind, e: AnyEntity): Point[] {
       return [(e as Column).position];
     case "beam":
       return [(e as Beam).start, (e as Beam).end];
+    case "dormer":
+      return [(e as Dormer).position];
+    case "roof":
+      return (e as Roof).polygon ?? [];
     default:
       return [];
   }
@@ -106,6 +116,8 @@ export function translatePatch(
       return { position: t((e as Column).position) };
     case "beam":
       return { start: t((e as Beam).start), end: t((e as Beam).end) };
+    case "dormer":
+      return { position: t((e as Dormer).position) };
     default:
       return {};
   }
@@ -154,6 +166,8 @@ export function mirrorPatch(
       return { position: m((e as Column).position) };
     case "beam":
       return { start: m((e as Beam).start), end: m((e as Beam).end) };
+    case "dormer":
+      return { position: m((e as Dormer).position) };
     default:
       return {};
   }
