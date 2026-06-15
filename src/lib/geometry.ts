@@ -114,6 +114,35 @@ export function getCornerFillPoints(endpoint: Point, walls: Array<{ start: Point
   return pts;
 }
 
+// Spiegel een set punten rond een spil-punt langs de horizontale ("h": x flipt)
+// of verticale ("v": y flipt) as.
+export function mirrorPoints(pts: Point[], axis: "h" | "v", pivot: Point): Point[] {
+  return pts.map((p) =>
+    axis === "h"
+      ? { x: 2 * pivot.x - p.x, y: p.y }
+      : { x: p.x, y: 2 * pivot.y - p.y },
+  );
+}
+
+// Snijpunt van de oneindige verlengingen van twee muren (lijnen door start→end).
+// Geeft null bij (vrijwel) parallelle lijnen.
+export function wallIntersection(
+  a: { start: Point; end: Point },
+  b: { start: Point; end: Point },
+): Point | null {
+  const x1 = a.start.x, y1 = a.start.y, x2 = a.end.x, y2 = a.end.y;
+  const x3 = b.start.x, y3 = b.start.y, x4 = b.end.x, y4 = b.end.y;
+  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(denom) < 1e-9) return null; // parallel of degeneraat
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+  return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+}
+
+// Ligt punt p binnen de (as-georiënteerde) rechthoek min..max?
+export function pointInRect(p: Point, min: Point, max: Point): boolean {
+  return p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y;
+}
+
 // Bounding box van een set punten.
 export function bounds(points: Point[]): { min: Point; max: Point } {
   if (points.length === 0) {

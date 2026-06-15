@@ -2,14 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Camera, Trash2, X } from "lucide-react";
+import { Camera, Trash2, X, FlipHorizontal2, FlipVertical2, Copy } from "lucide-react";
 import { getDB } from "@/lib/db/db";
 import { create, update, remove } from "@/lib/db/repo";
-import { useEditor } from "@/lib/store/editor";
+import type { TableName } from "@/lib/db/repo";
+import { useEditor, type Selection } from "@/lib/store/editor";
 import { useProject, useFurniture } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
-import type { Photo } from "@/lib/domain/types";
+import type { Photo, WallStatus as WallStatusType } from "@/lib/domain/types";
 import { dist, polygonArea } from "@/lib/geometry";
+import { copySelection, TABLE_FOR_KIND, type ClipboardData } from "@/lib/clipboard";
+import { mirrorPatch, selectionBounds, type AnyEntity } from "@/lib/selectionOps";
 import { formatLength, formatArea } from "@/lib/format";
 import {
   WALL_MATERIAL_LABEL,
@@ -33,6 +36,9 @@ const OPENING_TYPES: OpeningType[] = ["door", "window", "passage"];
 export function SelectionPanel() {
   const selection = useEditor((s) => s.selection);
   const select = useEditor((s) => s.select);
+  const multi = useEditor((s) => s.multi);
+  const setMulti = useEditor((s) => s.setMulti);
+  const setClipboard = useEditor((s) => s.setClipboard);
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const project = useProject();
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
@@ -111,15 +117,71 @@ export function SelectionPanel() {
 
   const tool = useEditor((s) => s.tool);
   const isPlacementMode = tool === "place" || tool === "draw-pipe";
+  const multiActive = multi.length > 1;
 
-  if (!selection || isPlacementMode) return null;
+  async function gatherEntities(sels: Selection[]) {
+    const db = getDB();
+    const out: { kind: Selection["kind"]; id: string; entity: AnyEntity }[] = [];
+    for (const s of sels) {
+      const ent = await (db[TABLE_FOR_KIND[s.kind] as keyof typeof db] as import("dexie").Table).get(s.id);
+      if (ent && !(ent as { deleted?: boolean }).deleted) {
+        out.push({ kind: s.kind, id: s.id, entity: ent as AnyEntity });
+      }
+    }
+    return out;
+  }
+
+  async function gatherData(sels: Selection[]): Promise<ClipboardData> {
+    const db = getDB();
+    const data: ClipboardData = {
+      walls: [], rooms: [], openings: [], electrical: [], plumbing: [], hvac: [], furniture: [],
+    };
+    for (const s of sels) {
+      const ent = await (db[TABLE_FOR_KIND[s.kind] as keyof typeof db] as import("dexie").Table).get(s.id);
+      if (!ent || (ent as { deleted?: boolean }).deleted) continue;
+      (data[TABLE_FOR_KIND[s.kind] as keyof ClipboardData] as unknown[]).push(ent);
+      if (s.kind === "wall") {
+        const ops = await db.openings.where("wallId").equals(s.id).toArray();
+        data.openings.push(...ops.filter((o) => !o.deleted));
+      }
+    }
+    return data;
+  }
+
+  async function bulkDelete() {
+    for (const s of multi) await remove(TABLE_FOR_KIND[s.kind] as TableName, s.id);
+    setMulti([]);
+  }
+  async function bulkCopy() {
+    setClipboard(copySelection(multi, await gatherData(multi)));
+  }
+  async function bulkMirror(axis: "h" | "v") {
+    const ents = await gatherEntities(multi);
+    if (!ents.length) return;
+    const bb = selectionBounds(ents);
+    const pivot = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2 };
+    for (const { kind, id, entity } of ents) {
+      const patch = mirrorPatch(kind, entity, axis, pivot);
+      if (Object.keys(patch).length) await update(TABLE_FOR_KIND[kind] as TableName, id, patch);
+    }
+  }
+  async function bulkWallStatus(status: WallStatusType) {
+    for (const s of multi) if (s.kind === "wall") await update("walls", s.id, { status });
+  }
+
+  if (isPlacementMode) return null;
+  if (!selection && !multiActive) return null;
 
   return (
     <div className="pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3">
       <div className="mx-auto max-w-md rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink-900">
-            {selection.kind === "wall"
+            {multiActive
+              ? `${multi.length} items geselecteerd`
+              : !selection
+              ? ""
+              : selection.kind === "wall"
               ? "Muur"
               : selection.kind === "opening"
                 ? "Deur / raam"
@@ -141,6 +203,50 @@ export function SelectionPanel() {
             <X size={16} />
           </button>
         </div>
+
+        {multiActive && (
+          <div className="space-y-2.5">
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => void bulkCopy()}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-paper-sunken py-2 text-xs font-medium text-ink-700 hover:bg-line"
+              >
+                <Copy size={14} /> Kopieer
+              </button>
+              <button
+                onClick={() => void bulkMirror("h")}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-paper-sunken py-2 text-xs font-medium text-ink-700 hover:bg-line"
+              >
+                <FlipHorizontal2 size={14} /> Spiegel H
+              </button>
+              <button
+                onClick={() => void bulkMirror("v")}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-paper-sunken py-2 text-xs font-medium text-ink-700 hover:bg-line"
+              >
+                <FlipVertical2 size={14} /> Spiegel V
+              </button>
+            </div>
+            {multi.some((s) => s.kind === "wall") && (
+              <Row label="Muur-status">
+                <div className="flex gap-1">
+                  {STATUSES.map((st) => (
+                    <button
+                      key={st}
+                      onClick={() => void bulkWallStatus(st)}
+                      className="rounded-md bg-paper-sunken px-2 py-1 text-[11px] font-medium text-ink-700"
+                    >
+                      {WALL_STATUS_LABEL[st]}
+                    </button>
+                  ))}
+                </div>
+              </Row>
+            )}
+            <p className="text-[11px] text-ink-400">
+              Tip: ↑↓←→ verplaatst · Ctrl+C/V kopieert · Del verwijdert.
+            </p>
+            <DeleteButton onClick={() => void bulkDelete()} />
+          </div>
+        )}
 
         {wall && (
           <div className="space-y-2.5">
@@ -499,7 +605,7 @@ export function SelectionPanel() {
                     key={deg}
                     onClick={() => void update("furniture", selectedFurniture.id, { rotation: deg })}
                     className={`rounded-md px-2 py-1 text-[11px] font-medium ${
-                      selectedFurniture.rotation === deg
+                      Math.round(selectedFurniture.rotation) === deg
                         ? "bg-accent text-white"
                         : "bg-paper-sunken text-ink-700"
                     }`}
@@ -507,6 +613,47 @@ export function SelectionPanel() {
                     {deg}°
                   </button>
                 ))}
+              </div>
+            </Row>
+            <Row label="Vrije hoek">
+              <NumberField
+                value={Math.round(selectedFurniture.rotation)}
+                unit="°"
+                onChange={(v) =>
+                  void update("furniture", selectedFurniture.id, {
+                    rotation: ((Math.round(v) % 360) + 360) % 360,
+                  })
+                }
+              />
+            </Row>
+            <Row label="Spiegelen">
+              <div className="flex gap-1">
+                <button
+                  onClick={() => {
+                    const p = selectedFurniture.position;
+                    void update(
+                      "furniture",
+                      selectedFurniture.id,
+                      mirrorPatch("furniture", selectedFurniture, "h", p),
+                    );
+                  }}
+                  className="flex items-center gap-1 rounded-md bg-paper-sunken px-2 py-1 text-[11px] font-medium text-ink-700"
+                >
+                  <FlipHorizontal2 size={12} /> H
+                </button>
+                <button
+                  onClick={() => {
+                    const p = selectedFurniture.position;
+                    void update(
+                      "furniture",
+                      selectedFurniture.id,
+                      mirrorPatch("furniture", selectedFurniture, "v", p),
+                    );
+                  }}
+                  className="flex items-center gap-1 rounded-md bg-paper-sunken px-2 py-1 text-[11px] font-medium text-ink-700"
+                >
+                  <FlipVertical2 size={12} /> V
+                </button>
               </div>
             </Row>
             <Row label="Kleur">

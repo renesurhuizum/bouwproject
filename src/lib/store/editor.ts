@@ -44,6 +44,18 @@ export interface Selection {
   id: string;
 }
 
+// Eén item op het klembord: het soort + de losse velden (zonder id/levelId),
+// klaar om als nieuwe entiteit geplakt te worden. `srcId` bewaart de originele
+// id zodat gekoppelde entiteiten (opening → muur) bij plakken herverbonden worden.
+export interface ClipItem {
+  kind: SelKind;
+  srcId: string;
+  data: Record<string, unknown>;
+}
+export interface Clipboard {
+  items: ClipItem[];
+}
+
 interface WallDefaults {
   thickness: number;
   height: number;
@@ -59,7 +71,10 @@ interface EditorState {
   furniturePaletteKind: FurnitureKind | null;
   pipeType: "supply-cold" | "supply-hot" | "drain" | "cv-pipe";
   selection: Selection | null;
+  multi: Selection[]; // meervoudige selectie (lasso / shift-klik). Leeg = enkelvoudig.
+  clipboard: Clipboard | null;
   visibleLayers: Record<EditorLayer, boolean>;
+  lockedLayers: Record<EditorLayer, boolean>;
   wallDefaults: WallDefaults;
   showGrid: boolean;
   gridSnap: GridSnap;
@@ -71,7 +86,10 @@ interface EditorState {
   setFurniturePaletteKind: (kind: FurnitureKind | null) => void;
   setPipeType: (t: "supply-cold" | "supply-hot" | "drain" | "cv-pipe") => void;
   select: (s: Selection | null) => void;
+  setMulti: (s: Selection[]) => void;
+  setClipboard: (c: Clipboard | null) => void;
   toggleLayer: (l: EditorLayer) => void;
+  toggleLock: (l: EditorLayer) => void;
   setWallDefaults: (d: Partial<WallDefaults>) => void;
   toggleGrid: () => void;
   cycleGridSnap: () => void;
@@ -87,6 +105,8 @@ export const useEditor = create<EditorState>()(
       furniturePaletteKind: null,
       pipeType: "supply-cold",
       selection: null,
+      multi: [],
+      clipboard: null,
       visibleLayers: {
         structure: true,
         electrical: true,
@@ -94,6 +114,14 @@ export const useEditor = create<EditorState>()(
         hvac: true,
         rooms: true,
         furniture: true,
+      },
+      lockedLayers: {
+        structure: false,
+        electrical: false,
+        plumbing: false,
+        hvac: false,
+        rooms: false,
+        furniture: false,
       },
       wallDefaults: {
         thickness: 0.1,
@@ -106,21 +134,28 @@ export const useEditor = create<EditorState>()(
       gridSnap: "fine",
       phaseOverlay: false,
 
-      setActiveLevel: (id) => set({ activeLevelId: id, selection: null }),
+      setActiveLevel: (id) => set({ activeLevelId: id, selection: null, multi: [] }),
       setTool: (tool) =>
         set((s) => ({
           tool,
           placeKind: tool === "place" ? s.placeKind : null,
           selection: null,
+          multi: [],
         })),
       setPlaceKind: (placeKind) => set({ placeKind, tool: "place" }),
       setFurniturePaletteKind: (kind) =>
         set({ furniturePaletteKind: kind, tool: kind ? "place-furniture" : "select" }),
       setPipeType: (pipeType) => set({ pipeType }),
-      select: (selection) => set({ selection }),
+      select: (selection) => set({ selection, multi: [] }),
+      setMulti: (multi) => set({ multi, selection: null }),
+      setClipboard: (clipboard) => set({ clipboard }),
       toggleLayer: (l) =>
         set((s) => ({
           visibleLayers: { ...s.visibleLayers, [l]: !s.visibleLayers[l] },
+        })),
+      toggleLock: (l) =>
+        set((s) => ({
+          lockedLayers: { ...s.lockedLayers, [l]: !s.lockedLayers[l] },
         })),
       setWallDefaults: (d) =>
         set((s) => ({ wallDefaults: { ...s.wallDefaults, ...d } })),
@@ -138,6 +173,7 @@ export const useEditor = create<EditorState>()(
       partialize: (s) => ({
         activeLevelId: s.activeLevelId,
         visibleLayers: s.visibleLayers,
+        lockedLayers: s.lockedLayers,
         wallDefaults: s.wallDefaults,
         showGrid: s.showGrid,
         gridSnap: s.gridSnap,

@@ -16,6 +16,8 @@ import {
   Sofa,
   Undo2,
   Redo2,
+  Lock,
+  LockOpen,
 } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import { useHistory } from "@/lib/history";
@@ -91,6 +93,8 @@ export function Toolbar() {
   const setWallDefaults = useEditor((s) => s.setWallDefaults);
   const visibleLayers = useEditor((s) => s.visibleLayers);
   const toggleLayer = useEditor((s) => s.toggleLayer);
+  const lockedLayers = useEditor((s) => s.lockedLayers);
+  const toggleLock = useEditor((s) => s.toggleLock);
   const showGrid = useEditor((s) => s.showGrid);
   const toggleGrid = useEditor((s) => s.toggleGrid);
   const gridSnap = useEditor((s) => s.gridSnap);
@@ -353,17 +357,35 @@ export function Toolbar() {
       {showLayers && (
         <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
           {LAYERS.map((l) => (
-            <button
+            <div
               key={l.key}
-              onClick={() => toggleLayer(l.key)}
-              className={`rounded-lg px-2.5 py-1.5 text-xs font-medium ${
-                visibleLayers[l.key]
-                  ? "bg-ink-900 text-paper-raised"
-                  : "bg-paper-sunken text-ink-300"
+              className={`flex items-center gap-0.5 rounded-lg ${
+                visibleLayers[l.key] ? "bg-ink-900" : "bg-paper-sunken"
               }`}
             >
-              {l.label}
-            </button>
+              <button
+                onClick={() => toggleLayer(l.key)}
+                className={`rounded-l-lg py-1.5 pl-2.5 pr-1.5 text-xs font-medium ${
+                  visibleLayers[l.key] ? "text-paper-raised" : "text-ink-300"
+                }`}
+              >
+                {l.label}
+              </button>
+              <button
+                onClick={() => toggleLock(l.key)}
+                aria-label={lockedLayers[l.key] ? `${l.label} ontgrendelen` : `${l.label} vergrendelen`}
+                title={lockedLayers[l.key] ? "Vergrendeld — niet selecteerbaar" : "Vergrendelen"}
+                className={`rounded-r-lg py-1.5 pl-1 pr-2 ${
+                  lockedLayers[l.key]
+                    ? "text-danger"
+                    : visibleLayers[l.key]
+                    ? "text-paper-raised/60 hover:text-paper-raised"
+                    : "text-ink-300 hover:text-ink-500"
+                }`}
+              >
+                {lockedLayers[l.key] ? <Lock size={12} /> : <LockOpen size={12} />}
+              </button>
+            </div>
           ))}
           <button
             onClick={toggleGrid}
