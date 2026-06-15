@@ -6,16 +6,14 @@ import type { Wall, Opening, ElectricalItem, PlumbingItem, HvacItem } from "@/li
 import { dist, projectOnSegment } from "@/lib/geometry";
 import { formatLength } from "@/lib/format";
 import {
+  ELECTRICAL_CODE,
   ELECTRICAL_LABEL,
   OPENING_LABEL,
   FIXTURE_LABEL,
   HVAC_LABEL,
 } from "@/lib/domain/constants";
 
-const ELEC_CODE: Record<string, string> = {
-  socket: "S", "socket-double": "S²", switch: "W", light: "L",
-  spot: "·", "wall-light": "WL", data: "D", panel: "▣", outdoor: "B",
-};
+const ELEC_CODE: Record<string, string> = ELECTRICAL_CODE;
 const ELEC_COLOR = "#1d4ed8";
 const PLUMB_COLOR = "#0891b2";
 const HVAC_COLOR = "#f97316";

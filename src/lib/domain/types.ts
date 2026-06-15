@@ -92,6 +92,7 @@ export type ElectricalType =
   | "wall-light" // wandlamp
   | "data" // UTP/data
   | "panel" // meterkast/groepenkast
+  | "perilex" // kookgroep 2-fase (krachtstroom)
   | "outdoor"; // buitenpunt
 
 export interface ElectricalItem extends Entity {
@@ -140,13 +141,14 @@ export type FurnitureKind =
   | "sofa-2" | "sofa-3" | "sofa-l"
   | "dining-table" | "dining-chair" | "desk" | "office-chair"
   | "wardrobe" | "bookshelf" | "tv-unit" | "coffee-table"
-  | "bathtub" | "shower-cabin" | "kitchen-island";
+  | "bathtub" | "shower-cabin" | "kitchen-island"
+  | "kitchen-base" | "kitchen-high" | "kitchen-upper" | "kitchen-corner";
 
 export interface Furniture extends Entity {
   levelId: string;
   kind: FurnitureKind;
   position: Point;
-  rotation: number;      // graden: 0, 90, 180, 270
+  rotation: number;      // graden, vrij (0–360); presets 0/90/180/270 in de UI
   width?: number;        // m (override)
   depth?: number;        // m (override)
   color?: string;
@@ -166,6 +168,67 @@ export interface HvacItem extends Entity {
   position?: Point;
   heightZ?: number;
   note?: string;
+}
+
+// ── Bouwkundige elementen (constructie) ──────────────────────────────────────
+
+export type StaircaseKind = "straight" | "l-shape" | "spiral";
+
+export interface Staircase extends Entity {
+  levelId: string;
+  kind: StaircaseKind;
+  position: Point; // linkerbovenhoek van de omhullende rechthoek
+  width: number; // m (trapbreedte)
+  run: number; // m (horizontale looplengte)
+  steps: number; // aantal treden
+  rotation: number; // graden
+  direction: "up" | "down"; // looprichting (op/af)
+}
+
+export type ColumnShape = "round" | "square";
+
+export interface Column extends Entity {
+  levelId: string;
+  position: Point;
+  shape: ColumnShape;
+  size: number; // diameter (rond) of zijde (vierkant), m
+  height?: number; // m (default = verdiepingshoogte)
+  material: WallMaterial;
+  loadBearing: boolean;
+}
+
+export type BeamProfile = "HEA100" | "HEA140" | "HEA160" | "HEB200" | "custom";
+
+export interface Beam extends Entity {
+  levelId: string;
+  start: Point;
+  end: Point;
+  profile: BeamProfile;
+  height: number; // m boven vloer (positie in de gevel, voor 3D)
+  width?: number; // flensbreedte m (override bij custom)
+}
+
+// ── Dak ───────────────────────────────────────────────────────────────────────
+
+export type RoofType = "gable" | "hip" | "shed" | "flat" | "mansard";
+
+export interface Roof extends Entity {
+  levelId: string; // hoort bij de bovenste verdieping
+  type: RoofType;
+  pitch: number; // hellingshoek in graden
+  ridgeDirection: number; // richting van de nok (graden, 0 = nok langs X)
+  overhang: number; // dakoversteek in m
+  polygon?: Point[]; // optioneel dakvoet-polygoon; anders bounding box van de muren
+}
+
+export type DormerType = "gable-dormer" | "shed-dormer" | "velux";
+
+export interface Dormer extends Entity {
+  roofId: string;
+  type: DormerType;
+  position: Point; // positie op het dakvlak (plan-coördinaten)
+  width: number; // m
+  height: number; // m (kapelhoogte of velux-hoogte)
 }
 
 // ── Planning & uitvoering ─────────────────────────────────────────────────────
@@ -234,4 +297,12 @@ export interface Photo extends Entity {
 }
 
 // Layer-zichtbaarheid in de editor
-export type EditorLayer = "structure" | "electrical" | "plumbing" | "hvac" | "rooms" | "furniture";
+export type EditorLayer =
+  | "structure"
+  | "construction"
+  | "roof"
+  | "electrical"
+  | "plumbing"
+  | "hvac"
+  | "rooms"
+  | "furniture";

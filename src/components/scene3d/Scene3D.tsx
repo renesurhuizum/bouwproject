@@ -4,14 +4,18 @@
 // Plan-coördinaten (x, y in meters) → wereld (x, z). Hoogte = y omhoog.
 
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, Grid, Sky } from "@react-three/drei";
 import { useLiveQuery } from "dexie-react-hooks";
-import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem } from "@/lib/domain/types";
-import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac } from "@/lib/hooks";
+import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer } from "@/lib/domain/types";
+import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
+import { ELECTRICAL_LABEL, BEAM_PROFILE_DIMS } from "@/lib/domain/constants";
+import { buildRoof } from "@/lib/roofGeometry";
+import { bounds } from "@/lib/geometry";
 import { getDB } from "@/lib/db/db";
 import { create as dbCreate } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
@@ -139,11 +143,7 @@ function RoomCeiling3D({ room, height }: { room: Room; height: number }) {
   );
 }
 
-const ELECTRICAL_LABELS: Record<string, string> = {
-  socket: "Stopcontact", "socket-double": "Dubbel stop.", switch: "Schakelaar",
-  light: "Lichtpunt", spot: "Inbouwspot", data: "Data/UTP",
-  panel: "Meterkast", "wall-light": "Wandlamp", outdoor: "Buitenpunt",
-};
+const ELECTRICAL_LABELS = ELECTRICAL_LABEL;
 
 function handleElectricalClick(e: ThreeEvent<MouseEvent>, item: ElectricalItem) {
   e.stopPropagation();
@@ -158,7 +158,7 @@ function handleElectricalClick(e: ThreeEvent<MouseEvent>, item: ElectricalItem) 
 
 function ElectricalMarker({ item }: { item: ElectricalItem }) {
   const isLight = item.type === "light" || item.type === "spot";
-  const isWall = item.type === "socket" || item.type === "socket-double" || item.type === "switch" || item.type === "data";
+  const isWall = item.type === "socket" || item.type === "socket-double" || item.type === "switch" || item.type === "data" || item.type === "perilex";
   const isSwitch = item.type === "switch";
 
   if (isLight) {
@@ -209,41 +209,203 @@ function ElectricalMarker({ item }: { item: ElectricalItem }) {
   );
 }
 
-function plumbingDims(fixture?: string): { w: number; d: number; h: number; color: string } {
-  switch (fixture) {
-    case "toilet":       return { w: 0.40, d: 0.65, h: 0.40, color: "#f0ede8" };
-    case "sink":         return { w: 0.55, d: 0.45, h: 0.85, color: "#e8f0f4" };
-    case "shower":       return { w: 0.90, d: 0.90, h: 2.20, color: "#d4eaf0" };
-    case "bath":         return { w: 0.75, d: 1.70, h: 0.55, color: "#e8f4f8" };
-    case "kitchen-tap":  return { w: 0.60, d: 0.55, h: 0.90, color: "#e8e4d8" };
-    case "boiler":       return { w: 0.45, d: 0.45, h: 0.80, color: "#d0d8e0" };
-    default:             return { w: 0.40, d: 0.40, h: 0.85, color: "#c8dce8" };
-  }
+// ── Gedeelde materiaal-presets voor composite-modellen ──────────────────────
+const CHROME = { color: "#d8dcdf", metalness: 0.85, roughness: 0.2 } as const;
+const WHITE_CERAMIC = { color: "#f5f4f0", roughness: 0.18, metalness: 0.05 } as const;
+const GLASS = { color: "#cfe8f0", transparent: true, opacity: 0.25, depthWrite: false, roughness: 0.1, metalness: 0.1 } as const;
+
+// Donkerder/lichter tint van een hex-kleur (pure berekening, geen state).
+function shade(hex: string, f: number): string {
+  const c = new THREE.Color(hex);
+  c.r = Math.min(1, c.r * f);
+  c.g = Math.min(1, c.g * f);
+  c.b = Math.min(1, c.b * f);
+  return `#${c.getHexString()}`;
+}
+
+// Vier pootjes in de hoeken (cilinders).
+function CornerLegs({ w, d, h = 0.08, r = 0.03, inset = 0.08, color = "#6b5a45" }: {
+  w: number; d: number; h?: number; r?: number; inset?: number; color?: string;
+}) {
+  const xs = [-(w / 2 - inset), w / 2 - inset];
+  const zs = [-(d / 2 - inset), d / 2 - inset];
+  return (
+    <>
+      {xs.map((x, i) =>
+        zs.map((z, j) => (
+          <mesh key={`${i}-${j}`} position={[x, h / 2, z]} castShadow>
+            <cylinderGeometry args={[r, r, h, 10]} />
+            <meshStandardMaterial color={color} roughness={0.6} />
+          </mesh>
+        )),
+      )}
+    </>
+  );
+}
+
+// Klein chroom kraantje: staand buisje + haaks uitloopje. `position` = voet.
+function ChromeTap({ position, h = 0.18 }: { position: [number, number, number]; h?: number }) {
+  return (
+    <group position={position}>
+      <mesh position={[0, h / 2, 0]} castShadow>
+        <cylinderGeometry args={[0.014, 0.014, h, 12]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+      <mesh position={[0, h - 0.01, 0.06]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.011, 0.011, 0.12, 12]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+    </group>
+  );
+}
+
+// Staande doucheset: dunne buis met douchekop bovenaan. `x`/`z` = voet op de bak.
+function ShowerRiser({ x, z }: { x: number; z: number }) {
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, 1.05, 0]} castShadow>
+        <cylinderGeometry args={[0.012, 0.012, 2.0, 12]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+      {/* arm naar voren */}
+      <mesh position={[0, 2.02, 0.09]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.01, 0.01, 0.18, 12]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+      {/* douchekop: afgeplatte cilinder */}
+      <mesh position={[0, 2.0, 0.18]}>
+        <cylinderGeometry args={[0.09, 0.09, 0.02, 16]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+    </group>
+  );
+}
+
+// ── Sanitair-modellen ────────────────────────────────────────────────────────
+
+function ToiletModel() {
+  return (
+    <>
+      {/* stortbak tegen de achterzijde, tot ~0.8 m */}
+      <mesh position={[0, 0.55, -0.23]} castShadow>
+        <boxGeometry args={[0.38, 0.50, 0.18]} />
+        <meshStandardMaterial {...WHITE_CERAMIC} />
+      </mesh>
+      {/* pot */}
+      <mesh position={[0, 0.20, 0.05]} castShadow>
+        <cylinderGeometry args={[0.16, 0.13, 0.40, 16]} />
+        <meshStandardMaterial {...WHITE_CERAMIC} />
+      </mesh>
+      {/* bril */}
+      <mesh position={[0, 0.41, 0.05]}>
+        <cylinderGeometry args={[0.19, 0.19, 0.03, 16]} />
+        <meshStandardMaterial color="#fbfaf7" roughness={0.25} />
+      </mesh>
+    </>
+  );
+}
+
+function SinkModel() {
+  return (
+    <>
+      {/* onderkast/zuil */}
+      <mesh position={[0, 0.38, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.45, 0.76, 0.32]} />
+        <meshStandardMaterial color="#e8e4dc" roughness={0.6} />
+      </mesh>
+      {/* kom */}
+      <mesh position={[0, 0.81, 0.02]} castShadow>
+        <cylinderGeometry args={[0.24, 0.20, 0.10, 16]} />
+        <meshStandardMaterial {...WHITE_CERAMIC} />
+      </mesh>
+      {/* binnen-kom (lager) */}
+      <mesh position={[0, 0.845, 0.02]}>
+        <cylinderGeometry args={[0.19, 0.16, 0.05, 16]} />
+        <meshStandardMaterial color="#eef2f3" roughness={0.15} />
+      </mesh>
+      <ChromeTap position={[0, 0.86, -0.16]} />
+    </>
+  );
+}
+
+function ShowerModel() {
+  return (
+    <>
+      {/* douchebak */}
+      <mesh position={[0, 0.025, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.90, 0.05, 0.90]} />
+        <meshStandardMaterial color="#f2f4f4" roughness={0.3} />
+      </mesh>
+      <ShowerRiser x={-0.35} z={-0.35} />
+    </>
+  );
+}
+
+function WashingMachineModel() {
+  return (
+    <>
+      <mesh position={[0, 0.425, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.60, 0.85, 0.60]} />
+        <meshStandardMaterial color="#f4f4f2" roughness={0.35} metalness={0.1} />
+      </mesh>
+      {/* ronde deur aan de voorzijde */}
+      <mesh position={[0, 0.40, 0.315]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.20, 0.20, 0.03, 16]} />
+        <meshStandardMaterial color="#3a3f44" roughness={0.2} metalness={0.3} />
+      </mesh>
+      {/* bedieningsstrip */}
+      <mesh position={[0, 0.78, 0.305]}>
+        <boxGeometry args={[0.54, 0.08, 0.02]} />
+        <meshStandardMaterial color="#d8dadc" roughness={0.4} />
+      </mesh>
+    </>
+  );
+}
+
+function BoilerModel({ hz }: { hz: number }) {
+  return (
+    <>
+      {/* witte staande kast op muurhoogte */}
+      <mesh position={[0, hz + 0.40, 0]} castShadow>
+        <boxGeometry args={[0.45, 0.80, 0.38]} />
+        <meshStandardMaterial color="#f6f6f4" roughness={0.3} metalness={0.1} />
+      </mesh>
+      {/* leidingaansluitingen onderaan */}
+      <mesh position={[-0.10, hz - 0.10, 0]} castShadow>
+        <cylinderGeometry args={[0.014, 0.014, 0.20, 10]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+      <mesh position={[0.10, hz - 0.10, 0]} castShadow>
+        <cylinderGeometry args={[0.014, 0.014, 0.20, 10]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+    </>
+  );
 }
 
 function PlumbingMarker({ item }: { item: PlumbingItem }) {
   if (!item.position) return null;
-  const dims = plumbingDims(item.fixture);
-  return (
-    <group position={[item.position.x, dims.h / 2, item.position.y]}>
-      <mesh castShadow>
-        <boxGeometry args={[dims.w, dims.h, dims.d]} />
-        <meshStandardMaterial color={dims.color} roughness={0.25} metalness={0.08} />
-      </mesh>
-      {item.fixture === "toilet" && (
-        <mesh position={[0, dims.h / 2 + 0.04, -dims.d * 0.15]}>
-          <cylinderGeometry args={[dims.w * 0.42, dims.w * 0.42, 0.08, 20]} />
-          <meshStandardMaterial color="#f5f2ee" roughness={0.2} />
+
+  let model: ReactNode;
+  switch (item.fixture) {
+    case "toilet":          model = <ToiletModel />; break;
+    case "sink":            model = <SinkModel />; break;
+    case "shower":          model = <ShowerModel />; break;
+    case "bath":            model = <BathtubModel w={0.75} d={1.70} h={0.55} color="#e8f4f8" />; break;
+    case "washing-machine": model = <WashingMachineModel />; break;
+    case "boiler":          model = <BoilerModel hz={item.heightZ ?? 0.9} />; break;
+    case "kitchen-tap":     model = <ChromeTap position={[0, 0.90, 0]} h={0.30} />; break;
+    case "outdoor-tap":     model = <ChromeTap position={[0, item.heightZ ?? 0.5, 0]} />; break;
+    default:
+      model = (
+        <mesh position={[0, 0.425, 0]} castShadow>
+          <boxGeometry args={[0.40, 0.85, 0.40]} />
+          <meshStandardMaterial color="#c8dce8" roughness={0.25} metalness={0.08} />
         </mesh>
-      )}
-      {item.fixture === "sink" && (
-        <mesh position={[0, dims.h / 2 - 0.02, 0]}>
-          <boxGeometry args={[dims.w * 0.85, 0.06, dims.d * 0.85]} />
-          <meshStandardMaterial color="#d8edf4" roughness={0.15} metalness={0.1} />
-        </mesh>
-      )}
-    </group>
-  );
+      );
+  }
+
+  return <group position={[item.position.x, 0, item.position.y]}>{model}</group>;
 }
 
 function PipePath3D({ item }: { item: PlumbingItem }) {
@@ -275,6 +437,442 @@ function PipeJunction({ pos, hz, color }: { pos: Point; hz: number; color: strin
   );
 }
 
+// ── Meubel-modellen (alle subcomponenten op module-niveau) ───────────────────
+
+function BedModel({ w, d, color, pillows }: { w: number; d: number; color: string; pillows: number }) {
+  const mw = w - 0.08; // matrasbreedte (iets ingezet)
+  const md = d - 0.10;
+  const duvetD = md * 0.65;
+  return (
+    <>
+      {/* laag frame */}
+      <mesh position={[0, 0.125, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, 0.25, d]} />
+        <meshStandardMaterial color={color} roughness={0.85} />
+      </mesh>
+      {/* matras */}
+      <mesh position={[0, 0.35, 0]} castShadow>
+        <boxGeometry args={[mw, 0.20, md]} />
+        <meshStandardMaterial color="#f8f4ef" roughness={0.9} />
+      </mesh>
+      {/* hoofdbord aan de korte zijde */}
+      <mesh position={[0, 0.45, -d / 2 + 0.025]} castShadow>
+        <boxGeometry args={[w, 0.9, 0.05]} />
+        <meshStandardMaterial color={shade(color, 0.85)} roughness={0.8} />
+      </mesh>
+      {/* kussens tegen het hoofdbord */}
+      {Array.from({ length: pillows }, (_, i) => (
+        <mesh
+          key={i}
+          position={[pillows === 1 ? 0 : (i === 0 ? -1 : 1) * (mw / 4), 0.50, -d / 2 + 0.30]}
+          castShadow
+        >
+          <boxGeometry args={[Math.min(0.55, mw * 0.42), 0.10, 0.35]} />
+          <meshStandardMaterial color="#fbf9f4" roughness={0.95} />
+        </mesh>
+      ))}
+      {/* dekbed over ~65% vanaf het voeteneind */}
+      <mesh position={[0, 0.47, d / 2 - 0.05 - duvetD / 2]} castShadow>
+        <boxGeometry args={[mw + 0.04, 0.04, duvetD]} />
+        <meshStandardMaterial color={color} roughness={0.95} />
+      </mesh>
+    </>
+  );
+}
+
+function SofaModel({ w, d, color, kind }: { w: number; d: number; color: string; kind: "sofa-2" | "sofa-3" | "sofa-l" }) {
+  const isL = kind === "sofa-l";
+  const mainD = isL ? Math.min(0.85, d * 0.55) : d; // diepte van het rechte deel
+  const mainZ = -d / 2 + mainD / 2;
+  const cushions = kind === "sofa-3" ? 3 : 2;
+  const innerW = w - 0.24; // tussen de armleuningen
+  const cw = innerW / cushions - 0.02;
+  const cushD = mainD - 0.24;
+  const cushZ = -d / 2 + 0.21 + cushD / 2;
+  const cushionColor = shade(color, 1.08);
+  const chaiseX = w / 2 - 0.51;
+  return (
+    <>
+      {/* pootjes */}
+      <group position={[0, 0, isL ? mainZ : 0]}>
+        <CornerLegs w={w} d={mainD} />
+      </group>
+      {isL && (
+        <>
+          <mesh position={[chaiseX - 0.30, 0.04, d / 2 - 0.08]} castShadow>
+            <cylinderGeometry args={[0.03, 0.03, 0.08, 10]} />
+            <meshStandardMaterial color="#6b5a45" roughness={0.6} />
+          </mesh>
+          <mesh position={[chaiseX + 0.30, 0.04, d / 2 - 0.08]} castShadow>
+            <cylinderGeometry args={[0.03, 0.03, 0.08, 10]} />
+            <meshStandardMaterial color="#6b5a45" roughness={0.6} />
+          </mesh>
+        </>
+      )}
+      {/* zitbasis */}
+      <mesh position={[0, 0.265, mainZ]} castShadow receiveShadow>
+        <boxGeometry args={[w, 0.37, mainD]} />
+        <meshStandardMaterial color={color} roughness={0.88} />
+      </mesh>
+      {/* rugleuning langs de achterzijde */}
+      <mesh position={[0, 0.465, -d / 2 + 0.09]} castShadow>
+        <boxGeometry args={[w, 0.77, 0.18]} />
+        <meshStandardMaterial color={color} roughness={0.88} />
+      </mesh>
+      {/* armleuningen */}
+      <mesh position={[-(w / 2 - 0.06), 0.365, mainZ]} castShadow>
+        <boxGeometry args={[0.12, 0.57, mainD]} />
+        <meshStandardMaterial color={color} roughness={0.88} />
+      </mesh>
+      <mesh position={[w / 2 - 0.06, 0.365, isL ? 0 : mainZ]} castShadow>
+        <boxGeometry args={[0.12, 0.57, isL ? d : mainD]} />
+        <meshStandardMaterial color={color} roughness={0.88} />
+      </mesh>
+      {/* zitkussens */}
+      {Array.from({ length: cushions }, (_, i) => (
+        <mesh
+          key={i}
+          position={[-innerW / 2 + (i + 0.5) * (innerW / cushions), 0.50, cushZ]}
+          castShadow
+        >
+          <boxGeometry args={[cw, 0.12, cushD]} />
+          <meshStandardMaterial color={cushionColor} roughness={0.9} />
+        </mesh>
+      ))}
+      {/* chaise (haaks poot-segment) bij hoekbank */}
+      {isL && (
+        <>
+          <mesh position={[chaiseX, 0.265, mainD / 2]} castShadow receiveShadow>
+            <boxGeometry args={[0.78, 0.37, d - mainD]} />
+            <meshStandardMaterial color={color} roughness={0.88} />
+          </mesh>
+          <mesh position={[chaiseX, 0.50, mainD / 2]} castShadow>
+            <boxGeometry args={[0.70, 0.12, d - mainD - 0.08]} />
+            <meshStandardMaterial color={cushionColor} roughness={0.9} />
+          </mesh>
+        </>
+      )}
+    </>
+  );
+}
+
+function TableModel({ w, d, h, color, monitor = false }: { w: number; d: number; h: number; color: string; monitor?: boolean }) {
+  return (
+    <>
+      {/* blad */}
+      <mesh position={[0, h - 0.02, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, 0.04, d]} />
+        <meshStandardMaterial color={color} roughness={0.75} />
+      </mesh>
+      <CornerLegs w={w} d={d} h={h - 0.04} r={0.03} inset={0.10} color={shade(color, 0.8)} />
+      {monitor && (
+        <>
+          {/* monitorvoet */}
+          <mesh position={[0, h + 0.05, -d / 2 + 0.14]} castShadow>
+            <boxGeometry args={[0.10, 0.10, 0.06]} />
+            <meshStandardMaterial color="#2a2a2a" roughness={0.5} />
+          </mesh>
+          {/* monitor-plaat */}
+          <mesh position={[0, h + 0.25, -d / 2 + 0.14]} castShadow>
+            <boxGeometry args={[0.45, 0.30, 0.02]} />
+            <meshStandardMaterial color="#2a2a2a" roughness={0.4} />
+          </mesh>
+        </>
+      )}
+    </>
+  );
+}
+
+function DiningChairModel({ w, d, color }: { w: number; d: number; color: string }) {
+  return (
+    <>
+      <CornerLegs w={w} d={d} h={0.43} r={0.016} inset={0.04} color={shade(color, 0.8)} />
+      {/* zitting */}
+      <mesh position={[0, 0.45, 0]} castShadow>
+        <boxGeometry args={[w, 0.04, d]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+      {/* rugleuning-plaat */}
+      <mesh position={[0, 0.68, -d / 2 + 0.015]} castShadow>
+        <boxGeometry args={[w - 0.04, 0.42, 0.03]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+    </>
+  );
+}
+
+const OFFICE_LEG_ANGLES = [0, 1, 2, 3, 4].map((i) => (i * 2 * Math.PI) / 5);
+
+function OfficeChairModel({ color }: { color: string }) {
+  return (
+    <>
+      {/* 5 lage poot-cilinders rondom */}
+      {OFFICE_LEG_ANGLES.map((a, i) => (
+        <mesh
+          key={i}
+          position={[Math.cos(a) * 0.15, 0.03, Math.sin(a) * 0.15]}
+          rotation={[0, -a, Math.PI / 2]}
+          castShadow
+        >
+          <cylinderGeometry args={[0.018, 0.018, 0.28, 10]} />
+          <meshStandardMaterial color="#3a3a3a" roughness={0.5} metalness={0.3} />
+        </mesh>
+      ))}
+      {/* zuil */}
+      <mesh position={[0, 0.25, 0]} castShadow>
+        <cylinderGeometry args={[0.028, 0.028, 0.40, 12]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+      {/* zitting */}
+      <mesh position={[0, 0.48, 0]} castShadow>
+        <boxGeometry args={[0.48, 0.07, 0.48]} />
+        <meshStandardMaterial color={color} roughness={0.85} />
+      </mesh>
+      {/* rugleuning */}
+      <mesh position={[0, 0.80, -0.22]} castShadow>
+        <boxGeometry args={[0.45, 0.52, 0.06]} />
+        <meshStandardMaterial color={color} roughness={0.85} />
+      </mesh>
+    </>
+  );
+}
+
+function WardrobeModel({ w, d, h, color }: { w: number; d: number; h: number; color: string }) {
+  return (
+    <>
+      {/* korpus */}
+      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, h, d]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+      {/* verticale deurnaad */}
+      <mesh position={[0, h / 2, d / 2 + 0.003]}>
+        <boxGeometry args={[0.012, h - 0.08, 0.005]} />
+        <meshStandardMaterial color={shade(color, 0.45)} roughness={0.9} />
+      </mesh>
+      {/* handgrepen */}
+      <mesh position={[-0.05, h * 0.52, d / 2 + 0.012]} castShadow>
+        <cylinderGeometry args={[0.008, 0.008, 0.12, 8]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+      <mesh position={[0.05, h * 0.52, d / 2 + 0.012]} castShadow>
+        <cylinderGeometry args={[0.008, 0.008, 0.12, 8]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+    </>
+  );
+}
+
+function BookshelfModel({ w, d, h, color }: { w: number; d: number; h: number; color: string }) {
+  return (
+    <>
+      {/* zijwangen */}
+      <mesh position={[-(w / 2 - 0.012), h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.024, h, d]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+      <mesh position={[w / 2 - 0.012, h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.024, h, d]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+      {/* achterwand */}
+      <mesh position={[0, h / 2, -d / 2 + 0.01]} receiveShadow>
+        <boxGeometry args={[w, h, 0.02]} />
+        <meshStandardMaterial color={shade(color, 0.9)} roughness={0.85} />
+      </mesh>
+      {/* boven- en onderplank */}
+      <mesh position={[0, h - 0.015, 0]} castShadow>
+        <boxGeometry args={[w, 0.03, d]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+      <mesh position={[0, 0.015, 0]}>
+        <boxGeometry args={[w, 0.03, d]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+      {/* 4 horizontale planken, open front */}
+      {[1, 2, 3, 4].map((i) => (
+        <mesh key={i} position={[0, (h * i) / 5, 0.005]} castShadow>
+          <boxGeometry args={[w - 0.05, 0.025, d - 0.03]} />
+          <meshStandardMaterial color={color} roughness={0.8} />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
+function TvUnitModel({ w, d, h, color }: { w: number; d: number; h: number; color: string }) {
+  const tvW = w * 0.7;
+  const tvH = (tvW * 9) / 16;
+  return (
+    <>
+      {/* laag korpus */}
+      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, h, d]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+      {/* deurnaden */}
+      <mesh position={[-w / 6, h / 2, d / 2 + 0.003]}>
+        <boxGeometry args={[0.01, h - 0.06, 0.005]} />
+        <meshStandardMaterial color={shade(color, 0.45)} roughness={0.9} />
+      </mesh>
+      <mesh position={[w / 6, h / 2, d / 2 + 0.003]}>
+        <boxGeometry args={[0.01, h - 0.06, 0.005]} />
+        <meshStandardMaterial color={shade(color, 0.45)} roughness={0.9} />
+      </mesh>
+      {/* handgrepen (liggend) */}
+      <mesh position={[-w / 6 - 0.07, h * 0.7, d / 2 + 0.012]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.007, 0.007, 0.09, 8]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+      <mesh position={[w / 6 + 0.07, h * 0.7, d / 2 + 0.012]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.007, 0.007, 0.09, 8]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+      {/* TV-voet + paneel */}
+      <mesh position={[0, h + 0.02, -d * 0.1]}>
+        <boxGeometry args={[0.35, 0.04, 0.16]} />
+        <meshStandardMaterial color="#1c1e20" roughness={0.5} />
+      </mesh>
+      <mesh position={[0, h + 0.04 + tvH / 2, -d * 0.1]} castShadow>
+        <boxGeometry args={[tvW, tvH, 0.03]} />
+        <meshStandardMaterial color="#101214" roughness={0.3} metalness={0.2} />
+      </mesh>
+    </>
+  );
+}
+
+function BathtubModel({ w, d, h, color }: { w: number; d: number; h: number; color: string }) {
+  // Kraantje op een korte zijde: bepaal welke as de lange is.
+  const alongX = w >= d;
+  const tapPos: [number, number, number] = alongX ? [w / 2 - 0.12, h, 0] : [0, h, d / 2 - 0.12];
+  return (
+    <>
+      {/* buitenwand */}
+      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, h, d]} />
+        <meshStandardMaterial color={color} roughness={0.25} metalness={0.05} />
+      </mesh>
+      {/* binnenkuip (witte bodem iets lager) */}
+      <mesh position={[0, h - 0.10, 0]}>
+        <boxGeometry args={[w - 0.16, 0.06, d - 0.16]} />
+        <meshStandardMaterial {...WHITE_CERAMIC} />
+      </mesh>
+      {/* dunne lichte rand bovenop (4 strips) */}
+      <mesh position={[0, h - 0.015, -(d / 2 - 0.05)]}>
+        <boxGeometry args={[w, 0.03, 0.10]} />
+        <meshStandardMaterial color="#f4f7f8" roughness={0.15} />
+      </mesh>
+      <mesh position={[0, h - 0.015, d / 2 - 0.05]}>
+        <boxGeometry args={[w, 0.03, 0.10]} />
+        <meshStandardMaterial color="#f4f7f8" roughness={0.15} />
+      </mesh>
+      <mesh position={[-(w / 2 - 0.05), h - 0.015, 0]}>
+        <boxGeometry args={[0.10, 0.03, d - 0.20]} />
+        <meshStandardMaterial color="#f4f7f8" roughness={0.15} />
+      </mesh>
+      <mesh position={[w / 2 - 0.05, h - 0.015, 0]}>
+        <boxGeometry args={[0.10, 0.03, d - 0.20]} />
+        <meshStandardMaterial color="#f4f7f8" roughness={0.15} />
+      </mesh>
+      {/* chroom kraantje */}
+      <ChromeTap position={tapPos} h={0.14} />
+    </>
+  );
+}
+
+function ShowerCabinModel({ w, d }: { w: number; d: number }) {
+  return (
+    <>
+      {/* douchebak */}
+      <mesh position={[0, 0.025, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, 0.05, d]} />
+        <meshStandardMaterial color="#f2f4f4" roughness={0.3} />
+      </mesh>
+      {/* glazen wanden: achterzijde + zijkant */}
+      <mesh position={[0, 1.05, -d / 2 + 0.01]}>
+        <boxGeometry args={[w, 2.0, 0.02]} />
+        <meshStandardMaterial {...GLASS} />
+      </mesh>
+      <mesh position={[-w / 2 + 0.01, 1.05, 0]}>
+        <boxGeometry args={[0.02, 2.0, d]} />
+        <meshStandardMaterial {...GLASS} />
+      </mesh>
+      <ShowerRiser x={-w / 2 + 0.10} z={-d / 2 + 0.10} />
+    </>
+  );
+}
+
+const HOB_PITS: [number, number][] = [
+  [-0.12, -0.11],
+  [0.12, -0.11],
+  [-0.12, 0.11],
+  [0.12, 0.11],
+];
+
+function KitchenIslandModel({ w, d, h, color }: { w: number; d: number; h: number; color: string }) {
+  const topY = h - 0.02;
+  const sinkX = -w / 4;
+  const hobX = w / 4;
+  return (
+    <>
+      {/* korpus (donkerder) */}
+      <mesh position={[0, (h - 0.04) / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, h - 0.04, d]} />
+        <meshStandardMaterial color={shade(color, 0.8)} roughness={0.85} />
+      </mesh>
+      {/* werkblad, steekt 0.02 over */}
+      <mesh position={[0, topY, 0]} castShadow>
+        <boxGeometry args={[w + 0.04, 0.04, d + 0.04]} />
+        <meshStandardMaterial color={shade(color, 1.12)} roughness={0.45} />
+      </mesh>
+      {/* spoelbak (ingezet, donkergrijs) */}
+      <mesh position={[sinkX, topY + 0.021, 0.02]}>
+        <boxGeometry args={[Math.min(0.42, w * 0.32), 0.012, Math.min(0.38, d * 0.42)]} />
+        <meshStandardMaterial color="#54585c" roughness={0.35} metalness={0.55} />
+      </mesh>
+      {/* kraan: 2 cilindertjes haaks */}
+      <ChromeTap position={[sinkX, h, -Math.min(0.26, d * 0.30)]} h={0.28} />
+      {/* kookplaat */}
+      <mesh position={[hobX, topY + 0.021, 0]}>
+        <boxGeometry args={[Math.min(0.55, w * 0.40), 0.012, Math.min(0.50, d * 0.55)]} />
+        <meshStandardMaterial color="#16181a" roughness={0.3} metalness={0.2} />
+      </mesh>
+      {HOB_PITS.map(([px, pz], i) => (
+        <mesh key={i} position={[hobX + px, topY + 0.03, pz]}>
+          <cylinderGeometry args={[0.06, 0.06, 0.006, 16]} />
+          <meshStandardMaterial color="#2e3134" roughness={0.4} />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
+function KitchenCabinetModel({ w, d, h, color, mountY = 0, worktop = false }: {
+  w: number; d: number; h: number; color: string; mountY?: number; worktop?: boolean;
+}) {
+  return (
+    <>
+      {/* korpus */}
+      <mesh position={[0, mountY + h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, h, d]} />
+        <meshStandardMaterial color={color} roughness={0.7} />
+      </mesh>
+      {/* aanrechtblad */}
+      {worktop && (
+        <mesh position={[0, mountY + h + 0.02, 0]} castShadow>
+          <boxGeometry args={[w + 0.02, 0.04, d + 0.02]} />
+          <meshStandardMaterial color={shade(color, 1.12)} roughness={0.45} />
+        </mesh>
+      )}
+      {/* greep langs de voorzijde */}
+      <mesh position={[0, mountY + h * 0.5, d / 2 + 0.012]} castShadow>
+        <boxGeometry args={[0.14, 0.02, 0.02]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+    </>
+  );
+}
+
 function FurnitureMesh3D({ item }: { item: Furniture }) {
   const def = FURNITURE_DEFAULTS[item.kind];
   const w = item.width ?? def.w;
@@ -282,10 +880,43 @@ function FurnitureMesh3D({ item }: { item: Furniture }) {
   const h = def.h;
   const color = item.color ?? def.color;
   const rotY = -(item.rotation * Math.PI) / 180;
+  const kind = item.kind;
+
+  let model: ReactNode;
+  if (kind === "bed-single" || kind === "bed-double" || kind === "bed-king") {
+    model = <BedModel w={w} d={d} color={color} pillows={kind === "bed-single" ? 1 : 2} />;
+  } else if (kind === "sofa-2" || kind === "sofa-3" || kind === "sofa-l") {
+    model = <SofaModel w={w} d={d} color={color} kind={kind} />;
+  } else if (kind === "dining-table" || kind === "coffee-table" || kind === "desk") {
+    model = <TableModel w={w} d={d} h={h} color={color} monitor={kind === "desk"} />;
+  } else if (kind === "dining-chair") {
+    model = <DiningChairModel w={w} d={d} color={color} />;
+  } else if (kind === "office-chair") {
+    model = <OfficeChairModel color={color} />;
+  } else if (kind === "wardrobe") {
+    model = <WardrobeModel w={w} d={d} h={h} color={color} />;
+  } else if (kind === "bookshelf") {
+    model = <BookshelfModel w={w} d={d} h={h} color={color} />;
+  } else if (kind === "tv-unit") {
+    model = <TvUnitModel w={w} d={d} h={h} color={color} />;
+  } else if (kind === "bathtub") {
+    model = <BathtubModel w={w} d={d} h={h} color={color} />;
+  } else if (kind === "shower-cabin") {
+    model = <ShowerCabinModel w={w} d={d} />;
+  } else if (kind === "kitchen-island") {
+    model = <KitchenIslandModel w={w} d={d} h={h} color={color} />;
+  } else if (kind === "kitchen-upper") {
+    model = <KitchenCabinetModel w={w} d={d} h={h} color={color} mountY={1.5} />;
+  } else if (kind === "kitchen-base" || kind === "kitchen-corner") {
+    model = <KitchenCabinetModel w={w} d={d} h={h} color={color} worktop />;
+  } else {
+    // kitchen-high
+    model = <KitchenCabinetModel w={w} d={d} h={h} color={color} />;
+  }
 
   return (
     <group
-      position={[item.position.x, h / 2, item.position.y]}
+      position={[item.position.x, 0, item.position.y]}
       rotation={[0, rotY, 0]}
       onClick={(e: ThreeEvent<MouseEvent>) => {
         e.stopPropagation();
@@ -298,34 +929,7 @@ function FurnitureMesh3D({ item }: { item: Furniture }) {
         });
       }}
     >
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[w, h, d]} />
-        <meshStandardMaterial color={color} roughness={0.82} />
-      </mesh>
-      {(item.kind === "bed-single" || item.kind === "bed-double" || item.kind === "bed-king") && (
-        <>
-          <mesh position={[0, h / 2 + 0.05, -d / 2 + 0.32]}>
-            <boxGeometry args={[w * 0.85, 0.12, 0.50]} />
-            <meshStandardMaterial color="#f8f4ef" roughness={0.9} />
-          </mesh>
-          <mesh position={[0, h / 2 + 0.02, d / 2 - 0.1]}>
-            <boxGeometry args={[w, 0.06, 0.08]} />
-            <meshStandardMaterial color={color} roughness={0.8} />
-          </mesh>
-        </>
-      )}
-      {(item.kind === "sofa-2" || item.kind === "sofa-3" || item.kind === "sofa-l") && (
-        <mesh position={[0, h * 0.35, -d / 2 + 0.08]}>
-          <boxGeometry args={[w, h * 0.55, 0.14]} />
-          <meshStandardMaterial color={color} roughness={0.88} />
-        </mesh>
-      )}
-      {item.kind === "bathtub" && (
-        <mesh position={[0, h / 2 + 0.04, 0]}>
-          <boxGeometry args={[w * 0.88, 0.06, d * 0.80]} />
-          <meshStandardMaterial color="#c8e8f0" roughness={0.12} metalness={0.05} />
-        </mesh>
-      )}
+      {model}
     </group>
   );
 }
@@ -362,6 +966,197 @@ function HvacMesh3D({ item }: { item: HvacItem }) {
   }
 
   return null;
+}
+
+// ── Bouwkundige elementen (trap, kolom, balk) ────────────────────────────────
+
+const CONSTRUCTION_MATERIAL_COLOR: Record<string, string> = {
+  brick: "#b08968",
+  "sand-lime": "#e0ddd5",
+  concrete: "#a8a8a8",
+  "aerated-concrete": "#dcd8cf",
+  "timber-frame": "#c9a96e",
+  gypsum: "#e8e4dc",
+  other: "#b0b0b0",
+};
+
+const STAIR_COLOR = "#c9b8a0";
+
+function StaircaseModel3D({ stair, totalRise }: { stair: Staircase; totalRise: number }) {
+  const rotY = -(stair.rotation * Math.PI) / 180;
+  const n = Math.max(2, Math.round(stair.steps));
+  const w = stair.width;
+  const riser = totalRise / n;
+
+  if (stair.kind === "spiral") {
+    const R = Math.max(w, stair.run) / 2;
+    return (
+      <group position={[stair.position.x + R, 0, stair.position.y + R]} rotation={[0, rotY, 0]}>
+        <mesh position={[0, totalRise / 2, 0]} castShadow>
+          <cylinderGeometry args={[0.06, 0.06, totalRise, 12]} />
+          <meshStandardMaterial color="#8a7a60" roughness={0.7} />
+        </mesh>
+        {Array.from({ length: n }, (_, i) => {
+          const a = (i / n) * Math.PI * 2;
+          return (
+            <mesh key={i} position={[(Math.cos(a) * R) / 2, (i + 1) * riser - riser / 2, (Math.sin(a) * R) / 2]} rotation={[0, -a, 0]} castShadow receiveShadow>
+              <boxGeometry args={[R, 0.05, R * 0.5]} />
+              <meshStandardMaterial color={STAIR_COLOR} roughness={0.7} />
+            </mesh>
+          );
+        })}
+      </group>
+    );
+  }
+
+  if (stair.kind === "l-shape") {
+    const half = Math.round(n / 2);
+    const depthA = (stair.run - w) / Math.max(1, half);
+    const baseH = half * riser;
+    const depthB = (stair.run - w) / Math.max(1, n - half);
+    return (
+      <group position={[stair.position.x, 0, stair.position.y]} rotation={[0, rotY, 0]}>
+        {Array.from({ length: half }, (_, i) => (
+          <mesh key={`a${i}`} position={[w / 2, ((i + 1) * riser) / 2, i * depthA + depthA / 2]} castShadow receiveShadow>
+            <boxGeometry args={[w, (i + 1) * riser, depthA]} />
+            <meshStandardMaterial color={STAIR_COLOR} roughness={0.7} />
+          </mesh>
+        ))}
+        {Array.from({ length: n - half }, (_, i) => (
+          <mesh key={`b${i}`} position={[w + i * depthB + depthB / 2, (baseH + (i + 1) * riser) / 2, stair.run - w / 2]} castShadow receiveShadow>
+            <boxGeometry args={[depthB, baseH + (i + 1) * riser, w]} />
+            <meshStandardMaterial color={STAIR_COLOR} roughness={0.7} />
+          </mesh>
+        ))}
+      </group>
+    );
+  }
+
+  // straight
+  const depth = stair.run / n;
+  return (
+    <group position={[stair.position.x, 0, stair.position.y]} rotation={[0, rotY, 0]}>
+      {Array.from({ length: n }, (_, i) => (
+        <mesh key={i} position={[w / 2, ((i + 1) * riser) / 2, i * depth + depth / 2]} castShadow receiveShadow>
+          <boxGeometry args={[w, (i + 1) * riser, depth]} />
+          <meshStandardMaterial color={STAIR_COLOR} roughness={0.7} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function ColumnModel3D({ col, levelHeight }: { col: Column; levelHeight: number }) {
+  const h = col.height ?? levelHeight;
+  const color = CONSTRUCTION_MATERIAL_COLOR[col.material] ?? "#a8a8a8";
+  return (
+    <group position={[col.position.x, 0, col.position.y]}>
+      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+        {col.shape === "round" ? (
+          <cylinderGeometry args={[col.size / 2, col.size / 2, h, 20]} />
+        ) : (
+          <boxGeometry args={[col.size, h, col.size]} />
+        )}
+        <meshStandardMaterial color={color} roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
+function BeamModel3D({ beam }: { beam: Beam }) {
+  const len = dist(beam.start, beam.end);
+  if (len < 0.01) return null;
+  const dims = BEAM_PROFILE_DIMS[beam.profile];
+  const fw = beam.width ?? dims.w;
+  const fh = dims.h;
+  const flT = fh * 0.15;
+  const cx = (beam.start.x + beam.end.x) / 2;
+  const cz = (beam.start.y + beam.end.y) / 2;
+  const rotY = -angle(beam.start, beam.end);
+  return (
+    <group position={[cx, beam.height, cz]} rotation={[0, rotY, 0]}>
+      <mesh position={[0, fh / 2 - flT / 2, 0]} castShadow>
+        <boxGeometry args={[len, flT, fw]} />
+        <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.7} />
+      </mesh>
+      <mesh position={[0, -fh / 2 + flT / 2, 0]} castShadow>
+        <boxGeometry args={[len, flT, fw]} />
+        <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.7} />
+      </mesh>
+      <mesh castShadow>
+        <boxGeometry args={[len, fh - 2 * flT, fw * 0.12]} />
+        <meshStandardMaterial color="#5b626b" roughness={0.4} metalness={0.7} />
+      </mesh>
+    </group>
+  );
+}
+
+// ── Dak ───────────────────────────────────────────────────────────────────────
+
+const ROOF_COLOR = "#9b4a3a"; // terracotta
+
+function RoofMesh3D({ roof, walls, baseY }: { roof: Roof; walls: Wall[]; baseY: number }) {
+  const bb = useMemo(
+    () => (roof.polygon && roof.polygon.length >= 3 ? bounds(roof.polygon) : bounds(walls.flatMap((w) => [w.start, w.end]))),
+    [roof.polygon, walls],
+  );
+  const W = bb.max.x - bb.min.x;
+  const D = bb.max.y - bb.min.y;
+  const cx = (bb.min.x + bb.max.x) / 2;
+  const cz = (bb.min.y + bb.max.y) / 2;
+
+  const geom = useMemo(() => {
+    const m = buildRoof(roof.type, Math.max(0.5, W), Math.max(0.5, D), roof.pitch, roof.overhang);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(m.positions, 3));
+    g.setIndex(m.indices);
+    g.computeVertexNormals();
+    return g;
+  }, [roof.type, roof.pitch, roof.overhang, W, D]);
+
+  if (W <= 0.5 || D <= 0.5) return null;
+  const rotY = -(roof.ridgeDirection * Math.PI) / 180;
+
+  return (
+    <group position={[cx, baseY, cz]} rotation={[0, rotY, 0]}>
+      <mesh geometry={geom} castShadow receiveShadow>
+        <meshStandardMaterial color={ROOF_COLOR} roughness={0.85} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+}
+
+function DormerMesh3D({ dormer, baseY }: { dormer: Dormer; baseY: number }) {
+  const w = dormer.width;
+  const h = dormer.height;
+  if (dormer.type === "velux") {
+    return (
+      <mesh position={[dormer.position.x, baseY + 0.6, dormer.position.y]} rotation={[-Math.PI / 4, 0, 0]} castShadow>
+        <boxGeometry args={[w, 0.04, h]} />
+        <meshStandardMaterial color="#2b3a44" roughness={0.2} metalness={0.3} />
+      </mesh>
+    );
+  }
+  // gable / shed dakkapel: kubus met een donker dakje
+  const depth = 1.1;
+  return (
+    <group position={[dormer.position.x, baseY, dormer.position.y]}>
+      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, h, depth]} />
+        <meshStandardMaterial color="#e8e2d6" roughness={0.7} />
+      </mesh>
+      {/* venster */}
+      <mesh position={[0, h / 2, depth / 2 + 0.01]}>
+        <boxGeometry args={[w * 0.7, h * 0.6, 0.02]} />
+        <meshStandardMaterial {...GLASS} />
+      </mesh>
+      {/* dakje */}
+      <mesh position={[0, h + 0.08, 0]} castShadow>
+        <boxGeometry args={[w + 0.1, 0.06, depth + 0.1]} />
+        <meshStandardMaterial color={ROOF_COLOR} roughness={0.85} />
+      </mesh>
+    </group>
+  );
 }
 
 function FloorPlane({ levelId, elevation }: { levelId: string; elevation: number }) {
@@ -435,6 +1230,12 @@ function LevelScene({
   const plumbing = usePlumbing(level.id) ?? [];
   const furniture = useFurniture(level.id) ?? [];
   const hvac = useHvac(level.id) ?? [];
+  const stairs = useStairs(level.id) ?? [];
+  const columns = useColumns(level.id) ?? [];
+  const beams = useBeams(level.id) ?? [];
+  const roofs = useRoofs(level.id) ?? [];
+  const roofIds = useMemo(() => roofs.map((r) => r.id), [roofs]);
+  const dormers = useDormers(roofIds) ?? [];
 
   const openingsByWall = useMemo(() => {
     const m = new Map<string, Opening[]>();
@@ -518,13 +1319,36 @@ function LevelScene({
         furniture.map((it) => <FurnitureMesh3D key={it.id} item={it} />)}
       {visibleLayers.hvac &&
         hvac.map((it) => <HvacMesh3D key={it.id} item={it} />)}
-      <FloorPlane levelId={level.id} elevation={level.elevation} />
+      {visibleLayers.construction && (
+        <>
+          {stairs.map((s) => (
+            <StaircaseModel3D key={s.id} stair={s} totalRise={level.height} />
+          ))}
+          {columns.map((c) => (
+            <ColumnModel3D key={c.id} col={c} levelHeight={level.height} />
+          ))}
+          {beams.map((b) => (
+            <BeamModel3D key={b.id} beam={b} />
+          ))}
+        </>
+      )}
+      {visibleLayers.roof && (
+        <>
+          {roofs.map((r) => (
+            <RoofMesh3D key={r.id} roof={r} walls={walls} baseY={level.height} />
+          ))}
+          {dormers.map((dm) => (
+            <DormerMesh3D key={dm.id} dormer={dm} baseY={level.height} />
+          ))}
+        </>
+      )}
     </group>
   );
 }
 
 export function Scene3D() {
   const visibleLayers = useEditor((s) => s.visibleLayers);
+  const activeLevelId = useEditor((s) => s.activeLevelId);
   const project = useProject();
   const editMode = use3DEdit((s) => s.mode);
   const [walkMode, setWalkMode] = useState(false);
@@ -539,6 +1363,10 @@ export function Scene3D() {
     [project?.id],
     [] as Level[],
   );
+
+  // Klik-vlak voor 3D-plaatsing hoort bij de actieve verdieping. Eén vlak —
+  // niet één per laag — anders vangt het bovenste vlak alle kliks op.
+  const activeLevel = levels.find((l) => l.id === activeLevelId) ?? levels[0] ?? null;
 
   // Camera-doel: centroid van BG-verdieping (order=1).
   const groundLevelId = levels[0]?.id ?? null;
@@ -602,6 +1430,11 @@ export function Scene3D() {
         {levels.map((level) => (
           <LevelScene key={level.id} level={level} visibleLayers={visibleLayers} />
         ))}
+
+        {/* Eén klik-vlak voor de actieve verdieping, alleen tijdens plaatsen */}
+        {activeLevel && editMode !== "none" && !walkMode && (
+          <FloorPlane levelId={activeLevel.id} elevation={activeLevel.elevation} />
+        )}
 
         {walkMode ? (
           <WalkthroughMode

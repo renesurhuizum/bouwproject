@@ -9,6 +9,11 @@ import type {
   WallStatus,
   PhaseStatus,
   MaterialStatus,
+  StaircaseKind,
+  ColumnShape,
+  BeamProfile,
+  RoofType,
+  DormerType,
 } from "./types";
 
 // ── Verwarming / HVAC ─────────────────────────────────────────────────────────
@@ -55,6 +60,7 @@ export const ELECTRICAL_DEFAULT_HEIGHT: Record<ElectricalType, number> = {
   "wall-light": 1.9,
   data: 0.3,
   panel: 1.5,
+  perilex: 0.6, // achter/onder kooktoestel
   outdoor: 0.6,
 };
 
@@ -67,7 +73,22 @@ export const ELECTRICAL_LABEL: Record<ElectricalType, string> = {
   "wall-light": "Wandlamp",
   data: "Data / UTP",
   panel: "Groepenkast",
+  perilex: "Perilex (kookgroep)",
   outdoor: "Buitenpunt",
+};
+
+// Korte symboolcode op plattegrond, werkblad en aanzichten (één bron).
+export const ELECTRICAL_CODE: Record<ElectricalType, string> = {
+  socket: "S",
+  "socket-double": "S²",
+  switch: "W",
+  light: "L",
+  spot: "·",
+  "wall-light": "WL",
+  data: "D",
+  panel: "▣",
+  perilex: "P",
+  outdoor: "B",
 };
 
 // Veelgebruikte uitzonderingen op de standaardhoogte.
@@ -312,6 +333,91 @@ export const FIXTURE_DEFAULT_HEIGHT: Record<FixtureKind, number> = {
 };
 
 export const PLUMBING_COLOR = "#0891b2"; // teal
+
+// Werkelijke voetafdruk (m) per sanitair-soort — één bron voor 2D-editor,
+// werkblad en 3D zodat symbolen overal dezelfde fysieke maat houden.
+export const FIXTURE_FOOTPRINT: Record<FixtureKind, { w: number; h: number }> = {
+  toilet:            { w: 0.42, h: 0.68 },
+  sink:              { w: 0.55, h: 0.45 },
+  shower:            { w: 0.90, h: 0.90 },
+  bath:              { w: 1.70, h: 0.75 },
+  "kitchen-tap":     { w: 0.30, h: 0.30 },
+  "washing-machine": { w: 0.60, h: 0.60 },
+  boiler:            { w: 0.45, h: 0.45 },
+  "outdoor-tap":     { w: 0.30, h: 0.30 },
+};
+
+// ── Bouwkundige elementen (constructie) ──────────────────────────────────────
+
+export const STAIRCASE_LABEL: Record<StaircaseKind, string> = {
+  straight: "Rechte trap",
+  "l-shape": "Kwartslag (L)",
+  spiral: "Spiltrap",
+};
+
+// Standaardafmetingen per traptype (m / aantal treden).
+export const STAIRCASE_DEFAULTS: Record<
+  StaircaseKind,
+  { width: number; run: number; steps: number }
+> = {
+  straight: { width: 1.0, run: 3.0, steps: 16 },
+  "l-shape": { width: 1.0, run: 2.4, steps: 16 },
+  spiral: { width: 1.6, run: 1.6, steps: 14 },
+};
+
+export const COLUMN_SHAPE_LABEL: Record<ColumnShape, string> = {
+  round: "Rond",
+  square: "Vierkant",
+};
+
+export const COLUMN_DEFAULT_SIZE = 0.3; // m
+
+// Stalen profielen: hoogte × flensbreedte (m), afgerond op standaard HEA/HEB.
+export const BEAM_PROFILE_LABEL: Record<BeamProfile, string> = {
+  HEA100: "HEA 100",
+  HEA140: "HEA 140",
+  HEA160: "HEA 160",
+  HEB200: "HEB 200",
+  custom: "Aangepast",
+};
+
+export const BEAM_PROFILE_DIMS: Record<BeamProfile, { h: number; w: number }> = {
+  HEA100: { h: 0.096, w: 0.1 },
+  HEA140: { h: 0.133, w: 0.14 },
+  HEA160: { h: 0.152, w: 0.16 },
+  HEB200: { h: 0.2, w: 0.2 },
+  custom: { h: 0.16, w: 0.16 },
+};
+
+// ── Dak ───────────────────────────────────────────────────────────────────────
+
+export const ROOF_TYPE_LABEL: Record<RoofType, string> = {
+  gable: "Zadeldak",
+  hip: "Schilddak",
+  shed: "Lessenaarsdak",
+  flat: "Plat dak",
+  mansard: "Mansardedak",
+};
+
+export const ROOF_DEFAULTS: Record<RoofType, { pitch: number; overhang: number }> = {
+  gable: { pitch: 45, overhang: 0.5 },
+  hip: { pitch: 40, overhang: 0.5 },
+  shed: { pitch: 15, overhang: 0.4 },
+  flat: { pitch: 3, overhang: 0.3 },
+  mansard: { pitch: 60, overhang: 0.4 },
+};
+
+export const DORMER_TYPE_LABEL: Record<DormerType, string> = {
+  "gable-dormer": "Dakkapel (zadel)",
+  "shed-dormer": "Dakkapel (lessenaar)",
+  velux: "Dakraam (Velux)",
+};
+
+export const DORMER_DEFAULTS: Record<DormerType, { width: number; height: number }> = {
+  "gable-dormer": { width: 1.8, height: 1.4 },
+  "shed-dormer": { width: 2.4, height: 1.4 },
+  velux: { width: 0.8, height: 1.2 },
+};
 
 // ── Materialen ────────────────────────────────────────────────────────────────
 

@@ -2,14 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Camera, Trash2, X } from "lucide-react";
+import { Camera, Trash2, X, FlipHorizontal2, FlipVertical2, Copy } from "lucide-react";
 import { getDB } from "@/lib/db/db";
 import { create, update, remove } from "@/lib/db/repo";
-import { useEditor } from "@/lib/store/editor";
+import type { TableName } from "@/lib/db/repo";
+import { useEditor, type Selection } from "@/lib/store/editor";
 import { useProject, useFurniture } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
-import type { Photo } from "@/lib/domain/types";
+import type { Photo, WallStatus as WallStatusType } from "@/lib/domain/types";
 import { dist, polygonArea } from "@/lib/geometry";
+import { copySelection, TABLE_FOR_KIND, type ClipboardData } from "@/lib/clipboard";
+import { mirrorPatch, selectionBounds, type AnyEntity } from "@/lib/selectionOps";
 import { formatLength, formatArea } from "@/lib/format";
 import {
   WALL_MATERIAL_LABEL,
@@ -21,8 +24,27 @@ import {
   OPENING_COLOR,
   FIXTURE_LABEL,
   HVAC_LABEL,
+  STAIRCASE_LABEL,
+  COLUMN_SHAPE_LABEL,
+  BEAM_PROFILE_LABEL,
+  ROOF_TYPE_LABEL,
+  DORMER_TYPE_LABEL,
+  DORMER_DEFAULTS,
 } from "@/lib/domain/constants";
-import type { Wall, WallMaterial, WallStatus, OpeningType, FloorMaterial } from "@/lib/domain/types";
+import { bounds } from "@/lib/geometry";
+import type {
+  Wall,
+  WallMaterial,
+  WallStatus,
+  OpeningType,
+  FloorMaterial,
+  StaircaseKind,
+  ColumnShape,
+  BeamProfile,
+  RoofType,
+  DormerType,
+  Dormer,
+} from "@/lib/domain/types";
 import { polygonArea as polyArea } from "@/lib/geometry";
 import { nvoArea } from "@/lib/validation";
 
@@ -33,6 +55,9 @@ const OPENING_TYPES: OpeningType[] = ["door", "window", "passage"];
 export function SelectionPanel() {
   const selection = useEditor((s) => s.selection);
   const select = useEditor((s) => s.select);
+  const multi = useEditor((s) => s.multi);
+  const setMulti = useEditor((s) => s.setMulti);
+  const setClipboard = useEditor((s) => s.setClipboard);
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const project = useProject();
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
@@ -108,18 +133,109 @@ export function SelectionPanel() {
       selection?.kind === "hvac" ? await getDB().hvac.get(selection.id) : null,
     [selection?.kind, selection?.id],
   );
+  const staircase = useLiveQuery(
+    async () => (selection?.kind === "staircase" ? await getDB().stairs.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
+  const column = useLiveQuery(
+    async () => (selection?.kind === "column" ? await getDB().columns.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
+  const beam = useLiveQuery(
+    async () => (selection?.kind === "beam" ? await getDB().beams.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
+  const roof = useLiveQuery(
+    async () => (selection?.kind === "roof" ? await getDB().roofs.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
+  const dormer = useLiveQuery(
+    async () => (selection?.kind === "dormer" ? await getDB().dormers.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
 
   const tool = useEditor((s) => s.tool);
   const isPlacementMode = tool === "place" || tool === "draw-pipe";
+  const multiActive = multi.length > 1;
 
-  if (!selection || isPlacementMode) return null;
+  async function gatherEntities(sels: Selection[]) {
+    const db = getDB();
+    const out: { kind: Selection["kind"]; id: string; entity: AnyEntity }[] = [];
+    for (const s of sels) {
+      const ent = await (db[TABLE_FOR_KIND[s.kind] as keyof typeof db] as import("dexie").Table).get(s.id);
+      if (ent && !(ent as { deleted?: boolean }).deleted) {
+        out.push({ kind: s.kind, id: s.id, entity: ent as AnyEntity });
+      }
+    }
+    return out;
+  }
+
+  async function gatherData(sels: Selection[]): Promise<ClipboardData> {
+    const db = getDB();
+    const data: ClipboardData = {
+      walls: [], rooms: [], openings: [], electrical: [], plumbing: [], hvac: [], furniture: [],
+      stairs: [], columns: [], beams: [], roofs: [], dormers: [],
+    };
+    for (const s of sels) {
+      const ent = await (db[TABLE_FOR_KIND[s.kind] as keyof typeof db] as import("dexie").Table).get(s.id);
+      if (!ent || (ent as { deleted?: boolean }).deleted) continue;
+      (data[TABLE_FOR_KIND[s.kind] as keyof ClipboardData] as unknown[]).push(ent);
+      if (s.kind === "wall") {
+        const ops = await db.openings.where("wallId").equals(s.id).toArray();
+        data.openings.push(...ops.filter((o) => !o.deleted));
+      }
+    }
+    return data;
+  }
+
+  async function bulkDelete() {
+    for (const s of multi) await remove(TABLE_FOR_KIND[s.kind] as TableName, s.id);
+    setMulti([]);
+  }
+  async function bulkCopy() {
+    setClipboard(copySelection(multi, await gatherData(multi)));
+  }
+  async function bulkMirror(axis: "h" | "v") {
+    const ents = await gatherEntities(multi);
+    if (!ents.length) return;
+    const bb = selectionBounds(ents);
+    const pivot = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2 };
+    for (const { kind, id, entity } of ents) {
+      const patch = mirrorPatch(kind, entity, axis, pivot);
+      if (Object.keys(patch).length) await update(TABLE_FOR_KIND[kind] as TableName, id, patch);
+    }
+  }
+  async function bulkWallStatus(status: WallStatusType) {
+    for (const s of multi) if (s.kind === "wall") await update("walls", s.id, { status });
+  }
+
+  async function addDormer(roofId: string, type: DormerType) {
+    const bb = bounds((walls ?? []).flatMap((w) => [w.start, w.end]));
+    const center = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2 };
+    const def = DORMER_DEFAULTS[type];
+    const dm = await create<Dormer>("dormers", {
+      roofId,
+      type,
+      position: center,
+      width: def.width,
+      height: def.height,
+    });
+    select({ kind: "dormer", id: dm.id });
+  }
+
+  if (isPlacementMode) return null;
+  if (!selection && !multiActive) return null;
 
   return (
     <div className="pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3">
       <div className="mx-auto max-w-md rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink-900">
-            {selection.kind === "wall"
+            {multiActive
+              ? `${multi.length} items geselecteerd`
+              : !selection
+              ? ""
+              : selection.kind === "wall"
               ? "Muur"
               : selection.kind === "opening"
                 ? "Deur / raam"
@@ -131,7 +247,17 @@ export function SelectionPanel() {
                       ? (selectedFurniture ? FURNITURE_DEFAULTS[selectedFurniture.kind].label : "Meubel")
                       : selection.kind === "hvac"
                         ? "Verwarming"
-                        : "Elektra"}
+                        : selection.kind === "staircase"
+                          ? "Trap"
+                          : selection.kind === "column"
+                            ? "Kolom"
+                            : selection.kind === "beam"
+                              ? "Stalen balk"
+                              : selection.kind === "roof"
+                                ? "Dak"
+                                : selection.kind === "dormer"
+                                  ? "Dakkapel"
+                                  : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -141,6 +267,50 @@ export function SelectionPanel() {
             <X size={16} />
           </button>
         </div>
+
+        {multiActive && (
+          <div className="space-y-2.5">
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => void bulkCopy()}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-paper-sunken py-2 text-xs font-medium text-ink-700 hover:bg-line"
+              >
+                <Copy size={14} /> Kopieer
+              </button>
+              <button
+                onClick={() => void bulkMirror("h")}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-paper-sunken py-2 text-xs font-medium text-ink-700 hover:bg-line"
+              >
+                <FlipHorizontal2 size={14} /> Spiegel H
+              </button>
+              <button
+                onClick={() => void bulkMirror("v")}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-paper-sunken py-2 text-xs font-medium text-ink-700 hover:bg-line"
+              >
+                <FlipVertical2 size={14} /> Spiegel V
+              </button>
+            </div>
+            {multi.some((s) => s.kind === "wall") && (
+              <Row label="Muur-status">
+                <div className="flex gap-1">
+                  {STATUSES.map((st) => (
+                    <button
+                      key={st}
+                      onClick={() => void bulkWallStatus(st)}
+                      className="rounded-md bg-paper-sunken px-2 py-1 text-[11px] font-medium text-ink-700"
+                    >
+                      {WALL_STATUS_LABEL[st]}
+                    </button>
+                  ))}
+                </div>
+              </Row>
+            )}
+            <p className="text-[11px] text-ink-400">
+              Tip: ↑↓←→ verplaatst · Ctrl+C/V kopieert · Del verwijdert.
+            </p>
+            <DeleteButton onClick={() => void bulkDelete()} />
+          </div>
+        )}
 
         {wall && (
           <div className="space-y-2.5">
@@ -486,6 +656,186 @@ export function SelectionPanel() {
           </div>
         )}
 
+        {staircase && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <div className="flex gap-1">
+                {(["straight", "l-shape", "spiral"] as StaircaseKind[]).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => update("stairs", staircase.id, { kind: k })}
+                    className={`rounded-md px-2 py-1 text-[10px] font-medium ${
+                      staircase.kind === k ? "bg-[#0f766e] text-white" : "bg-paper-sunken text-ink-700"
+                    }`}
+                  >
+                    {STAIRCASE_LABEL[k]}
+                  </button>
+                ))}
+              </div>
+            </Row>
+            <Row label="Breedte">
+              <NumberField value={Math.round(staircase.width * 100)} unit="cm" onChange={(v) => update("stairs", staircase.id, { width: v / 100 })} />
+            </Row>
+            <Row label="Looplengte">
+              <NumberField value={Math.round(staircase.run * 100)} unit="cm" onChange={(v) => update("stairs", staircase.id, { run: v / 100 })} />
+            </Row>
+            <Row label="Treden">
+              <NumberField value={staircase.steps} unit="st" onChange={(v) => update("stairs", staircase.id, { steps: Math.max(2, Math.round(v)) })} />
+            </Row>
+            <Row label="Rotatie">
+              <NumberField value={Math.round(staircase.rotation)} unit="°" onChange={(v) => update("stairs", staircase.id, { rotation: ((Math.round(v) % 360) + 360) % 360 })} />
+            </Row>
+            <Row label="Richting">
+              <div className="flex gap-1">
+                {(["up", "down"] as const).map((dir) => (
+                  <button
+                    key={dir}
+                    onClick={() => update("stairs", staircase.id, { direction: dir })}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                      staircase.direction === dir ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"
+                    }`}
+                  >
+                    {dir === "up" ? "Op" : "Af"}
+                  </button>
+                ))}
+              </div>
+            </Row>
+            <DeleteButton onClick={() => removeAnd("stairs", staircase.id, () => select(null))} />
+          </div>
+        )}
+
+        {column && (
+          <div className="space-y-2.5">
+            <Row label="Vorm">
+              <div className="flex gap-1">
+                {(["square", "round"] as ColumnShape[]).map((sh) => (
+                  <button
+                    key={sh}
+                    onClick={() => update("columns", column.id, { shape: sh })}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                      column.shape === sh ? "bg-[#0f766e] text-white" : "bg-paper-sunken text-ink-700"
+                    }`}
+                  >
+                    {COLUMN_SHAPE_LABEL[sh]}
+                  </button>
+                ))}
+              </div>
+            </Row>
+            <Row label={column.shape === "round" ? "Diameter" : "Zijde"}>
+              <NumberField value={Math.round(column.size * 100)} unit="cm" onChange={(v) => update("columns", column.id, { size: Math.max(0.05, v / 100) })} />
+            </Row>
+            <Row label="Materiaal">
+              <select
+                value={column.material}
+                onChange={(e) => update("columns", column.id, { material: e.target.value as WallMaterial })}
+                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              >
+                {MATERIALS.map((m) => (
+                  <option key={m} value={m}>{WALL_MATERIAL_LABEL[m]}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Dragend">
+              <button
+                onClick={() => update("columns", column.id, { loadBearing: !column.loadBearing })}
+                className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                  column.loadBearing ? "bg-danger text-white" : "bg-paper-sunken text-ink-700"
+                }`}
+              >
+                {column.loadBearing ? "Ja" : "Nee"}
+              </button>
+            </Row>
+            <DeleteButton onClick={() => removeAnd("columns", column.id, () => select(null))} />
+          </div>
+        )}
+
+        {beam && (
+          <div className="space-y-2.5">
+            <Row label="Profiel">
+              <select
+                value={beam.profile}
+                onChange={(e) => update("beams", beam.id, { profile: e.target.value as BeamProfile })}
+                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              >
+                {(["HEA100", "HEA140", "HEA160", "HEB200", "custom"] as BeamProfile[]).map((p) => (
+                  <option key={p} value={p}>{BEAM_PROFILE_LABEL[p]}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Hoogte in gevel">
+              <NumberField value={Math.round(beam.height * 100)} unit="cm" onChange={(v) => update("beams", beam.id, { height: v / 100 })} />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("beams", beam.id, () => select(null))} />
+          </div>
+        )}
+
+        {roof && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <select
+                value={roof.type}
+                onChange={(e) => update("roofs", roof.id, { type: e.target.value as RoofType })}
+                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              >
+                {(["gable", "hip", "shed", "flat", "mansard"] as RoofType[]).map((t) => (
+                  <option key={t} value={t}>{ROOF_TYPE_LABEL[t]}</option>
+                ))}
+              </select>
+            </Row>
+            {roof.type !== "flat" && (
+              <>
+                <Row label="Helling">
+                  <NumberField value={Math.round(roof.pitch)} unit="°" onChange={(v) => update("roofs", roof.id, { pitch: Math.max(1, Math.min(80, Math.round(v))) })} />
+                </Row>
+                <Row label="Nokrichting">
+                  <NumberField value={Math.round(roof.ridgeDirection)} unit="°" onChange={(v) => update("roofs", roof.id, { ridgeDirection: ((Math.round(v) % 360) + 360) % 360 })} />
+                </Row>
+              </>
+            )}
+            <Row label="Dakoverstek">
+              <NumberField value={Math.round(roof.overhang * 100)} unit="cm" onChange={(v) => update("roofs", roof.id, { overhang: Math.max(0, v / 100) })} />
+            </Row>
+            <div>
+              <span className="mb-1 block text-xs text-ink-500">Dakkapel toevoegen</span>
+              <div className="flex flex-wrap gap-1">
+                {(["gable-dormer", "shed-dormer", "velux"] as DormerType[]).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => void addDormer(roof.id, t)}
+                    className="rounded-md bg-paper-sunken px-2 py-1 text-[10px] font-medium text-ink-700 hover:bg-line"
+                  >
+                    {DORMER_TYPE_LABEL[t]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <DeleteButton onClick={() => removeAnd("roofs", roof.id, () => select(null))} />
+          </div>
+        )}
+
+        {dormer && (
+          <div className="space-y-2.5">
+            <Row label="Type">
+              <select
+                value={dormer.type}
+                onChange={(e) => update("dormers", dormer.id, { type: e.target.value as DormerType })}
+                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              >
+                {(["gable-dormer", "shed-dormer", "velux"] as DormerType[]).map((t) => (
+                  <option key={t} value={t}>{DORMER_TYPE_LABEL[t]}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Breedte">
+              <NumberField value={Math.round(dormer.width * 100)} unit="cm" onChange={(v) => update("dormers", dormer.id, { width: Math.max(0.3, v / 100) })} />
+            </Row>
+            <Row label="Hoogte">
+              <NumberField value={Math.round(dormer.height * 100)} unit="cm" onChange={(v) => update("dormers", dormer.id, { height: Math.max(0.3, v / 100) })} />
+            </Row>
+            <DeleteButton onClick={() => removeAnd("dormers", dormer.id, () => select(null))} />
+          </div>
+        )}
+
         {lightboxPhoto && (
           <Lightbox photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />
         )}
@@ -499,7 +849,7 @@ export function SelectionPanel() {
                     key={deg}
                     onClick={() => void update("furniture", selectedFurniture.id, { rotation: deg })}
                     className={`rounded-md px-2 py-1 text-[11px] font-medium ${
-                      selectedFurniture.rotation === deg
+                      Math.round(selectedFurniture.rotation) === deg
                         ? "bg-accent text-white"
                         : "bg-paper-sunken text-ink-700"
                     }`}
@@ -507,6 +857,47 @@ export function SelectionPanel() {
                     {deg}°
                   </button>
                 ))}
+              </div>
+            </Row>
+            <Row label="Vrije hoek">
+              <NumberField
+                value={Math.round(selectedFurniture.rotation)}
+                unit="°"
+                onChange={(v) =>
+                  void update("furniture", selectedFurniture.id, {
+                    rotation: ((Math.round(v) % 360) + 360) % 360,
+                  })
+                }
+              />
+            </Row>
+            <Row label="Spiegelen">
+              <div className="flex gap-1">
+                <button
+                  onClick={() => {
+                    const p = selectedFurniture.position;
+                    void update(
+                      "furniture",
+                      selectedFurniture.id,
+                      mirrorPatch("furniture", selectedFurniture, "h", p),
+                    );
+                  }}
+                  className="flex items-center gap-1 rounded-md bg-paper-sunken px-2 py-1 text-[11px] font-medium text-ink-700"
+                >
+                  <FlipHorizontal2 size={12} /> H
+                </button>
+                <button
+                  onClick={() => {
+                    const p = selectedFurniture.position;
+                    void update(
+                      "furniture",
+                      selectedFurniture.id,
+                      mirrorPatch("furniture", selectedFurniture, "v", p),
+                    );
+                  }}
+                  className="flex items-center gap-1 rounded-md bg-paper-sunken px-2 py-1 text-[11px] font-medium text-ink-700"
+                >
+                  <FlipVertical2 size={12} /> V
+                </button>
               </div>
             </Row>
             <Row label="Kleur">
@@ -588,7 +979,7 @@ export function SelectionPanel() {
 }
 
 async function removeAnd(
-  table: "walls" | "electrical" | "openings" | "rooms" | "plumbing" | "furniture" | "hvac",
+  table: TableName,
   id: string,
   after: () => void,
 ) {

@@ -4,7 +4,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { getDB } from "./db/db";
-import type { Furniture, HvacItem } from "./domain/types";
+import type { Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer } from "./domain/types";
 
 function notDeleted<T extends { deleted?: boolean }>(rows: T[] | undefined): T[] {
   return (rows ?? []).filter((r) => !r.deleted);
@@ -181,5 +181,63 @@ export function useHvac(levelId: string | null) {
     },
     [levelId],
     [] as HvacItem[],
+  );
+}
+
+export function useStairs(levelId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      return notDeleted(await getDB().stairs.where("levelId").equals(levelId).toArray());
+    },
+    [levelId],
+    [] as Staircase[],
+  );
+}
+
+export function useColumns(levelId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      return notDeleted(await getDB().columns.where("levelId").equals(levelId).toArray());
+    },
+    [levelId],
+    [] as Column[],
+  );
+}
+
+export function useBeams(levelId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      return notDeleted(await getDB().beams.where("levelId").equals(levelId).toArray());
+    },
+    [levelId],
+    [] as Beam[],
+  );
+}
+
+export function useRoofs(levelId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      return notDeleted(await getDB().roofs.where("levelId").equals(levelId).toArray());
+    },
+    [levelId],
+    [] as Roof[],
+  );
+}
+
+export function useDormers(roofIds: string[]) {
+  const key = roofIds.join(",");
+  return useLiveQuery(
+    async () => {
+      if (roofIds.length === 0) return [];
+      const all = notDeleted(await getDB().dormers.toArray());
+      const set = new Set(roofIds);
+      return all.filter((d) => set.has(d.roofId));
+    },
+    [key],
+    [] as Dormer[],
   );
 }

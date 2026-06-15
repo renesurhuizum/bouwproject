@@ -114,6 +114,35 @@ export function getCornerFillPoints(endpoint: Point, walls: Array<{ start: Point
   return pts;
 }
 
+// Spiegel een set punten rond een spil-punt langs de horizontale ("h": x flipt)
+// of verticale ("v": y flipt) as.
+export function mirrorPoints(pts: Point[], axis: "h" | "v", pivot: Point): Point[] {
+  return pts.map((p) =>
+    axis === "h"
+      ? { x: 2 * pivot.x - p.x, y: p.y }
+      : { x: p.x, y: 2 * pivot.y - p.y },
+  );
+}
+
+// Snijpunt van de oneindige verlengingen van twee muren (lijnen door start→end).
+// Geeft null bij (vrijwel) parallelle lijnen.
+export function wallIntersection(
+  a: { start: Point; end: Point },
+  b: { start: Point; end: Point },
+): Point | null {
+  const x1 = a.start.x, y1 = a.start.y, x2 = a.end.x, y2 = a.end.y;
+  const x3 = b.start.x, y3 = b.start.y, x4 = b.end.x, y4 = b.end.y;
+  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(denom) < 1e-9) return null; // parallel of degeneraat
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+  return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+}
+
+// Ligt punt p binnen de (as-georiënteerde) rechthoek min..max?
+export function pointInRect(p: Point, min: Point, max: Point): boolean {
+  return p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y;
+}
+
 // Bounding box van een set punten.
 export function bounds(points: Point[]): { min: Point; max: Point } {
   if (points.length === 0) {
@@ -130,4 +159,27 @@ export function bounds(points: Point[]): { min: Point; max: Point } {
     maxY = Math.max(maxY, p.y);
   }
   return { min: { x: minX, y: minY }, max: { x: maxX, y: maxY } };
+}
+
+// Punt-in-polygon (ray casting). Randpunten tellen als binnen
+// (kwadratische afstand, tolerantie 1 mm — geen sqrt in de hot loop).
+export function pointInPolygon(p: Point, poly: Point[]): boolean {
+  if (poly.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+    const ex = p.x - (a.x + t * dx);
+    const ey = p.y - (a.y + t * dy);
+    if (ex * ex + ey * ey < 1e-6) return true;
+    const intersects =
+      a.y > p.y !== b.y > p.y &&
+      p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x;
+    if (intersects) inside = !inside;
+  }
+  return inside;
 }
