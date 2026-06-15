@@ -197,6 +197,8 @@ interface Props {
   furniture?: Furniture[];
   northDegrees?: number;
   maxWidth?: number;
+  openingCodes?: Map<string, string>; // kozijnstaat-referenties (D01/R01) bij openingen
+  svgId?: string; // voor PNG-export
 }
 
 export function WerkbladPlan({
@@ -208,6 +210,8 @@ export function WerkbladPlan({
   furniture = [],
   northDegrees = 0,
   maxWidth = 700,
+  openingCodes,
+  svgId,
 }: Props) {
   const pts: Point[] = [
     ...walls.flatMap((w) => [w.start, w.end]),
@@ -241,7 +245,7 @@ export function WerkbladPlan({
   const barX = PAD;
 
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="block">
+    <svg id={svgId} width="100%" viewBox={`0 0 ${W} ${H}`} className="block">
       {/* Maatlijnen — totale breedte (boven) en hoogte (rechts) */}
       <g stroke="#ea580c" strokeWidth={0.7} fill="none">
         <line x1={sx(b.min.x)} y1={PAD + DIM - 14} x2={sx(b.max.x)} y2={PAD + DIM - 14} />
@@ -448,6 +452,39 @@ export function WerkbladPlan({
           </g>
         );
       })}
+
+      {/* Kozijnstaat-referenties (D01/R01) bij elke opening */}
+      {openingCodes &&
+        openings.map((op) => {
+          const code = openingCodes.get(op.id);
+          const w = wallById.get(op.wallId);
+          if (!code || !w) return null;
+          const len = dist(w.start, w.end);
+          if (len < 0.01) return null;
+          const dx = (w.end.x - w.start.x) / len;
+          const dy = (w.end.y - w.start.y) / len;
+          const nx = -dy, ny = dx;
+          const off = 18 / scale; // ~18px naar buiten
+          const cM = { x: w.start.x + dx * op.offset, y: w.start.y + dy * op.offset };
+          const px = sx(cM.x + nx * off);
+          const py = sy(cM.y + ny * off);
+          return (
+            <g key={`code-${op.id}`}>
+              <circle cx={px} cy={py} r={7.5} fill="#fff" stroke="#1c1917" strokeWidth={0.8} />
+              <text
+                x={px}
+                y={py + 2.5}
+                textAnchor="middle"
+                fontSize={7}
+                fontWeight="700"
+                fontFamily="monospace"
+                fill="#1c1917"
+              >
+                {code}
+              </text>
+            </g>
+          );
+        })}
 
       {/* Noordpijl rechtsboven */}
       <g transform={`translate(${W - 26} ${PAD + DIM + 6})`}>
