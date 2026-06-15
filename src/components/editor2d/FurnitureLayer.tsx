@@ -5,6 +5,7 @@ import { Layer, Rect, Text, Group, Circle, Line } from "react-konva";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
 import type { Furniture } from "@/lib/domain/types";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
+import { FurnitureSymbol } from "./furnitureSymbols";
 
 interface Props {
   view: ViewState;
@@ -62,18 +63,28 @@ export function FurnitureLayer({ view, furniture, selectedId, onSelect, onMove, 
                 fill={item.color ?? def.color}
                 stroke={selected ? "#ea580c" : "#8b7355"}
                 strokeWidth={selected ? 2 : 1}
-                cornerRadius={3}
+                cornerRadius={2}
                 opacity={0.85}
               />
-              <Text
-                text={def.label}
-                fontSize={Math.max(8, Math.min(12, sw / 6))}
-                fill="#4a3728"
-                width={sw}
-                height={sd}
-                align="center"
-                verticalAlign="middle"
+              <FurnitureSymbol
+                kind={item.kind}
+                sw={sw}
+                sd={sd}
+                color={item.color ?? def.color}
+                stroke="#5c4a35"
               />
+              {sw < 28 && (
+                <Text
+                  text={def.label}
+                  fontSize={Math.max(8, Math.min(12, sw / 6))}
+                  fill="#4a3728"
+                  width={sw}
+                  height={sd}
+                  align="center"
+                  verticalAlign="middle"
+                  listening={false}
+                />
+              )}
               {selected && (
                 <>
                   <Circle x={0}   y={0}   radius={5} fill="#ea580c" />

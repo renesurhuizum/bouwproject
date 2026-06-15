@@ -12,6 +12,8 @@ export interface LayoutPrefs {
   doorSide: DoorSide;
   bedrooms: number;
   wishes: string; // vrije tekst
+  originX?: number; // wereld-x van de linkerbovenhoek (default 0)
+  originY?: number; // wereld-y van de linkerbovenhoek (default 0)
 }
 
 interface RoomSpec {
@@ -146,6 +148,20 @@ function orientForDoor(layout: Layout, side: DoorSide): Layout {
   };
 }
 
+// Verschuif een complete layout naar de werkelijke positie van de footprint.
+function translateLayout(layout: Layout, dx: number, dy: number): Layout {
+  if (dx === 0 && dy === 0) return layout;
+  const tp = (p: Point): Point => ({ x: p.x + dx, y: p.y + dy });
+  return {
+    outer: { ...layout.outer, x: layout.outer.x + dx, y: layout.outer.y + dy },
+    rooms: layout.rooms.map((r) => ({
+      ...r,
+      rect: { ...r.rect, x: r.rect.x + dx, y: r.rect.y + dy },
+    })),
+    cuts: layout.cuts.map((c) => ({ a: tp(c.a), b: tp(c.b) })),
+  };
+}
+
 // Drie varianten door de volgorde van publieke ruimtes te wisselen.
 export function generateLayouts(prefs: LayoutPrefs): Layout[] {
   const base = buildProgram(prefs);
@@ -165,7 +181,8 @@ export function generateLayouts(prefs: LayoutPrefs): Layout[] {
     const outer = { x: 0, y: 0, w: prefs.width, h: prefs.depth };
     const cuts: Segment[] = [];
     const rooms = slice({ ...outer }, specs, cuts);
-    return orientForDoor({ rooms, cuts, outer }, prefs.doorSide);
+    const oriented = orientForDoor({ rooms, cuts, outer }, prefs.doorSide);
+    return translateLayout(oriented, prefs.originX ?? 0, prefs.originY ?? 0);
   });
 }
 

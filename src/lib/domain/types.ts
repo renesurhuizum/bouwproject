@@ -92,6 +92,7 @@ export type ElectricalType =
   | "wall-light" // wandlamp
   | "data" // UTP/data
   | "panel" // meterkast/groepenkast
+  | "perilex" // kookgroep 2-fase (krachtstroom)
   | "outdoor"; // buitenpunt
 
 export interface ElectricalItem extends Entity {

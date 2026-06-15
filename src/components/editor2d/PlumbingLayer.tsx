@@ -3,11 +3,102 @@
 // Water-laag. Toont leidingtrajecten (path) en sanitair/tappunten (position).
 
 import { Fragment } from "react";
-import { Layer, Line, Circle, Group, Text, Label, Tag } from "react-konva";
-import type { PlumbingItem } from "@/lib/domain/types";
-import { FIXTURE_CODE, PLUMBING_COLOR } from "@/lib/domain/constants";
+import { Layer, Line, Circle, Ellipse, Rect, Group, Text, Label, Tag } from "react-konva";
+import type { PlumbingItem, FixtureKind } from "@/lib/domain/types";
+import { FIXTURE_CODE, FIXTURE_FOOTPRINT, PLUMBING_COLOR } from "@/lib/domain/constants";
 import { formatHeight } from "@/lib/format";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
+
+// Bovenaanzicht-symbool per sanitair-soort, getekend in (0,0)–(w,h) px.
+// Puur tekenwerk; alle shapes listening={false} — de hit-Rect van de caller vangt clicks.
+function FixtureSymbol({ kind, w, h }: { kind: FixtureKind; w: number; h: number }) {
+  const s = PLUMBING_COLOR;
+  const sw = 1.2;
+  const common = { stroke: s, strokeWidth: sw, listening: false as const };
+
+  switch (kind) {
+    case "toilet":
+      return (
+        <>
+          {/* stortbak */}
+          <Rect x={w * 0.06} y={0} width={w * 0.88} height={h * 0.26} cornerRadius={2}
+            fill="#ffffff" opacity={0.9} {...common} />
+          {/* pot */}
+          <Ellipse x={w * 0.5} y={h * 0.6} radiusX={w * 0.33} radiusY={h * 0.32}
+            fill="#ffffff" opacity={0.9} {...common} />
+          {/* bril */}
+          <Ellipse x={w * 0.5} y={h * 0.62} radiusX={w * 0.22} radiusY={h * 0.22}
+            {...common} strokeWidth={0.8} />
+        </>
+      );
+    case "sink":
+      return (
+        <>
+          <Rect x={0} y={0} width={w} height={h} cornerRadius={2}
+            fill="#ffffff" opacity={0.85} {...common} />
+          {/* kom */}
+          <Ellipse x={w * 0.5} y={h * 0.56} radiusX={w * 0.36} radiusY={h * 0.32} {...common} strokeWidth={0.9} />
+          {/* kraan */}
+          <Circle x={w * 0.5} y={h * 0.12} radius={Math.max(1.5, w * 0.05)} fill={s} listening={false} />
+          <Line points={[w * 0.5, h * 0.12, w * 0.5, h * 0.3]} {...common} strokeWidth={0.9} />
+        </>
+      );
+    case "shower":
+      return (
+        <>
+          <Rect x={0} y={0} width={w} height={h} fill="#ffffff" opacity={0.7} {...common} />
+          {/* diagonalen (standaard douchesymbool) */}
+          <Line points={[0, 0, w, h]} {...common} strokeWidth={0.8} />
+          <Line points={[w, 0, 0, h]} {...common} strokeWidth={0.8} />
+          {/* putje */}
+          <Circle x={w * 0.5} y={h * 0.5} radius={Math.max(2, w * 0.07)} fill="#ffffff" {...common} strokeWidth={0.9} />
+          {/* douchekop in hoek */}
+          <Circle x={w * 0.12} y={h * 0.12} radius={Math.max(2, w * 0.06)} fill={s} listening={false} />
+        </>
+      );
+    case "bath":
+      return (
+        <>
+          <Rect x={0} y={0} width={w} height={h} cornerRadius={2}
+            fill="#ffffff" opacity={0.9} {...common} />
+          {/* binnenkuip */}
+          <Rect x={w * 0.08} y={h * 0.12} width={w * 0.84} height={h * 0.76}
+            cornerRadius={Math.max(4, h * 0.3)} {...common} strokeWidth={0.9} />
+          {/* afvoer + kraanzijde */}
+          <Circle x={w * 0.14} y={h * 0.5} radius={Math.max(1.5, w * 0.02)} {...common} strokeWidth={0.9} />
+          <Circle x={w * 0.05} y={h * 0.5} radius={Math.max(1.5, w * 0.015)} fill={s} listening={false} />
+        </>
+      );
+    case "washing-machine":
+      return (
+        <>
+          <Rect x={0} y={0} width={w} height={h} cornerRadius={2}
+            fill="#ffffff" opacity={0.9} {...common} />
+          {/* bedieningspaneel */}
+          <Line points={[w * 0.08, h * 0.18, w * 0.92, h * 0.18]} {...common} strokeWidth={0.8} />
+          {/* trommel */}
+          <Circle x={w * 0.5} y={h * 0.58} radius={w * 0.28} {...common} strokeWidth={0.9} />
+          <Circle x={w * 0.5} y={h * 0.58} radius={w * 0.18} {...common} strokeWidth={0.7} />
+        </>
+      );
+    case "boiler":
+      return (
+        <>
+          <Circle x={w * 0.5} y={h * 0.5} radius={w * 0.48} fill="#ffffff" opacity={0.9} {...common} />
+          <Circle x={w * 0.5} y={h * 0.5} radius={w * 0.32} {...common} strokeWidth={0.8} />
+        </>
+      );
+    case "kitchen-tap":
+    case "outdoor-tap":
+      return (
+        <>
+          {/* tappunt: cirkel met uitloop (kraansymbool) */}
+          <Circle x={w * 0.5} y={h * 0.6} radius={w * 0.3} fill="#ffffff" opacity={0.9} {...common} />
+          <Line points={[w * 0.5, h * 0.6, w * 0.5, h * 0.12, w * 0.82, h * 0.12]} {...common} strokeWidth={1.1} />
+        </>
+      );
+  }
+}
 
 const PIPE_COLORS: Record<string, string> = {
   "supply-cold": "#3b82f6",
@@ -102,11 +193,63 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
         />
       )}
 
-      {/* Tappunten / sanitair */}
+      {/* Tappunten / sanitair — bouwtekening-symbolen op ware grootte */}
       {fixtures.map((item) => {
         if (!item.position) return null;
         const p = metersToScreen(item.position, view);
         const selected = item.id === selectedId;
+        const size = item.fixture ? FIXTURE_FOOTPRINT[item.fixture] : null;
+        const sw = size ? metersToPx(size.w, view) : 0;
+        const sh = size ? metersToPx(size.h, view) : 0;
+        // Bij ver uitzoomen is het symbool onleesbaar → cirkel-marker als terugval.
+        const useSymbol = !!item.fixture && sw >= 16;
+
+        if (useSymbol && item.fixture) {
+          return (
+            <Fragment key={item.id}>
+              {selected && (
+                <Rect
+                  x={p.x - sw / 2 - 3}
+                  y={p.y - sh / 2 - 3}
+                  width={sw + 6}
+                  height={sh + 6}
+                  fill="#fb923c"
+                  opacity={0.35}
+                  cornerRadius={3}
+                  listening={false}
+                />
+              )}
+              <Group x={p.x - sw / 2} y={p.y - sh / 2}>
+                <FixtureSymbol kind={item.fixture} w={sw} h={sh} />
+                {/* onzichtbaar klikvlak over de hele voetafdruk */}
+                <Rect
+                  id={item.id}
+                  name="plumbing"
+                  x={0}
+                  y={0}
+                  width={sw}
+                  height={sh}
+                  fill="transparent"
+                  onClick={() => onSelect(item.id)}
+                  onTap={() => onSelect(item.id)}
+                />
+              </Group>
+              {item.heightZ != null && (
+                <Label x={p.x - 14} y={p.y + sh / 2 + 2} listening={false}>
+                  <Tag fill="#cffafe" cornerRadius={2} />
+                  <Text
+                    text={`${FIXTURE_CODE[item.fixture]} ${formatHeight(item.heightZ)}`}
+                    fontSize={9}
+                    fontFamily="monospace"
+                    fill={PLUMBING_COLOR}
+                    padding={2}
+                  />
+                </Label>
+              )}
+            </Fragment>
+          );
+        }
+
         const r = 12;
         return (
           <Fragment key={item.id}>

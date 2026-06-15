@@ -47,6 +47,7 @@ const PLACE_TYPES: ElectricalType[] = [
   "spot",
   "data",
   "panel",
+  "perilex",
   "outdoor",
 ];
 

@@ -4,30 +4,189 @@
 // openingen (deur-zwaaiboog / raam), installatiepunten met hoogtes, plus
 // maatlijnen, schaalbalk, noordpijl en legenda. Geen Konva — schoon voor print.
 
+import type { ReactNode } from "react";
 import type {
   Wall,
   Room,
   Opening,
   ElectricalItem,
-  ElectricalType,
   PlumbingItem,
+  Furniture,
+  FurnitureKind,
+  FixtureKind,
   Point,
 } from "@/lib/domain/types";
-import { WALL_STATUS_COLOR, FIXTURE_CODE, PLUMBING_COLOR } from "@/lib/domain/constants";
+import {
+  WALL_STATUS_COLOR,
+  ELECTRICAL_CODE,
+  FIXTURE_CODE,
+  FIXTURE_FOOTPRINT,
+  PLUMBING_COLOR,
+} from "@/lib/domain/constants";
+import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { bounds, dist, polygonArea, polygonCentroid } from "@/lib/geometry";
 import { formatLength, formatArea, formatHeight } from "@/lib/format";
 
-const ELEC_CODE: Record<ElectricalType, string> = {
-  socket: "S",
-  "socket-double": "S²",
-  switch: "W",
-  light: "L",
-  spot: "·",
-  "wall-light": "WL",
-  data: "D",
-  panel: "▣",
-  outdoor: "B",
-};
+const ELEC_CODE = ELECTRICAL_CODE;
+const FIXTURE_DIMS = FIXTURE_FOOTPRINT;
+
+// Sanitair-symbool op ware grootte, gecentreerd rond (0,0). w/h in px.
+// Stijl (stroke/fill) komt van de omhullende <g>; alleen afwijkingen lokaal.
+function fixtureSymbol(kind: FixtureKind, w: number, h: number): ReactNode {
+  switch (kind) {
+    case "toilet": {
+      const tank = h * 0.28; // stortbak bovenaan
+      const cy = -h / 2 + tank + (h - tank) / 2;
+      return (
+        <>
+          <rect x={-w / 2} y={-h / 2} width={w} height={tank} />
+          <ellipse cx={0} cy={cy} rx={w * 0.45} ry={(h - tank) * 0.46} />
+          <ellipse cx={0} cy={cy} rx={w * 0.3} ry={(h - tank) * 0.3} fill="none" />
+        </>
+      );
+    }
+    case "sink":
+      return (
+        <>
+          <rect x={-w / 2} y={-h / 2} width={w} height={h} />
+          <ellipse cx={0} cy={h * 0.06} rx={w * 0.32} ry={h * 0.3} />
+          <circle cx={0} cy={-h / 2 + h * 0.16} r={1.5} fill="#0891b2" />
+        </>
+      );
+    case "shower":
+      return (
+        <>
+          <rect x={-w / 2} y={-h / 2} width={w} height={h} />
+          <line x1={-w / 2} y1={-h / 2} x2={w / 2} y2={h / 2} />
+          <line x1={w / 2} y1={-h / 2} x2={-w / 2} y2={h / 2} />
+          <circle cx={0} cy={0} r={Math.max(2, w * 0.06)} fill="white" />
+        </>
+      );
+    case "bath": {
+      const ix = w * 0.1;
+      const iy = h * 0.1;
+      return (
+        <>
+          <rect x={-w / 2} y={-h / 2} width={w} height={h} />
+          <rect
+            x={-w / 2 + ix}
+            y={-h / 2 + iy}
+            width={w - ix * 2}
+            height={h - iy * 2}
+            rx={(h - iy * 2) / 3}
+            fill="none"
+          />
+          <circle cx={-w / 2 + w * 0.18} cy={0} r={2} fill="none" />
+        </>
+      );
+    }
+    case "washing-machine":
+      return (
+        <>
+          <rect x={-w / 2} y={-h / 2} width={w} height={h} />
+          <line x1={-w / 2} y1={-h / 2 + h * 0.18} x2={w / 2} y2={-h / 2 + h * 0.18} />
+          <circle cx={0} cy={h * 0.09} r={w * 0.3} fill="none" />
+        </>
+      );
+    case "boiler":
+      return (
+        <>
+          <circle cx={0} cy={0} r={w / 2} />
+          <circle cx={0} cy={0} r={w * 0.34} fill="none" />
+        </>
+      );
+    case "kitchen-tap":
+    case "outdoor-tap":
+      return (
+        <>
+          <circle cx={0} cy={0} r={w * 0.28} />
+          <line x1={0} y1={0} x2={0} y2={h / 2} />
+        </>
+      );
+  }
+}
+
+// Meubel-contour (architectenstijl), gecentreerd rond (0,0). w/h in px.
+// Stijl (dunne grijze lijnen, fill none) komt van de omhullende <g>.
+function furnitureOutline(kind: FurnitureKind, w: number, h: number): ReactNode {
+  const box = <rect x={-w / 2} y={-h / 2} width={w} height={h} />;
+  switch (kind) {
+    case "bed-single":
+    case "bed-double":
+    case "bed-king":
+      return (
+        <>
+          {box}
+          {/* kussenlijn */}
+          <line x1={-w / 2 + w * 0.08} y1={-h / 2 + h * 0.15} x2={w / 2 - w * 0.08} y2={-h / 2 + h * 0.15} />
+          {/* dwarslijn (dekenvouw) op 30% */}
+          <line x1={-w / 2} y1={-h / 2 + h * 0.3} x2={w / 2} y2={-h / 2 + h * 0.3} />
+        </>
+      );
+    case "sofa-2":
+    case "sofa-3":
+    case "sofa-l":
+    case "dining-chair":
+    case "office-chair":
+      return (
+        <>
+          {box}
+          {/* ruglijn */}
+          <line x1={-w / 2} y1={-h / 2 + h * 0.25} x2={w / 2} y2={-h / 2 + h * 0.25} />
+        </>
+      );
+    case "dining-table":
+    case "desk":
+    case "coffee-table":
+    case "tv-unit":
+      return box;
+    case "wardrobe":
+    case "bookshelf":
+      return (
+        <>
+          {box}
+          <line x1={-w / 2} y1={-h / 2} x2={w / 2} y2={h / 2} />
+          <line x1={w / 2} y1={-h / 2} x2={-w / 2} y2={h / 2} />
+        </>
+      );
+    case "bathtub": {
+      const ix = w * 0.1;
+      const iy = h * 0.1;
+      return (
+        <>
+          {box}
+          <rect x={-w / 2 + ix} y={-h / 2 + iy} width={w - ix * 2} height={h - iy * 2} rx={(h - iy * 2) / 3} />
+          <circle cx={-w / 2 + w * 0.18} cy={0} r={2} />
+        </>
+      );
+    }
+    case "shower-cabin":
+      return (
+        <>
+          {box}
+          <line x1={-w / 2} y1={-h / 2} x2={w / 2} y2={h / 2} />
+          <line x1={w / 2} y1={-h / 2} x2={-w / 2} y2={h / 2} />
+          <circle cx={0} cy={0} r={Math.max(2, w * 0.06)} />
+        </>
+      );
+    case "kitchen-island": {
+      const r = Math.min(w, h) * 0.1;
+      const cx = w * 0.2;
+      return (
+        <>
+          {box}
+          {/* spoelbak links */}
+          <rect x={-w / 2 + w * 0.08} y={-h * 0.22} width={w * 0.25} height={h * 0.44} />
+          {/* 4 kookzones rechts */}
+          <circle cx={cx} cy={-h * 0.2} r={r} />
+          <circle cx={cx + w * 0.22} cy={-h * 0.2} r={r} />
+          <circle cx={cx} cy={h * 0.2} r={r} />
+          <circle cx={cx + w * 0.22} cy={h * 0.2} r={r} />
+        </>
+      );
+    }
+  }
+}
 
 interface Props {
   walls: Wall[];
@@ -35,6 +194,7 @@ interface Props {
   electrical: ElectricalItem[];
   plumbing: PlumbingItem[];
   openings?: Opening[];
+  furniture?: Furniture[];
   northDegrees?: number;
   maxWidth?: number;
 }
@@ -45,6 +205,7 @@ export function WerkbladPlan({
   electrical,
   plumbing,
   openings = [],
+  furniture = [],
   northDegrees = 0,
   maxWidth = 700,
 }: Props) {
@@ -62,7 +223,7 @@ export function WerkbladPlan({
   const scale = maxWidth / wM;
   const PAD = 30;
   const DIM = 30;    // ruimte voor maatlijnen (boven + rechts)
-  const FOOT = 56;   // ruimte voor schaalbalk + legenda onderaan
+  const FOOT = 70;   // ruimte voor schaalbalk + legenda onderaan
   const W = wM * scale + PAD * 2 + DIM;
   const H = hM * scale + PAD * 2 + DIM + FOOT;
 
@@ -217,6 +378,24 @@ export function WerkbladPlan({
         );
       })}
 
+      {/* Meubilering — lichte contouren onder de installatielagen */}
+      {furniture.map((f) => {
+        const def = FURNITURE_DEFAULTS[f.kind];
+        const fw = (f.width ?? def.w) * scale;
+        const fd = (f.depth ?? def.d) * scale;
+        return (
+          <g
+            key={f.id}
+            transform={`translate(${sx(f.position.x)} ${sy(f.position.y)}) rotate(${f.rotation})`}
+            stroke="#9ca3af"
+            strokeWidth={0.8}
+            fill="none"
+          >
+            {furnitureOutline(f.kind, fw, fd)}
+          </g>
+        );
+      })}
+
       {/* Elektra */}
       {electrical.map((it) => (
         <g key={it.id}>
@@ -245,25 +424,30 @@ export function WerkbladPlan({
         </g>
       ))}
 
-      {/* Water */}
-      {plumbing.map((it) =>
-        it.position && it.fixture ? (
-          <g key={it.id}>
-            <circle cx={sx(it.position.x)} cy={sy(it.position.y)} r={9} fill={PLUMBING_COLOR} />
+      {/* Water — sanitair als bovenaanzicht-symbolen op ware grootte */}
+      {plumbing.map((it) => {
+        if (!it.position || !it.fixture) return null;
+        const dims = FIXTURE_DIMS[it.fixture];
+        const fw = dims.w * scale;
+        const fh = dims.h * scale;
+        return (
+          <g key={it.id} transform={`translate(${sx(it.position.x)} ${sy(it.position.y)})`}>
+            <g stroke={PLUMBING_COLOR} strokeWidth={1} fill="white">
+              {fixtureSymbol(it.fixture, fw, fh)}
+            </g>
             <text
-              x={sx(it.position.x)}
-              y={sy(it.position.y) + 3}
+              x={0}
+              y={fh / 2 + 7}
               textAnchor="middle"
-              fontSize={7}
-              fontWeight="700"
+              fontSize={6}
               fontFamily="monospace"
-              fill="#fff"
+              fill={PLUMBING_COLOR}
             >
               {FIXTURE_CODE[it.fixture]}
             </text>
           </g>
-        ) : null,
-      )}
+        );
+      })}
 
       {/* Noordpijl rechtsboven */}
       <g transform={`translate(${W - 26} ${PAD + DIM + 6})`}>
@@ -304,12 +488,16 @@ export function WerkbladPlan({
           <text x={20} y={3} fill="#44403c">Elektra</text>
         </g>
         <g transform="translate(72 16)">
-          <circle cx={8} cy={0} r={6} fill={PLUMBING_COLOR} />
-          <text x={20} y={3} fill="#44403c">Water</text>
+          <circle cx={8} cy={0} r={6} fill="white" stroke={PLUMBING_COLOR} strokeWidth={1} />
+          <text x={20} y={3} fill="#44403c">Water/sanitair</text>
         </g>
         <g transform="translate(150 16)">
           <line x1={0} y1={0} x2={16} y2={0} stroke="#a16207" strokeWidth={1.2} />
           <text x={20} y={3} fill="#44403c">Deur/raam</text>
+        </g>
+        <g transform="translate(0 32)">
+          <rect x={0} y={-5} width={16} height={10} fill="none" stroke="#9ca3af" strokeWidth={0.8} />
+          <text x={20} y={3} fill="#44403c">Meubilering (grijs)</text>
         </g>
       </g>
     </svg>
