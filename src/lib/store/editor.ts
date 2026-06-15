@@ -12,9 +12,20 @@ import type {
   OpeningType,
   WallMaterial,
   WallStatus,
+  StaircaseKind,
+  ColumnShape,
+  BeamProfile,
 } from "../domain/types";
 
-export type Tool = "select" | "wall" | "room" | "place" | "divide" | "place-furniture" | "draw-pipe";
+export type Tool =
+  | "select"
+  | "wall"
+  | "room"
+  | "place"
+  | "divide"
+  | "place-furniture"
+  | "draw-pipe"
+  | "construction";
 
 export type GridSnap = "fine" | "normal" | "coarse";
 // fine = 10 cm, normal = 50 cm, coarse = 100 cm
@@ -30,6 +41,12 @@ export type PlaceKind =
   | { domain: "plumbing"; fixture: FixtureKind }
   | { domain: "hvac"; type: HvacType };
 
+// Constructie-gereedschap: trap, kolom of stalen balk plaatsen.
+export type ConstructionKind =
+  | { domain: "staircase"; kind: StaircaseKind }
+  | { domain: "column"; shape: ColumnShape }
+  | { domain: "beam"; profile: BeamProfile };
+
 export type SelKind =
   | "wall"
   | "room"
@@ -37,7 +54,10 @@ export type SelKind =
   | "plumbing"
   | "hvac"
   | "opening"
-  | "furniture";
+  | "furniture"
+  | "staircase"
+  | "column"
+  | "beam";
 
 export interface Selection {
   kind: SelKind;
@@ -68,6 +88,7 @@ interface EditorState {
   activeLevelId: string | null;
   tool: Tool;
   placeKind: PlaceKind | null;
+  constructionKind: ConstructionKind | null;
   furniturePaletteKind: FurnitureKind | null;
   pipeType: "supply-cold" | "supply-hot" | "drain" | "cv-pipe";
   selection: Selection | null;
@@ -83,6 +104,7 @@ interface EditorState {
   setActiveLevel: (id: string) => void;
   setTool: (t: Tool) => void;
   setPlaceKind: (p: PlaceKind | null) => void;
+  setConstructionKind: (k: ConstructionKind | null) => void;
   setFurniturePaletteKind: (kind: FurnitureKind | null) => void;
   setPipeType: (t: "supply-cold" | "supply-hot" | "drain" | "cv-pipe") => void;
   select: (s: Selection | null) => void;
@@ -102,6 +124,7 @@ export const useEditor = create<EditorState>()(
       activeLevelId: null,
       tool: "select",
       placeKind: null,
+      constructionKind: null,
       furniturePaletteKind: null,
       pipeType: "supply-cold",
       selection: null,
@@ -109,6 +132,7 @@ export const useEditor = create<EditorState>()(
       clipboard: null,
       visibleLayers: {
         structure: true,
+        construction: true,
         electrical: true,
         plumbing: true,
         hvac: true,
@@ -117,6 +141,7 @@ export const useEditor = create<EditorState>()(
       },
       lockedLayers: {
         structure: false,
+        construction: false,
         electrical: false,
         plumbing: false,
         hvac: false,
@@ -139,10 +164,12 @@ export const useEditor = create<EditorState>()(
         set((s) => ({
           tool,
           placeKind: tool === "place" ? s.placeKind : null,
+          constructionKind: tool === "construction" ? s.constructionKind : null,
           selection: null,
           multi: [],
         })),
       setPlaceKind: (placeKind) => set({ placeKind, tool: "place" }),
+      setConstructionKind: (constructionKind) => set({ constructionKind, tool: "construction" }),
       setFurniturePaletteKind: (kind) =>
         set({ furniturePaletteKind: kind, tool: kind ? "place-furniture" : "select" }),
       setPipeType: (pipeType) => set({ pipeType }),

@@ -14,6 +14,9 @@ import type {
   PlumbingItem,
   HvacItem,
   Furniture,
+  Staircase,
+  Column,
+  Beam,
 } from "./domain/types";
 
 export interface ClipboardData {
@@ -24,6 +27,9 @@ export interface ClipboardData {
   plumbing: PlumbingItem[];
   hvac: HvacItem[];
   furniture: Furniture[];
+  stairs: Staircase[];
+  columns: Column[];
+  beams: Beam[];
 }
 
 const find = <T extends { id: string }>(arr: T[], id: string) =>
@@ -137,6 +143,57 @@ export function copySelection(sels: Selection[], data: ClipboardData): Clipboard
             width: f.width,
             depth: f.depth,
             color: f.color,
+          },
+        });
+        break;
+      }
+      case "staircase": {
+        const st = find(data.stairs, s.id);
+        if (!st) break;
+        items.push({
+          kind: "staircase",
+          srcId: st.id,
+          data: {
+            kind: st.kind,
+            position: st.position,
+            width: st.width,
+            run: st.run,
+            steps: st.steps,
+            rotation: st.rotation,
+            direction: st.direction,
+          },
+        });
+        break;
+      }
+      case "column": {
+        const col = find(data.columns, s.id);
+        if (!col) break;
+        items.push({
+          kind: "column",
+          srcId: col.id,
+          data: {
+            position: col.position,
+            shape: col.shape,
+            size: col.size,
+            height: col.height,
+            material: col.material,
+            loadBearing: col.loadBearing,
+          },
+        });
+        break;
+      }
+      case "beam": {
+        const bm = find(data.beams, s.id);
+        if (!bm) break;
+        items.push({
+          kind: "beam",
+          srcId: bm.id,
+          data: {
+            start: bm.start,
+            end: bm.end,
+            profile: bm.profile,
+            height: bm.height,
+            width: bm.width,
           },
         });
         break;
@@ -296,6 +353,51 @@ export async function pasteClipboard(
         created.push({ table: "furniture", id: f.id });
         break;
       }
+      case "staircase": {
+        const d = it.data as unknown as Omit<Staircase, "id" | "updatedAt" | "levelId">;
+        const st = await create<Staircase>("stairs", {
+          levelId,
+          kind: d.kind,
+          position: off(d.position, offset),
+          width: d.width,
+          run: d.run,
+          steps: d.steps,
+          rotation: d.rotation,
+          direction: d.direction,
+        });
+        selections.push({ kind: "staircase", id: st.id });
+        created.push({ table: "stairs", id: st.id });
+        break;
+      }
+      case "column": {
+        const d = it.data as unknown as Omit<Column, "id" | "updatedAt" | "levelId">;
+        const col = await create<Column>("columns", {
+          levelId,
+          position: off(d.position, offset),
+          shape: d.shape,
+          size: d.size,
+          height: d.height,
+          material: d.material,
+          loadBearing: d.loadBearing,
+        });
+        selections.push({ kind: "column", id: col.id });
+        created.push({ table: "columns", id: col.id });
+        break;
+      }
+      case "beam": {
+        const d = it.data as unknown as Omit<Beam, "id" | "updatedAt" | "levelId">;
+        const bm = await create<Beam>("beams", {
+          levelId,
+          start: off(d.start, offset),
+          end: off(d.end, offset),
+          profile: d.profile,
+          height: d.height,
+          width: d.width,
+        });
+        selections.push({ kind: "beam", id: bm.id });
+        created.push({ table: "beams", id: bm.id });
+        break;
+      }
     }
   }
 
@@ -311,4 +413,7 @@ export const TABLE_FOR_KIND: Record<SelKind, string> = {
   plumbing: "plumbing",
   hvac: "hvac",
   furniture: "furniture",
+  staircase: "stairs",
+  column: "columns",
+  beam: "beams",
 };

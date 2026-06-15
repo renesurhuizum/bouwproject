@@ -10,10 +10,10 @@ import { Canvas } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, Grid, Sky } from "@react-three/drei";
 import { useLiveQuery } from "dexie-react-hooks";
-import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem } from "@/lib/domain/types";
-import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac } from "@/lib/hooks";
+import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem, Staircase, Column, Beam } from "@/lib/domain/types";
+import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac, useStairs, useColumns, useBeams } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
-import { ELECTRICAL_LABEL } from "@/lib/domain/constants";
+import { ELECTRICAL_LABEL, BEAM_PROFILE_DIMS } from "@/lib/domain/constants";
 import { getDB } from "@/lib/db/db";
 import { create as dbCreate } from "@/lib/db/repo";
 import { useEditor } from "@/lib/store/editor";
@@ -845,6 +845,32 @@ function KitchenIslandModel({ w, d, h, color }: { w: number; d: number; h: numbe
   );
 }
 
+function KitchenCabinetModel({ w, d, h, color, mountY = 0, worktop = false }: {
+  w: number; d: number; h: number; color: string; mountY?: number; worktop?: boolean;
+}) {
+  return (
+    <>
+      {/* korpus */}
+      <mesh position={[0, mountY + h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, h, d]} />
+        <meshStandardMaterial color={color} roughness={0.7} />
+      </mesh>
+      {/* aanrechtblad */}
+      {worktop && (
+        <mesh position={[0, mountY + h + 0.02, 0]} castShadow>
+          <boxGeometry args={[w + 0.02, 0.04, d + 0.02]} />
+          <meshStandardMaterial color={shade(color, 1.12)} roughness={0.45} />
+        </mesh>
+      )}
+      {/* greep langs de voorzijde */}
+      <mesh position={[0, mountY + h * 0.5, d / 2 + 0.012]} castShadow>
+        <boxGeometry args={[0.14, 0.02, 0.02]} />
+        <meshStandardMaterial {...CHROME} />
+      </mesh>
+    </>
+  );
+}
+
 function FurnitureMesh3D({ item }: { item: Furniture }) {
   const def = FURNITURE_DEFAULTS[item.kind];
   const w = item.width ?? def.w;
@@ -875,8 +901,15 @@ function FurnitureMesh3D({ item }: { item: Furniture }) {
     model = <BathtubModel w={w} d={d} h={h} color={color} />;
   } else if (kind === "shower-cabin") {
     model = <ShowerCabinModel w={w} d={d} />;
-  } else {
+  } else if (kind === "kitchen-island") {
     model = <KitchenIslandModel w={w} d={d} h={h} color={color} />;
+  } else if (kind === "kitchen-upper") {
+    model = <KitchenCabinetModel w={w} d={d} h={h} color={color} mountY={1.5} />;
+  } else if (kind === "kitchen-base" || kind === "kitchen-corner") {
+    model = <KitchenCabinetModel w={w} d={d} h={h} color={color} worktop />;
+  } else {
+    // kitchen-high
+    model = <KitchenCabinetModel w={w} d={d} h={h} color={color} />;
   }
 
   return (
@@ -931,6 +964,129 @@ function HvacMesh3D({ item }: { item: HvacItem }) {
   }
 
   return null;
+}
+
+// ── Bouwkundige elementen (trap, kolom, balk) ────────────────────────────────
+
+const CONSTRUCTION_MATERIAL_COLOR: Record<string, string> = {
+  brick: "#b08968",
+  "sand-lime": "#e0ddd5",
+  concrete: "#a8a8a8",
+  "aerated-concrete": "#dcd8cf",
+  "timber-frame": "#c9a96e",
+  gypsum: "#e8e4dc",
+  other: "#b0b0b0",
+};
+
+const STAIR_COLOR = "#c9b8a0";
+
+function StaircaseModel3D({ stair, totalRise }: { stair: Staircase; totalRise: number }) {
+  const rotY = -(stair.rotation * Math.PI) / 180;
+  const n = Math.max(2, Math.round(stair.steps));
+  const w = stair.width;
+  const riser = totalRise / n;
+
+  if (stair.kind === "spiral") {
+    const R = Math.max(w, stair.run) / 2;
+    return (
+      <group position={[stair.position.x + R, 0, stair.position.y + R]} rotation={[0, rotY, 0]}>
+        <mesh position={[0, totalRise / 2, 0]} castShadow>
+          <cylinderGeometry args={[0.06, 0.06, totalRise, 12]} />
+          <meshStandardMaterial color="#8a7a60" roughness={0.7} />
+        </mesh>
+        {Array.from({ length: n }, (_, i) => {
+          const a = (i / n) * Math.PI * 2;
+          return (
+            <mesh key={i} position={[(Math.cos(a) * R) / 2, (i + 1) * riser - riser / 2, (Math.sin(a) * R) / 2]} rotation={[0, -a, 0]} castShadow receiveShadow>
+              <boxGeometry args={[R, 0.05, R * 0.5]} />
+              <meshStandardMaterial color={STAIR_COLOR} roughness={0.7} />
+            </mesh>
+          );
+        })}
+      </group>
+    );
+  }
+
+  if (stair.kind === "l-shape") {
+    const half = Math.round(n / 2);
+    const depthA = (stair.run - w) / Math.max(1, half);
+    const baseH = half * riser;
+    const depthB = (stair.run - w) / Math.max(1, n - half);
+    return (
+      <group position={[stair.position.x, 0, stair.position.y]} rotation={[0, rotY, 0]}>
+        {Array.from({ length: half }, (_, i) => (
+          <mesh key={`a${i}`} position={[w / 2, ((i + 1) * riser) / 2, i * depthA + depthA / 2]} castShadow receiveShadow>
+            <boxGeometry args={[w, (i + 1) * riser, depthA]} />
+            <meshStandardMaterial color={STAIR_COLOR} roughness={0.7} />
+          </mesh>
+        ))}
+        {Array.from({ length: n - half }, (_, i) => (
+          <mesh key={`b${i}`} position={[w + i * depthB + depthB / 2, (baseH + (i + 1) * riser) / 2, stair.run - w / 2]} castShadow receiveShadow>
+            <boxGeometry args={[depthB, baseH + (i + 1) * riser, w]} />
+            <meshStandardMaterial color={STAIR_COLOR} roughness={0.7} />
+          </mesh>
+        ))}
+      </group>
+    );
+  }
+
+  // straight
+  const depth = stair.run / n;
+  return (
+    <group position={[stair.position.x, 0, stair.position.y]} rotation={[0, rotY, 0]}>
+      {Array.from({ length: n }, (_, i) => (
+        <mesh key={i} position={[w / 2, ((i + 1) * riser) / 2, i * depth + depth / 2]} castShadow receiveShadow>
+          <boxGeometry args={[w, (i + 1) * riser, depth]} />
+          <meshStandardMaterial color={STAIR_COLOR} roughness={0.7} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function ColumnModel3D({ col, levelHeight }: { col: Column; levelHeight: number }) {
+  const h = col.height ?? levelHeight;
+  const color = CONSTRUCTION_MATERIAL_COLOR[col.material] ?? "#a8a8a8";
+  return (
+    <group position={[col.position.x, 0, col.position.y]}>
+      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+        {col.shape === "round" ? (
+          <cylinderGeometry args={[col.size / 2, col.size / 2, h, 20]} />
+        ) : (
+          <boxGeometry args={[col.size, h, col.size]} />
+        )}
+        <meshStandardMaterial color={color} roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
+function BeamModel3D({ beam }: { beam: Beam }) {
+  const len = dist(beam.start, beam.end);
+  if (len < 0.01) return null;
+  const dims = BEAM_PROFILE_DIMS[beam.profile];
+  const fw = beam.width ?? dims.w;
+  const fh = dims.h;
+  const flT = fh * 0.15;
+  const cx = (beam.start.x + beam.end.x) / 2;
+  const cz = (beam.start.y + beam.end.y) / 2;
+  const rotY = -angle(beam.start, beam.end);
+  return (
+    <group position={[cx, beam.height, cz]} rotation={[0, rotY, 0]}>
+      <mesh position={[0, fh / 2 - flT / 2, 0]} castShadow>
+        <boxGeometry args={[len, flT, fw]} />
+        <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.7} />
+      </mesh>
+      <mesh position={[0, -fh / 2 + flT / 2, 0]} castShadow>
+        <boxGeometry args={[len, flT, fw]} />
+        <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.7} />
+      </mesh>
+      <mesh castShadow>
+        <boxGeometry args={[len, fh - 2 * flT, fw * 0.12]} />
+        <meshStandardMaterial color="#5b626b" roughness={0.4} metalness={0.7} />
+      </mesh>
+    </group>
+  );
 }
 
 function FloorPlane({ levelId, elevation }: { levelId: string; elevation: number }) {
@@ -1004,6 +1160,9 @@ function LevelScene({
   const plumbing = usePlumbing(level.id) ?? [];
   const furniture = useFurniture(level.id) ?? [];
   const hvac = useHvac(level.id) ?? [];
+  const stairs = useStairs(level.id) ?? [];
+  const columns = useColumns(level.id) ?? [];
+  const beams = useBeams(level.id) ?? [];
 
   const openingsByWall = useMemo(() => {
     const m = new Map<string, Opening[]>();
@@ -1087,6 +1246,19 @@ function LevelScene({
         furniture.map((it) => <FurnitureMesh3D key={it.id} item={it} />)}
       {visibleLayers.hvac &&
         hvac.map((it) => <HvacMesh3D key={it.id} item={it} />)}
+      {visibleLayers.construction && (
+        <>
+          {stairs.map((s) => (
+            <StaircaseModel3D key={s.id} stair={s} totalRise={level.height} />
+          ))}
+          {columns.map((c) => (
+            <ColumnModel3D key={c.id} col={c} levelHeight={level.height} />
+          ))}
+          {beams.map((b) => (
+            <BeamModel3D key={b.id} beam={b} />
+          ))}
+        </>
+      )}
     </group>
   );
 }

@@ -19,6 +19,9 @@ import type {
   MaterialItem,
   Photo,
   Furniture,
+  Staircase,
+  Column,
+  Beam,
 } from "../domain/types";
 
 export class BouwDB extends Dexie {
@@ -37,6 +40,9 @@ export class BouwDB extends Dexie {
   materials!: Table<MaterialItem, string>;
   photos!: Table<Photo, string>;
   furniture!: Table<Furniture, string>;
+  stairs!: Table<Staircase, string>;
+  columns!: Table<Column, string>;
+  beams!: Table<Beam, string>;
 
   constructor() {
     super("bouwproject");
@@ -56,6 +62,12 @@ export class BouwDB extends Dexie {
       materials: "id, projectId, status, updatedAt, deleted",
       photos: "id, projectId, updatedAt, deleted",
       furniture: "id, levelId, updatedAt, deleted",
+    });
+    // v3: bouwkundige elementen (trappen, kolommen, stalen balken).
+    this.version(3).stores({
+      stairs: "id, levelId, updatedAt, deleted",
+      columns: "id, levelId, updatedAt, deleted",
+      beams: "id, levelId, updatedAt, deleted",
     });
   }
 }

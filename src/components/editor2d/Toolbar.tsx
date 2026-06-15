@@ -18,6 +18,7 @@ import {
   Redo2,
   Lock,
   LockOpen,
+  Building2,
 } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import { useHistory } from "@/lib/history";
@@ -29,6 +30,9 @@ import type {
   HvacType,
   OpeningType,
   WallStatus,
+  StaircaseKind,
+  ColumnShape,
+  BeamProfile,
 } from "@/lib/domain/types";
 import {
   ELECTRICAL_LABEL,
@@ -36,6 +40,9 @@ import {
   FIXTURE_LABEL,
   HVAC_LABEL,
   WALL_STATUS_LABEL,
+  STAIRCASE_LABEL,
+  COLUMN_SHAPE_LABEL,
+  BEAM_PROFILE_LABEL,
 } from "@/lib/domain/constants";
 import { FURNITURE_CATEGORIES, FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 
@@ -75,12 +82,17 @@ const PIPE_OPTIONS = [
 
 const LAYERS: { key: EditorLayer; label: string }[] = [
   { key: "structure", label: "Muren" },
+  { key: "construction", label: "Constructie" },
   { key: "rooms", label: "Ruimtes" },
   { key: "electrical", label: "Elektra" },
   { key: "plumbing", label: "Water" },
   { key: "hvac", label: "Verwarming" },
   { key: "furniture", label: "Meubels" },
 ];
+
+const STAIRCASE_KINDS: StaircaseKind[] = ["straight", "l-shape", "spiral"];
+const COLUMN_SHAPES: ColumnShape[] = ["square", "round"];
+const BEAM_PROFILES: BeamProfile[] = ["HEA100", "HEA140", "HEA160", "HEB200", "custom"];
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
 
@@ -103,6 +115,8 @@ export function Toolbar() {
   const setFurniturePaletteKind = useEditor((s) => s.setFurniturePaletteKind);
   const pipeType = useEditor((s) => s.pipeType);
   const setPipeType = useEditor((s) => s.setPipeType);
+  const constructionKind = useEditor((s) => s.constructionKind);
+  const setConstructionKind = useEditor((s) => s.setConstructionKind);
 
   const undo = useHistory((s) => s.undo);
   const redo = useHistory((s) => s.redo);
@@ -353,6 +367,69 @@ export function Toolbar() {
         </div>
       )}
 
+      {/* Constructie-paneel — trappen / kolommen / balken */}
+      {tool === "construction" && (
+        <div className="pointer-events-auto w-full max-w-sm space-y-2 rounded-xl border border-line bg-paper-raised/97 p-2 shadow-lg backdrop-blur">
+          <div>
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-ink-400">Trappen</p>
+            <div className="flex flex-wrap gap-1">
+              {STAIRCASE_KINDS.map((k) => (
+                <button
+                  key={k}
+                  onClick={() => setConstructionKind({ domain: "staircase", kind: k })}
+                  className={`rounded-lg px-2 py-1.5 text-[10px] font-medium ${
+                    constructionKind?.domain === "staircase" && constructionKind.kind === k
+                      ? "bg-[#0f766e] text-white"
+                      : "bg-paper-sunken text-ink-700"
+                  }`}
+                >
+                  {STAIRCASE_LABEL[k]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-ink-400">Kolommen</p>
+            <div className="flex flex-wrap gap-1">
+              {COLUMN_SHAPES.map((sh) => (
+                <button
+                  key={sh}
+                  onClick={() => setConstructionKind({ domain: "column", shape: sh })}
+                  className={`rounded-lg px-2 py-1.5 text-[10px] font-medium ${
+                    constructionKind?.domain === "column" && constructionKind.shape === sh
+                      ? "bg-[#0f766e] text-white"
+                      : "bg-paper-sunken text-ink-700"
+                  }`}
+                >
+                  {COLUMN_SHAPE_LABEL[sh]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-ink-400">
+              Stalen balk
+              <span className="ml-1 font-normal normal-case text-ink-300">· 2 punten tekenen</span>
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {BEAM_PROFILES.map((pr) => (
+                <button
+                  key={pr}
+                  onClick={() => setConstructionKind({ domain: "beam", profile: pr })}
+                  className={`rounded-lg px-2 py-1.5 text-[10px] font-medium ${
+                    constructionKind?.domain === "beam" && constructionKind.profile === pr
+                      ? "bg-[#475569] text-white"
+                      : "bg-paper-sunken text-ink-700"
+                  }`}
+                >
+                  {BEAM_PROFILE_LABEL[pr]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Lagen-paneel */}
       {showLayers && (
         <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
@@ -454,6 +531,19 @@ export function Toolbar() {
           label="Meubels"
         >
           <Sofa size={20} />
+        </ToolBtn>
+        <ToolBtn
+          active={tool === "construction"}
+          onClick={() => {
+            if (tool === "construction") {
+              setTool("select");
+            } else {
+              setConstructionKind(constructionKind ?? { domain: "staircase", kind: "straight" });
+            }
+          }}
+          label="Constructie"
+        >
+          <Building2 size={20} />
         </ToolBtn>
         <div className="mx-0.5 h-7 w-px bg-line" />
         <ToolBtn active={showLayers} onClick={() => setShowLayers((v) => !v)} label="Lagen">

@@ -774,6 +774,64 @@ function renderKitchenIsland(p: SymbolProps): ReactNode {
   );
 }
 
+/* ---------------------------------- keuken --------------------------------- */
+
+// Onder-/hoge kast: korpus + aanrechtblad-strook langs y=0 + greepje.
+function renderKitchenCabinet(p: SymbolProps, opts: { worktop?: boolean; dashed?: boolean } = {}): ReactNode {
+  const { sw, sd, stroke } = p;
+  const topH = Math.max(2, sd * 0.18);
+  return (
+    <>
+      <Rect
+        x={0}
+        y={0}
+        width={sw}
+        height={sd}
+        stroke={stroke}
+        strokeWidth={MAIN}
+        dash={opts.dashed ? [4, 3] : undefined}
+        listening={false}
+      />
+      {opts.worktop && (
+        <Rect
+          x={0}
+          y={0}
+          width={sw}
+          height={topH}
+          stroke={stroke}
+          strokeWidth={THIN}
+          opacity={0.6}
+          listening={false}
+        />
+      )}
+      {/* greepje langs de voorzijde (y=sd) */}
+      <Line
+        points={[sw * 0.35, sd - Math.max(1.5, sd * 0.08), sw * 0.65, sd - Math.max(1.5, sd * 0.08)]}
+        stroke={stroke}
+        strokeWidth={1.5}
+        listening={false}
+      />
+    </>
+  );
+}
+
+function renderKitchenCorner(p: SymbolProps): ReactNode {
+  const { sw, sd, stroke } = p;
+  return (
+    <>
+      <Rect x={0} y={0} width={sw} height={sd} stroke={stroke} strokeWidth={MAIN} listening={false} />
+      {/* diagonale draailijn (hoekkast) */}
+      <Line points={[0, sd, sw, 0]} stroke={stroke} strokeWidth={THIN} opacity={0.7} listening={false} />
+      <Line
+        points={[sw * 0.55, sd - Math.max(1.5, sd * 0.08), sw * 0.8, sd - Math.max(1.5, sd * 0.08)]}
+        stroke={stroke}
+        strokeWidth={1.5}
+        listening={false}
+      />
+    </>
+  );
+}
+
 /* --------------------------------- mapping --------------------------------- */
 
 const RENDERERS: Record<FurnitureKind, (p: SymbolProps) => ReactNode> = {
@@ -794,6 +852,10 @@ const RENDERERS: Record<FurnitureKind, (p: SymbolProps) => ReactNode> = {
   bathtub: renderBathtub,
   "shower-cabin": renderShowerCabin,
   "kitchen-island": renderKitchenIsland,
+  "kitchen-base": (p) => renderKitchenCabinet(p, { worktop: true }),
+  "kitchen-high": (p) => renderKitchenCabinet(p, {}),
+  "kitchen-upper": (p) => renderKitchenCabinet(p, { dashed: true }),
+  "kitchen-corner": renderKitchenCorner,
 };
 
 export function FurnitureSymbol({
