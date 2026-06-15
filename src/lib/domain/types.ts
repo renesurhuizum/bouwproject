@@ -21,6 +21,9 @@ export interface Project extends Entity {
   description?: string;
   northDegrees?: number;  // voor noordpijl op werkblad (0 = omhoog = Noord)
   startDate?: string;     // ISO yyyy-mm-dd voor Gantt
+  revisionNumber?: number; // revisie-nummer (0 = eerste uitgave)
+  revisionDate?: string;   // ISO datum van laatste revisie
+  drawingScale?: number;   // tekeningschaal: 50 | 100 | 200 (1:50 etc.)
 }
 
 export interface Level extends Entity {
