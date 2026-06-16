@@ -24,6 +24,8 @@ export interface Project extends Entity {
   revisionNumber?: number; // revisie-nummer (0 = eerste uitgave)
   revisionDate?: string;   // ISO datum van laatste revisie
   drawingScale?: number;   // tekeningschaal: 50 | 100 | 200 (1:50 etc.)
+  lat?: number;            // breedtegraad voor zonberekening (NL ≈ 52.3)
+  lng?: number;            // lengtegraad (NL ≈ 5.3)
 }
 
 export interface Level extends Entity {

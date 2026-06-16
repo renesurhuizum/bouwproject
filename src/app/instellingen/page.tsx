@@ -252,6 +252,38 @@ export default function InstellingenPage() {
           </div>
         </section>
 
+        {/* Locatie (zonberekening) */}
+        <section className="space-y-3 rounded-card border border-line bg-paper-raised p-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+            Locatie (zonnestand 3D)
+          </h2>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="mb-1 block text-xs text-ink-500">Breedtegraad</span>
+              <input
+                type="number"
+                step="0.1"
+                defaultValue={project?.lat ?? 52.3}
+                onBlur={(e) => patchProject({ lat: Number(e.target.value) })}
+                className="tabular w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-900"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-ink-500">Lengtegraad</span>
+              <input
+                type="number"
+                step="0.1"
+                defaultValue={project?.lng ?? 5.3}
+                onBlur={(e) => patchProject({ lng: Number(e.target.value) })}
+                className="tabular w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-900"
+              />
+            </label>
+          </div>
+          <span className="block text-[11px] text-ink-400">
+            Bepaalt de zonnestand en schaduwen in de 3D-weergave. Standaard: Nederland (52.3, 5.3).
+          </span>
+        </section>
+
         {/* Databeheer */}
         <section className="space-y-3 rounded-card border border-line bg-paper-raised p-4">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
