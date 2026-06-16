@@ -153,6 +153,10 @@ export function SelectionPanel() {
     async () => (selection?.kind === "dormer" ? await getDB().dormers.get(selection.id) : null),
     [selection?.kind, selection?.id],
   );
+  const sectionLine = useLiveQuery(
+    async () => (selection?.kind === "section" ? await getDB().sections.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
 
   const tool = useEditor((s) => s.tool);
   const isPlacementMode = tool === "place" || tool === "draw-pipe";
@@ -174,7 +178,7 @@ export function SelectionPanel() {
     const db = getDB();
     const data: ClipboardData = {
       walls: [], rooms: [], openings: [], electrical: [], plumbing: [], hvac: [], furniture: [],
-      stairs: [], columns: [], beams: [], roofs: [], dormers: [],
+      stairs: [], columns: [], beams: [], roofs: [], dormers: [], sections: [],
     };
     for (const s of sels) {
       const ent = await (db[TABLE_FOR_KIND[s.kind] as keyof typeof db] as import("dexie").Table).get(s.id);
@@ -257,7 +261,9 @@ export function SelectionPanel() {
                                 ? "Dak"
                                 : selection.kind === "dormer"
                                   ? "Dakkapel"
-                                  : "Elektra"}
+                                  : selection.kind === "section"
+                                    ? "Doorsnede"
+                                    : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -833,6 +839,24 @@ export function SelectionPanel() {
               <NumberField value={Math.round(dormer.height * 100)} unit="cm" onChange={(v) => update("dormers", dormer.id, { height: Math.max(0.3, v / 100) })} />
             </Row>
             <DeleteButton onClick={() => removeAnd("dormers", dormer.id, () => select(null))} />
+          </div>
+        )}
+
+        {sectionLine && (
+          <div className="space-y-2.5">
+            <Row label="Label">
+              <input
+                type="text"
+                defaultValue={sectionLine.label}
+                key={sectionLine.label}
+                onBlur={(e) => update("sections", sectionLine.id, { label: e.target.value || "A-A" })}
+                className="w-24 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              />
+            </Row>
+            <p className="text-[11px] text-ink-400">
+              Bekijk de doorsnede via <strong>Aanzichten → Doorsneden</strong>.
+            </p>
+            <DeleteButton onClick={() => removeAnd("sections", sectionLine.id, () => select(null))} />
           </div>
         )}
 

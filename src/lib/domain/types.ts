@@ -24,6 +24,8 @@ export interface Project extends Entity {
   revisionNumber?: number; // revisie-nummer (0 = eerste uitgave)
   revisionDate?: string;   // ISO datum van laatste revisie
   drawingScale?: number;   // tekeningschaal: 50 | 100 | 200 (1:50 etc.)
+  lat?: number;            // breedtegraad voor zonberekening (NL ≈ 52.3)
+  lng?: number;            // lengtegraad (NL ≈ 5.3)
 }
 
 export interface Level extends Entity {
@@ -222,6 +224,13 @@ export interface Roof extends Entity {
   ridgeDirection: number; // richting van de nok (graden, 0 = nok langs X)
   overhang: number; // dakoversteek in m
   polygon?: Point[]; // optioneel dakvoet-polygoon; anders bounding box van de muren
+}
+
+export interface SectionLine extends Entity {
+  levelId: string;
+  start: Point;
+  end: Point;
+  label: string; // "A-A", "B-B"…
 }
 
 export type DormerType = "gable-dormer" | "shed-dormer" | "velux";

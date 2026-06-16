@@ -27,7 +27,8 @@ export type Tool =
   | "place-furniture"
   | "draw-pipe"
   | "construction"
-  | "roof";
+  | "roof"
+  | "section";
 
 export type GridSnap = "fine" | "normal" | "coarse";
 // fine = 10 cm, normal = 50 cm, coarse = 100 cm
@@ -61,7 +62,8 @@ export type SelKind =
   | "column"
   | "beam"
   | "roof"
-  | "dormer";
+  | "dormer"
+  | "section";
 
 export interface Selection {
   kind: SelKind;
