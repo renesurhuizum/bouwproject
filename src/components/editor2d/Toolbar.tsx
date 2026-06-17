@@ -159,7 +159,7 @@ export function Toolbar() {
   }
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 p-3">
+    <div className="pointer-events-none flex w-full flex-col items-center gap-2 p-3">
 
       {/* Contextueel paneel: muur-opties */}
       {tool === "wall" && (
