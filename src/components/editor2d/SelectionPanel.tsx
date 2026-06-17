@@ -231,7 +231,7 @@ export function SelectionPanel() {
   if (!selection && !multiActive) return null;
 
   return (
-    <div className="pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3">
+    <div className="pointer-events-auto w-full px-3 pb-1">
       <div className="mx-auto max-w-md rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink-900">

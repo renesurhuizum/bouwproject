@@ -61,9 +61,15 @@ export default function PlattegrondPage() {
     <div className="absolute inset-0 overflow-hidden">
       <PlanEditor />
       <LevelSwitcher />
-      <SelectionPanel />
       <ComplianceBanner />
-      <Toolbar />
+
+      {/* Onderste bediening: het selectie-paneel stapelt in normale flow bóven
+          de toolbar, zodat een hoger contextueel paneel (bv. Daktype) het
+          paneel nooit kan overlappen. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center">
+        <SelectionPanel />
+        <Toolbar />
+      </div>
 
       {/* Projectnaam — klikbaar om te bewerken */}
       {project && (
