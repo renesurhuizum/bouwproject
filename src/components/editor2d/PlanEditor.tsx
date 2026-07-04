@@ -66,7 +66,7 @@ import { WallsLayer } from "./WallsLayer";
 import { OpeningsLayer } from "./OpeningsLayer";
 import { RoomsLayer, type RoomPhaseStatus } from "./RoomsLayer";
 import { ElectricalLayer } from "./ElectricalLayer";
-import { PlumbingLayer } from "./PlumbingLayer";
+import { PlumbingLayer, PIPE_COLORS } from "./PlumbingLayer";
 import { FurnitureLayer } from "./FurnitureLayer";
 import { HvacLayer } from "./HvacLayer";
 import { StairsLayer } from "./StairsLayer";
@@ -144,6 +144,11 @@ export function PlanEditor() {
   });
   entitiesRef.current = { walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams, roofs, dormers, sections };
 
+  // Verse pipePoints voor de keydown-handler (Enter = opslaan): de handler
+  // draait met vaste deps en zou anders een stale lege array zien.
+  const pipePointsRef = useRef<Point[]>([]);
+  pipePointsRef.current = pipePoints;
+
   // Shift-toets tracking voor orthogonaal tekenen
   const shiftRef = useRef(false);
   // Wall length editing overlay
@@ -218,6 +223,8 @@ export function PlanEditor() {
     setDraftStart(null);
     setRoomDraft([]);
     setPipePoints([]);
+    setCursor(null); // geen stale crosshair/preview van het vorige gereedschap
+    setSnapTarget(null);
     setMenu(null);
     if (tool !== "divide") {
       setDivideRect(null);
@@ -254,18 +261,15 @@ export function PlanEditor() {
           const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
           void doNudge(dx, dy);
         }
-      } else if (e.key === "Enter" && tool === "draw-pipe" && pipePoints.length >= 2 && activeLevelId) {
+      } else if (
+        e.key === "Enter" &&
+        // Verse state lezen: `tool`/`pipePoints` uit de closure zijn stale
+        // (deps van dit effect zijn bewust beperkt).
+        useEditor.getState().tool === "draw-pipe" &&
+        pipePointsRef.current.length >= 2
+      ) {
         e.preventDefault();
-        void (async () => {
-          await create<import("@/lib/domain/types").PlumbingItem>("plumbing", {
-            levelId: activeLevelId,
-            type: pipeType as import("@/lib/domain/types").PlumbingType,
-            path: pipePoints,
-            diameter: pipeType === "drain" ? 50 : 22,
-            heightZ: pipeType === "drain" ? 0.05 : 1.0,
-          });
-          setPipePoints([]);
-        })();
+        void savePipe();
       } else if (e.key === "Escape") {
         setDraftStart(null);
         setRoomDraft([]);
@@ -468,8 +472,30 @@ export function PlanEditor() {
     return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
   }
 
-  function snapPoint(m: Point): Point {
-    const near = snapToPoints(m, endpoints, pxToMeters(SNAP_RADIUS_PX, view));
+  // Is (een voorouder van) het aangewezen node draggable? Dan mag de 1-vinger-pan
+  // niet starten: anders pant het canvas mee onder een Konva-drag en rekent
+  // onDragEnd terug met een verschoven view (item belandt op de verkeerde plek).
+  function isDraggableTarget(node: import("konva/lib/Node").Node | null): boolean {
+    let cur = node;
+    while (cur) {
+      if (cur.draggable?.()) return true;
+      cur = cur.getParent();
+    }
+    return false;
+  }
+
+  function snapPoint(m: Point, endpointSnap?: boolean): Point {
+    // Muur-eindpunt-snap alleen bij het tekenen van muren/ruimtes/balken (en bij
+    // het verslepen van muur-eindpunten). Meubels/installaties snappen anders
+    // onverwacht naar muurhoeken; die krijgen alleen raster-snap.
+    const allowEndpoint =
+      endpointSnap ??
+      (tool === "wall" ||
+        tool === "room" ||
+        (tool === "construction" && constructionKind?.domain === "beam"));
+    const near = allowEndpoint
+      ? snapToPoints(m, endpoints, pxToMeters(SNAP_RADIUS_PX, view))
+      : null;
     setSnapTarget(near);
     let result = near ?? snapToGrid(m, GRID_SNAP_M[gridSnap]);
     // Shift = ortho-constraint: snap naar 0°/45°/90° vanuit beginpunt
@@ -509,7 +535,7 @@ export function PlanEditor() {
 
   async function handleMoveEndpoint(wallId: string, which: "start" | "end", screenX: number, screenY: number) {
     const worldM = screenToMeters({ x: screenX, y: screenY }, view);
-    const snapped = snapPoint(worldM);
+    const snapped = snapPoint(worldM, true); // eindpunt-drag houdt eindpunt-snap
     await update("walls", wallId, { [which]: snapped });
   }
 
@@ -527,6 +553,23 @@ export function PlanEditor() {
       status: wallDefaults.status,
     });
     pushAction({ type: "create", table: "walls", id: w.id });
+  }
+
+  // Leiding opslaan uit de draft-punten. Leest verse state (getState + ref)
+  // zodat de Opslaan-knop en de Enter-sneltoets hetzelfde, niet-stale pad delen.
+  async function savePipe() {
+    const st = useEditor.getState();
+    const pts = pipePointsRef.current;
+    if (st.tool !== "draw-pipe" || !st.activeLevelId || pts.length < 2) return;
+    const item = await create<PlumbingItem>("plumbing", {
+      levelId: st.activeLevelId,
+      type: st.pipeType as PlumbingType,
+      path: pts,
+      diameter: st.pipeType === "drain" ? 50 : 22,
+      heightZ: st.pipeType === "drain" ? 0.05 : 1.0,
+    });
+    pushAction({ type: "create", table: "plumbing", id: item.id });
+    setPipePoints([]);
   }
 
   async function placeElectrical(at: Point) {
@@ -795,7 +838,9 @@ export function PlanEditor() {
         const startM = screenToMeters(pos, view);
         lassoRef.current = { id: evt.pointerId, start: startM };
         setLassoBox({ start: startM, current: startM });
-      } else if (tool === "select") {
+      } else if (tool === "select" && !isDraggableTarget(e.target)) {
+        // Pan alleen vanaf niet-versleepbare targets (leeg vlak, ruimtes, muren);
+        // vanaf meubels/handles wint de Konva-drag.
         panPointer.current = { id: evt.pointerId, last: pos };
       }
       if (tool === "divide") {
@@ -816,7 +861,7 @@ export function PlanEditor() {
     const evt = e.evt;
     if (!pointers.current.has(evt.pointerId)) {
       // cursor voor rubber-band tonen ook zonder ingedrukt
-      if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction" || tool === "section") {
+      if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction" || tool === "draw-pipe" || tool === "section") {
         setCursor(snapPoint(screenToMeters(posFromEvent(evt, stage), view)));
       }
       return;
@@ -857,7 +902,7 @@ export function PlanEditor() {
       if (tapRef.current) tapRef.current.moved = true;
       return;
     }
-    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction" || tool === "section") {
+    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction" || tool === "draw-pipe" || tool === "section") {
       setCursor(snapPoint(screenToMeters(pos, view)));
     }
     if (tool === "divide") {
@@ -991,6 +1036,11 @@ export function PlanEditor() {
           onPointerCancel={onPointerUp}
           onWheel={onWheel}
           onContextMenu={onContextMenu}
+          onDragStart={() => {
+            // Konva-drag gestart (bubbelt naar de Stage): pan en tap afbreken.
+            panPointer.current = null;
+            if (tapRef.current) tapRef.current.moved = true;
+          }}
         >
           <BgImageLayer levelId={activeLevelId} view={view} />
           {showGrid && <GridLayer view={view} width={size.width} height={size.height} />}
@@ -1034,6 +1084,11 @@ export function PlanEditor() {
               items={electrical}
               selectedId={selection?.kind === "electrical" ? selection.id : null}
               onSelect={(id) => onSelectEntity("electrical", id)}
+              onMove={
+                lockedLayers.electrical
+                  ? undefined
+                  : async (id, x, y) => { await update("electrical", id, { position: { x, y } }); }
+              }
             />
           )}
 
@@ -1043,6 +1098,11 @@ export function PlanEditor() {
               items={plumbing}
               selectedId={selection?.kind === "plumbing" ? selection.id : null}
               onSelect={(id) => onSelectEntity("plumbing", id)}
+              onMove={
+                lockedLayers.plumbing
+                  ? undefined
+                  : async (id, x, y) => { await update("plumbing", id, { position: { x, y } }); }
+              }
               previewPath={
                 tool === "draw-pipe" && pipePoints.length >= 1 && cursor
                   ? { points: [...pipePoints, cursor], type: pipeType }
@@ -1057,6 +1117,11 @@ export function PlanEditor() {
               items={hvac}
               selectedId={selection?.kind === "hvac" ? selection.id : null}
               onSelect={(id) => onSelectEntity("hvac", id)}
+              onMove={
+                lockedLayers.hvac
+                  ? undefined
+                  : async (id, x, y) => { await update("hvac", id, { position: { x, y } }); }
+              }
             />
           )}
 
@@ -1075,6 +1140,11 @@ export function PlanEditor() {
               stairs={stairs}
               selectedId={selection?.kind === "staircase" ? selection.id : null}
               onSelect={(id) => onSelectEntity("staircase", id)}
+              onMove={
+                lockedLayers.construction
+                  ? undefined
+                  : async (id, x, y) => { await update("stairs", id, { position: { x, y } }); }
+              }
             />
           )}
 
@@ -1084,6 +1154,11 @@ export function PlanEditor() {
               columns={columns}
               selectedId={selection?.kind === "column" ? selection.id : null}
               onSelect={(id) => onSelectEntity("column", id)}
+              onMove={
+                lockedLayers.construction
+                  ? undefined
+                  : async (id, x, y) => { await update("columns", id, { position: { x, y } }); }
+              }
             />
           )}
 
@@ -1150,7 +1225,7 @@ export function PlanEditor() {
                 </Label>
               </>
             )}
-            {(tool === "wall" || tool === "place" || tool === "room") && cursor && (
+            {(tool === "wall" || tool === "place" || tool === "room" || tool === "draw-pipe") && cursor && (
               <Circle
                 x={metersToScreen(cursor, view).x}
                 y={metersToScreen(cursor, view).y}
@@ -1277,6 +1352,38 @@ export function PlanEditor() {
               </>
             )}
 
+            {/* Leiding in opbouw: reeds getikte punten + polyline */}
+            {tool === "draw-pipe" && pipePoints.length > 0 && (
+              <>
+                {pipePoints.length >= 2 && (
+                  <Line
+                    points={pipePoints.flatMap((p) => {
+                      const s = metersToScreen(p, view);
+                      return [s.x, s.y];
+                    })}
+                    stroke={PIPE_COLORS[pipeType] ?? "#666"}
+                    strokeWidth={3}
+                    lineCap="round"
+                    lineJoin="round"
+                  />
+                )}
+                {pipePoints.map((p, i) => {
+                  const s = metersToScreen(p, view);
+                  return (
+                    <Circle
+                      key={i}
+                      x={s.x}
+                      y={s.y}
+                      radius={i === 0 ? 6 : 4}
+                      fill={i === 0 ? PIPE_COLORS[pipeType] ?? "#666" : "#fff"}
+                      stroke={PIPE_COLORS[pipeType] ?? "#666"}
+                      strokeWidth={2}
+                    />
+                  );
+                })}
+              </>
+            )}
+
             {/* Lasso rubber-band */}
             {lassoBox && (() => {
               const a = metersToScreen(lassoBox.start, view);
@@ -1357,9 +1464,9 @@ export function PlanEditor() {
         );
       })()}
 
-      {/* Leiding-tekenhulp */}
+      {/* Leiding-tekenhulp — onder de LevelSwitcher (top-3), anders vangt die de clicks */}
       {tool === "draw-pipe" && (
-        <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
+        <div className="pointer-events-none absolute inset-x-0 top-[60px] z-10 flex justify-center px-3">
           <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 px-2 py-1.5 shadow-lg backdrop-blur">
             <span className="px-1 text-[11px] text-ink-500">
               {pipePoints.length === 0
@@ -1382,19 +1489,7 @@ export function PlanEditor() {
             </button>
             <button
               disabled={pipePoints.length < 2}
-              onClick={() => {
-                if (!activeLevelId || pipePoints.length < 2) return;
-                void (async () => {
-                  await create<import("@/lib/domain/types").PlumbingItem>("plumbing", {
-                    levelId: activeLevelId,
-                    type: pipeType as import("@/lib/domain/types").PlumbingType,
-                    path: pipePoints,
-                    diameter: pipeType === "drain" ? 50 : 22,
-                    heightZ: pipeType === "drain" ? 0.05 : 1.0,
-                  });
-                  setPipePoints([]);
-                })();
-              }}
+              onClick={() => void savePipe()}
               className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
             >
               Opslaan
@@ -1403,9 +1498,9 @@ export function PlanEditor() {
         </div>
       )}
 
-      {/* Ruimte-tekenhulp */}
+      {/* Ruimte-tekenhulp — onder de LevelSwitcher (top-3), anders vangt die de clicks */}
       {tool === "room" && (
-        <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
+        <div className="pointer-events-none absolute inset-x-0 top-[60px] z-10 flex justify-center px-3">
           <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 px-2 py-1.5 shadow-lg backdrop-blur">
             <span className="px-1 text-[11px] text-ink-500">
               {roomDraft.length === 0

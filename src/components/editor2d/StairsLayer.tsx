@@ -6,13 +6,14 @@
 import { Fragment } from "react";
 import { Layer, Group, Rect, Line, Circle, Text } from "react-konva";
 import type { Staircase } from "@/lib/domain/types";
-import { metersToScreen, metersToPx, type ViewState } from "./viewport";
+import { metersToScreen, metersToPx, screenToMeters, type ViewState } from "./viewport";
 
 interface Props {
   view: ViewState;
   stairs: Staircase[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onMove?: (id: string, x: number, y: number) => void;
 }
 
 const ACCENT = "#0f766e"; // teal-groen voor constructie
@@ -107,7 +108,7 @@ function StairSymbol({ s, view }: { s: Staircase; view: ViewState }) {
   );
 }
 
-export function StairsLayer({ view, stairs, selectedId, onSelect }: Props) {
+export function StairsLayer({ view, stairs, selectedId, onSelect, onMove }: Props) {
   return (
     <Layer>
       {stairs.map((s) => {
@@ -119,7 +120,17 @@ export function StairsLayer({ view, stairs, selectedId, onSelect }: Props) {
         const selected = s.id === selectedId;
         return (
           <Fragment key={s.id}>
-            <Group x={pos.x} y={pos.y} rotation={s.rotation}>
+            <Group
+              x={pos.x}
+              y={pos.y}
+              rotation={s.rotation}
+              draggable={!!onMove}
+              onDragEnd={(e) => {
+                // position = groep-oorsprong (linkerbovenhoek), dus 1-op-1 terug.
+                const m = screenToMeters(e.target.absolutePosition(), view);
+                onMove?.(s.id, m.x, m.y);
+              }}
+            >
               {selected && (
                 <Rect
                   x={-4}

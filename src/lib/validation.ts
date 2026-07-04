@@ -90,6 +90,16 @@ function isFuncMatch(room: Room, keywords: string[]): boolean {
   return keywords.some((k) => text.includes(k));
 }
 
+// Woonruimte-check die badkamers/toiletten uitsluit: "Badkamer" bevat de
+// substring "kamer" en zou anders onterecht aan de 7,5 m²-eis getoetst worden.
+function isWoonruimte(room: Room): boolean {
+  return (
+    isFuncMatch(room, FUNC_WOONRUIMTE) &&
+    !isFuncMatch(room, FUNC_BADKAMER) &&
+    !isFuncMatch(room, FUNC_TOILET)
+  );
+}
+
 export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -98,7 +108,7 @@ export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[]
     const area = polygonArea(room.polygon);
 
     // Bouwbesluit 2012 - woonruimtes
-    if (isFuncMatch(room, FUNC_WOONRUIMTE)) {
+    if (isWoonruimte(room)) {
       if (area < 7.5) {
         issues.push({
           severity: "warn",
@@ -131,9 +141,14 @@ export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[]
     }
   }
 
-  // Wandhoogtes
+  // Wandhoogtes — alleen relevant als er daadwerkelijk woonruimtes op de
+  // verdieping liggen; anders staat de melding permanent in beeld (de
+  // standaard-seed had bv. een verdieping van 2,5 m zonder ruimtes).
   for (const level of levels) {
-    if (level.height < 2.6) {
+    const hasWoonruimte = rooms.some(
+      (r) => r.levelId === level.id && r.polygon.length >= 3 && isWoonruimte(r),
+    );
+    if (hasWoonruimte && level.height < 2.6) {
       issues.push({
         severity: "warn",
         message: `Verdieping "${level.name}": hoogte ${(level.height * 100).toFixed(0)} cm — Bouwbesluit vereist 260 cm voor woonruimtes`,

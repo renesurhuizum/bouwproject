@@ -80,6 +80,7 @@ export function RoomDivider({ divideRect, onClear }: Props) {
   const [presetIdx, setPresetIdx] = useState(2); // Gezinswoning als default
   const [rooms, setRooms] = useState<RoomSpec[]>(() => FLOORPLAN_PRESETS[2].rooms);
   const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showCustom, setShowCustom] = useState(false);
   const [openPlanPct, setOpenPlanPct] = useState(0); // 0–100
 
@@ -114,6 +115,7 @@ export function RoomDivider({ divideRect, onClear }: Props) {
   async function generate() {
     if (!divideRect || !activeLevelId || rooms.length === 0) return;
     setGenerating(true);
+    setError(null);
     try {
       const opts: FloorplanOptions = {
         openLiving: openPlanPct >= 50,
@@ -163,6 +165,10 @@ export function RoomDivider({ divideRect, onClear }: Props) {
 
       onClear();
       setTool("select");
+    } catch (err) {
+      // Zonder catch wordt dit een unhandled rejection (rode dev-overlay).
+      console.error("Ruimte-verdeler: genereren mislukt", err);
+      setError("Genereren mislukt — pas de rechthoek of kamers aan en probeer opnieuw.");
     } finally {
       setGenerating(false);
     }
@@ -175,8 +181,8 @@ export function RoomDivider({ divideRect, onClear }: Props) {
   const totalWeight = rooms.reduce((s, r) => s + r.weight, 0);
 
   return (
-    <div className="pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3">
-      <div className="mx-auto max-w-sm rounded-xl border border-line bg-paper-raised/97 shadow-xl backdrop-blur">
+    <div className="pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3 md:inset-x-auto md:right-3 md:bottom-[88px] md:w-80 md:px-0">
+      <div className="mx-auto max-w-sm rounded-xl border border-line bg-paper-raised/97 shadow-xl backdrop-blur md:max-w-none">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
           <div className="flex items-center gap-2">
@@ -192,7 +198,7 @@ export function RoomDivider({ divideRect, onClear }: Props) {
           </button>
         </div>
 
-        <div className="p-3 space-y-3">
+        <div className="max-h-[40vh] space-y-3 overflow-y-auto overscroll-contain p-3 md:max-h-[calc(100dvh-220px)]">
           {/* Presets */}
           <div>
             <p className="mb-1.5 text-[11px] font-medium text-ink-500 uppercase tracking-wide">Woningtype</p>
@@ -298,6 +304,7 @@ export function RoomDivider({ divideRect, onClear }: Props) {
           </div>
 
           {/* Genereer knop */}
+          {error && <p className="text-[11px] text-danger">{error}</p>}
           <button
             onClick={() => void generate()}
             disabled={!divideRect || generating || rooms.length === 0}

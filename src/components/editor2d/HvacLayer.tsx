@@ -2,18 +2,18 @@
 
 // HVAC-laag: radiatoren, vloerverwarming, ventilatie en WTW-units.
 
-import { Fragment } from "react";
 import { Layer, Rect, Circle, Line, Group, Text, Label, Tag } from "react-konva";
 import type { HvacItem } from "@/lib/domain/types";
 import { HVAC_COLOR, HVAC_CODE } from "@/lib/domain/constants";
 import { formatHeight } from "@/lib/format";
-import { metersToScreen, metersToPx, type ViewState } from "./viewport";
+import { metersToScreen, metersToPx, screenToMeters, type ViewState } from "./viewport";
 
 interface Props {
   view: ViewState;
   items: HvacItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onMove?: (id: string, x: number, y: number) => void;
 }
 
 function toFlat(pts: { x: number; y: number }[], view: ViewState): number[] {
@@ -23,7 +23,7 @@ function toFlat(pts: { x: number; y: number }[], view: ViewState): number[] {
   });
 }
 
-export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
+export function HvacLayer({ view, items, selectedId, onSelect, onMove }: Props) {
   const pathItems = items.filter((it) => it.path && it.path.length >= 2);
   const pointItems = items.filter((it) => it.position);
 
@@ -70,17 +70,26 @@ export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
         const code = HVAC_CODE[item.type];
         const r = metersToPx(0.15, view);
 
+        // Groep op het middelpunt; kinderen relatief, zodat het symbool als
+        // geheel versleepbaar is.
         return (
-          <Fragment key={item.id}>
+          <Group
+            key={item.id}
+            x={p.x}
+            y={p.y}
+            draggable={!!onMove}
+            onDragEnd={(e) => {
+              const m = screenToMeters(e.target.absolutePosition(), view);
+              onMove?.(item.id, m.x, m.y);
+            }}
+          >
             {selected && (
-              <Circle x={p.x} y={p.y} radius={r + 6} fill={color} opacity={0.3} listening={false} />
+              <Circle x={0} y={0} radius={r + 6} fill={color} opacity={0.3} listening={false} />
             )}
 
             {item.type === "radiator" ? (
               <RadiatorSymbol
                 id={item.id}
-                cx={p.x}
-                cy={p.y}
                 r={r}
                 color={color}
                 selected={selected}
@@ -90,8 +99,8 @@ export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
               <Circle
                 id={item.id}
                 name="hvac"
-                x={p.x}
-                y={p.y}
+                x={0}
+                y={0}
                 radius={r}
                 fill={color}
                 onClick={() => onSelect(item.id)}
@@ -101,8 +110,8 @@ export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
 
             <Text
               text={code}
-              x={p.x - r}
-              y={p.y - 5}
+              x={-r}
+              y={-5}
               width={r * 2}
               align="center"
               fontSize={Math.max(7, Math.min(10, r * 0.7))}
@@ -113,7 +122,7 @@ export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
             />
 
             {item.heightZ != null && item.heightZ > 0 && (
-              <Label x={p.x} y={p.y + r + 2} listening={false}>
+              <Label x={0} y={r + 2} listening={false}>
                 <Tag fill="#fef3c7" cornerRadius={2} />
                 <Text
                   text={formatHeight(item.heightZ)}
@@ -124,25 +133,22 @@ export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
                 />
               </Label>
             )}
-          </Fragment>
+          </Group>
         );
       })}
     </Layer>
   );
 }
 
+// Radiator-symbool rond (0,0) — de ouder-groep bepaalt de positie.
 function RadiatorSymbol({
   id,
-  cx,
-  cy,
   r,
   color,
   selected,
   onSelect,
 }: {
   id: string;
-  cx: number;
-  cy: number;
   r: number;
   color: string;
   selected: boolean;
@@ -156,8 +162,8 @@ function RadiatorSymbol({
     <Group id={id} name="hvac" onClick={onSelect} onTap={onSelect}>
       {/* Buitenkader */}
       <Rect
-        x={cx - w / 2}
-        y={cy - h / 2}
+        x={-w / 2}
+        y={-h / 2}
         width={w}
         height={h}
         fill={selected ? color : color + "cc"}
@@ -165,11 +171,11 @@ function RadiatorSymbol({
       />
       {/* Ribbels */}
       {Array.from({ length: fins }).map((_, i) => {
-        const x = cx - w / 2 + ((i + 1) * w) / (fins + 1);
+        const x = -w / 2 + ((i + 1) * w) / (fins + 1);
         return (
           <Line
             key={i}
-            points={[x, cy - h / 2 + 3, x, cy + h / 2 - 3]}
+            points={[x, -h / 2 + 3, x, h / 2 - 3]}
             stroke="#ffffff"
             strokeWidth={1.5}
             opacity={0.6}

@@ -231,8 +231,10 @@ export function SelectionPanel() {
   if (!selection && !multiActive) return null;
 
   return (
-    <div className="pointer-events-auto w-full px-3 pb-1">
-      <div className="mx-auto max-w-md rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur">
+    // Mobiel: stapelt in flow boven de toolbar (max 40vh, scrollbaar) zodat
+    // het canvas-midden vrij blijft; op md+ een rechts gedokt paneel.
+    <div className="pointer-events-auto w-full px-3 pb-1 md:absolute md:inset-x-auto md:right-3 md:bottom-[76px] md:w-80 md:px-0 md:pb-0">
+      <div className="mx-auto max-h-[40vh] max-w-md overflow-y-auto overscroll-contain rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur md:max-h-[calc(100dvh-240px)] md:max-w-none">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink-900">
             {multiActive

@@ -2,7 +2,7 @@
 
 import { Fragment } from "react";
 import { Layer, Rect, Text, Group, Circle, Line } from "react-konva";
-import { metersToScreen, metersToPx, type ViewState } from "./viewport";
+import { metersToScreen, metersToPx, screenToMeters, type ViewState } from "./viewport";
 import type { Furniture } from "@/lib/domain/types";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { FurnitureSymbol } from "./furnitureSymbols";
@@ -50,11 +50,8 @@ export function FurnitureLayer({ view, furniture, selectedId, onSelect, onMove, 
               onDragEnd={(e) => {
                 const stage = e.target.getStage();
                 if (!stage) return;
-                const pos = e.target.absolutePosition();
-                // convert back to meters
-                const mx = (pos.x - view.x) / (view.scale * 50);
-                const my = (pos.y - view.y) / (view.scale * 50);
-                onMove(item.id, mx, my);
+                const m = screenToMeters(e.target.absolutePosition(), view);
+                onMove(item.id, m.x, m.y);
               }}
             >
               <Rect

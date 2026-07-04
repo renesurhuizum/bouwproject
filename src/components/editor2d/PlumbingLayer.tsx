@@ -2,12 +2,11 @@
 
 // Water-laag. Toont leidingtrajecten (path) en sanitair/tappunten (position).
 
-import { Fragment } from "react";
 import { Layer, Line, Circle, Ellipse, Rect, Group, Text, Label, Tag } from "react-konva";
 import type { PlumbingItem, FixtureKind } from "@/lib/domain/types";
 import { FIXTURE_CODE, FIXTURE_FOOTPRINT, PLUMBING_COLOR } from "@/lib/domain/constants";
 import { formatHeight } from "@/lib/format";
-import { metersToScreen, metersToPx, type ViewState } from "./viewport";
+import { metersToScreen, metersToPx, screenToMeters, type ViewState } from "./viewport";
 
 // Bovenaanzicht-symbool per sanitair-soort, getekend in (0,0)–(w,h) px.
 // Puur tekenwerk; alle shapes listening={false} — de hit-Rect van de caller vangt clicks.
@@ -100,7 +99,7 @@ function FixtureSymbol({ kind, w, h }: { kind: FixtureKind; w: number; h: number
   }
 }
 
-const PIPE_COLORS: Record<string, string> = {
+export const PIPE_COLORS: Record<string, string> = {
   "supply-cold": "#3b82f6",
   "supply-hot":  "#ef4444",
   "drain":       "#8b5cf6",
@@ -120,6 +119,7 @@ interface Props {
   items: PlumbingItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onMove?: (id: string, x: number, y: number) => void;
   previewPath?: { points: { x: number; y: number }[]; type: string } | null;
 }
 
@@ -130,7 +130,7 @@ function toScreenFlat(pts: { x: number; y: number }[], view: ViewState): number[
   });
 }
 
-export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }: Props) {
+export function PlumbingLayer({ view, items, selectedId, onSelect, onMove, previewPath }: Props) {
   const pipes = items.filter((it) => it.path && it.path.length >= 2);
   const fixtures = items.filter((it) => it.type === "fixture" && it.position);
 
@@ -205,12 +205,24 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
         const useSymbol = !!item.fixture && sw >= 16;
 
         if (useSymbol && item.fixture) {
+          // Groep op de linkerbovenhoek van de voetafdruk; onDragEnd rekent
+          // terug naar het middelpunt (position = center).
           return (
-            <Fragment key={item.id}>
+            <Group
+              key={item.id}
+              x={p.x - sw / 2}
+              y={p.y - sh / 2}
+              draggable={!!onMove}
+              onDragEnd={(e) => {
+                const pos = e.target.absolutePosition();
+                const m = screenToMeters({ x: pos.x + sw / 2, y: pos.y + sh / 2 }, view);
+                onMove?.(item.id, m.x, m.y);
+              }}
+            >
               {selected && (
                 <Rect
-                  x={p.x - sw / 2 - 3}
-                  y={p.y - sh / 2 - 3}
+                  x={-3}
+                  y={-3}
                   width={sw + 6}
                   height={sh + 6}
                   fill="#fb923c"
@@ -219,23 +231,21 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
                   listening={false}
                 />
               )}
-              <Group x={p.x - sw / 2} y={p.y - sh / 2}>
-                <FixtureSymbol kind={item.fixture} w={sw} h={sh} />
-                {/* onzichtbaar klikvlak over de hele voetafdruk */}
-                <Rect
-                  id={item.id}
-                  name="plumbing"
-                  x={0}
-                  y={0}
-                  width={sw}
-                  height={sh}
-                  fill="transparent"
-                  onClick={() => onSelect(item.id)}
-                  onTap={() => onSelect(item.id)}
-                />
-              </Group>
+              <FixtureSymbol kind={item.fixture} w={sw} h={sh} />
+              {/* onzichtbaar klikvlak over de hele voetafdruk */}
+              <Rect
+                id={item.id}
+                name="plumbing"
+                x={0}
+                y={0}
+                width={sw}
+                height={sh}
+                fill="transparent"
+                onClick={() => onSelect(item.id)}
+                onTap={() => onSelect(item.id)}
+              />
               {item.heightZ != null && (
-                <Label x={p.x - 14} y={p.y + sh / 2 + 2} listening={false}>
+                <Label x={sw / 2 - 14} y={sh + 2} listening={false}>
                   <Tag fill="#cffafe" cornerRadius={2} />
                   <Text
                     text={`${FIXTURE_CODE[item.fixture]} ${formatHeight(item.heightZ)}`}
@@ -246,21 +256,30 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
                   />
                 </Label>
               )}
-            </Fragment>
+            </Group>
           );
         }
 
         const r = 12;
         return (
-          <Fragment key={item.id}>
+          <Group
+            key={item.id}
+            x={p.x}
+            y={p.y}
+            draggable={!!onMove}
+            onDragEnd={(e) => {
+              const m = screenToMeters(e.target.absolutePosition(), view);
+              onMove?.(item.id, m.x, m.y);
+            }}
+          >
             {selected && (
-              <Circle x={p.x} y={p.y} radius={r + 5} fill="#fb923c" opacity={0.5} listening={false} />
+              <Circle x={0} y={0} radius={r + 5} fill="#fb923c" opacity={0.5} listening={false} />
             )}
             <Circle
               id={item.id}
               name="plumbing"
-              x={p.x}
-              y={p.y}
+              x={0}
+              y={0}
               radius={r}
               fill={PLUMBING_COLOR}
               onClick={() => onSelect(item.id)}
@@ -269,8 +288,8 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
             {item.fixture && (
               <Text
                 text={FIXTURE_CODE[item.fixture]}
-                x={p.x - r}
-                y={p.y - 5}
+                x={-r}
+                y={-5}
                 width={r * 2}
                 align="center"
                 fontSize={9}
@@ -281,7 +300,7 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
               />
             )}
             {item.heightZ != null && (
-              <Label x={p.x} y={p.y + r + 2} listening={false}>
+              <Label x={0} y={r + 2} listening={false}>
                 <Tag fill="#cffafe" cornerRadius={2} />
                 <Text
                   text={formatHeight(item.heightZ)}
@@ -292,7 +311,7 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
                 />
               </Label>
             )}
-          </Fragment>
+          </Group>
         );
       })}
     </Layer>
