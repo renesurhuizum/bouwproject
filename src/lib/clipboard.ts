@@ -19,6 +19,7 @@ import type {
   Beam,
   Roof,
   Dormer,
+  SectionLine,
 } from "./domain/types";
 
 export interface ClipboardData {
@@ -34,6 +35,7 @@ export interface ClipboardData {
   beams: Beam[];
   roofs: Roof[];
   dormers: Dormer[];
+  sections: SectionLine[];
 }
 
 const find = <T extends { id: string }>(arr: T[], id: string) =>
@@ -215,6 +217,16 @@ export function copySelection(sels: Selection[], data: ClipboardData): Clipboard
             width: dm.width,
             height: dm.height,
           },
+        });
+        break;
+      }
+      case "section": {
+        const sec = find(data.sections, s.id);
+        if (!sec) break;
+        items.push({
+          kind: "section",
+          srcId: sec.id,
+          data: { start: sec.start, end: sec.end, label: sec.label },
         });
         break;
       }
@@ -434,6 +446,18 @@ export async function pasteClipboard(
         created.push({ table: "dormers", id: dm.id });
         break;
       }
+      case "section": {
+        const d = it.data as unknown as Omit<SectionLine, "id" | "updatedAt" | "levelId">;
+        const sec = await create<SectionLine>("sections", {
+          levelId,
+          start: off(d.start, offset),
+          end: off(d.end, offset),
+          label: d.label,
+        });
+        selections.push({ kind: "section", id: sec.id });
+        created.push({ table: "sections", id: sec.id });
+        break;
+      }
       case "roof":
         break; // niet dupliceerbaar via klembord
     }
@@ -456,4 +480,5 @@ export const TABLE_FOR_KIND: Record<SelKind, string> = {
   beam: "beams",
   roof: "roofs",
   dormer: "dormers",
+  section: "sections",
 };

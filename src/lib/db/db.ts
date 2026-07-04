@@ -24,6 +24,7 @@ import type {
   Beam,
   Roof,
   Dormer,
+  SectionLine,
 } from "../domain/types";
 
 export class BouwDB extends Dexie {
@@ -47,6 +48,7 @@ export class BouwDB extends Dexie {
   beams!: Table<Beam, string>;
   roofs!: Table<Roof, string>;
   dormers!: Table<Dormer, string>;
+  sections!: Table<SectionLine, string>;
 
   constructor() {
     super("bouwproject");
@@ -78,9 +80,13 @@ export class BouwDB extends Dexie {
       roofs: "id, levelId, updatedAt, deleted",
       dormers: "id, roofId, updatedAt, deleted",
     });
-    // v5: roomId-index op photos — photos.where("roomId") (SelectionPanel)
-    // gooide anders een SchemaError zodra een ruimte geselecteerd werd.
+    // v5: doorsnedelijnen.
     this.version(5).stores({
+      sections: "id, levelId, updatedAt, deleted",
+    });
+    // v6: roomId-index op photos — photos.where("roomId") (SelectionPanel)
+    // gooide anders een SchemaError zodra een ruimte geselecteerd werd.
+    this.version(6).stores({
       photos: "id, projectId, roomId, updatedAt, deleted",
     });
   }

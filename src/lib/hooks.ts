@@ -4,7 +4,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { getDB } from "./db/db";
-import type { Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer } from "./domain/types";
+import type { Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer, SectionLine } from "./domain/types";
 
 function notDeleted<T extends { deleted?: boolean }>(rows: T[] | undefined): T[] {
   return (rows ?? []).filter((r) => !r.deleted);
@@ -225,6 +225,17 @@ export function useRoofs(levelId?: string | null) {
     },
     [levelId],
     [] as Roof[],
+  );
+}
+
+export function useSections(levelId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      return notDeleted(await getDB().sections.where("levelId").equals(levelId).toArray());
+    },
+    [levelId],
+    [] as SectionLine[],
   );
 }
 

@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Printer, ArrowLeft, Map as MapIcon, Frame, ListTree } from "lucide-react";
+import { Printer, ArrowLeft, Map as MapIcon, Frame, ListTree, Download, DoorOpen } from "lucide-react";
 import {
   useProject,
   useLevels,
@@ -21,11 +21,15 @@ import {
   useTasks,
 } from "@/lib/hooks";
 import { useEditor } from "@/lib/store/editor";
+import { update } from "@/lib/db/repo";
 import { WerkbladPlan } from "@/components/werkblad/WerkbladPlan";
 import { WallElevation } from "@/components/werkblad/WallElevation";
+import { OpeningSchedule } from "@/components/werkblad/OpeningSchedule";
 import { roomWalls } from "@/lib/roomWalls";
 import { computeQuantities } from "@/lib/quantityTakeoff";
 import { polygonArea } from "@/lib/geometry";
+import { buildOpeningSchedule } from "@/lib/openingSchedule";
+import { svgToPngBlob, downloadBlob } from "@/lib/exportImage";
 import { formatArea, formatHeight } from "@/lib/format";
 import {
   ELECTRICAL_LABEL,
@@ -34,13 +38,17 @@ import {
 } from "@/lib/domain/constants";
 import type { ElectricalType, FixtureKind } from "@/lib/domain/types";
 
-type Tab = "plan" | "aanzichten" | "specs";
+type Tab = "plan" | "aanzichten" | "kozijnstaat" | "specs";
 
 const TABS: { key: Tab; label: string; icon: typeof MapIcon }[] = [
   { key: "plan", label: "Plan", icon: MapIcon },
   { key: "aanzichten", label: "Aanzichten", icon: Frame },
+  { key: "kozijnstaat", label: "Kozijnstaat", icon: DoorOpen },
   { key: "specs", label: "Specificaties", icon: ListTree },
 ];
+
+const PLAN_SVG_ID = "werkblad-plan-svg";
+const DRAWING_SCALES = [50, 100, 200];
 
 const QTY_CAT_LABEL: Record<string, string> = {
   walls: "Wanden",
@@ -66,6 +74,27 @@ export default function WerkbladPage() {
   const tasks = useTasks(project?.id) ?? [];
 
   const [tab, setTab] = useState<Tab>("plan");
+
+  const { codeById } = useMemo(() => buildOpeningSchedule(openings), [openings]);
+  const drawingScale = project?.drawingScale ?? 100;
+  const planMaxWidth = Math.round(700 * (100 / drawingScale));
+
+  async function downloadPng() {
+    const svg = document.getElementById(PLAN_SVG_ID) as SVGSVGElement | null;
+    if (!svg) return;
+    const blob = await svgToPngBlob(svg, 2);
+    downloadBlob(
+      blob,
+      `${(project?.name ?? "plattegrond").replace(/\s+/g, "_")}_${level?.name ?? ""}.png`,
+    );
+  }
+  async function bumpRevision() {
+    if (!project?.id) return;
+    await update("projects", project.id, {
+      revisionNumber: (project.revisionNumber ?? 0) + 1,
+      revisionDate: new Date().toISOString().slice(0, 10),
+    });
+  }
 
   // Elektra samenvatten per type.
   const elecByType = new Map<ElectricalType, { count: number; height: number }>();
@@ -106,12 +135,22 @@ export default function WerkbladPage() {
             );
           })}
         </div>
-        <button
-          onClick={() => window.print()}
-          className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
-        >
-          <Printer size={16} /> Print / PDF
-        </button>
+        <div className="flex items-center gap-2">
+          {tab === "plan" && (
+            <button
+              onClick={() => void downloadPng()}
+              className="flex items-center gap-2 rounded-lg bg-paper-sunken px-3 py-2 text-sm font-semibold text-ink-700 hover:bg-line"
+            >
+              <Download size={16} /> PNG
+            </button>
+          )}
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
+          >
+            <Printer size={16} /> Print / PDF
+          </button>
+        </div>
       </div>
 
       <div className="mx-auto max-w-3xl space-y-6 p-5 pb-10">
@@ -130,8 +169,15 @@ export default function WerkbladPage() {
             <div className="grid grid-cols-2 border-l border-ink-900 text-[10px] tabular">
               <TitleCell label="Datum" value={datum} />
               <TitleCell label="Verdieping" value={level?.name ?? "—"} />
-              <TitleCell label="Schaal" value="zie balk" />
-              <TitleCell label="Revisie" value="A" />
+              <TitleCell label="Schaal" value={`1:${drawingScale}`} />
+              <TitleCell
+                label="Revisie"
+                value={
+                  project?.revisionDate
+                    ? `${project.revisionNumber ?? 0} · ${project.revisionDate}`
+                    : String(project?.revisionNumber ?? 0)
+                }
+              />
             </div>
           </div>
         </header>
@@ -139,11 +185,36 @@ export default function WerkbladPage() {
         {/* ── PLAN ─────────────────────────────────────────────── */}
         {tab === "plan" && (
           <section>
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-ink-500">
-              Plattegrond &amp; maatvoering
-            </h2>
+            <div className="no-print mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-500">
+                Plattegrond &amp; maatvoering
+              </h2>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 text-xs text-ink-500">
+                  Schaal
+                  <select
+                    value={drawingScale}
+                    onChange={(e) => void update("projects", project!.id, { drawingScale: Number(e.target.value) })}
+                    disabled={!project}
+                    className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+                  >
+                    {DRAWING_SCALES.map((s) => (
+                      <option key={s} value={s}>1:{s}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  onClick={() => void bumpRevision()}
+                  disabled={!project}
+                  className="rounded-md bg-paper-sunken px-2.5 py-1 text-xs font-medium text-ink-700 hover:bg-line disabled:opacity-40"
+                >
+                  Revisie +1
+                </button>
+              </div>
+            </div>
             <div className="rounded-lg border border-line bg-white p-3">
               <WerkbladPlan
+                svgId={PLAN_SVG_ID}
                 walls={walls}
                 rooms={rooms}
                 openings={openings}
@@ -151,6 +222,8 @@ export default function WerkbladPage() {
                 plumbing={plumbing}
                 furniture={furniture}
                 northDegrees={project?.northDegrees ?? 0}
+                maxWidth={planMaxWidth}
+                openingCodes={codeById}
               />
             </div>
           </section>
@@ -186,6 +259,21 @@ export default function WerkbladPage() {
                 );
               })
             )}
+          </section>
+        )}
+
+        {/* ── KOZIJNSTAAT ──────────────────────────────────────── */}
+        {tab === "kozijnstaat" && (
+          <section>
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-ink-500">
+              Kozijnstaat — deuren &amp; ramen
+            </h2>
+            <div className="rounded-lg border border-line bg-white p-4">
+              <OpeningSchedule openings={openings} />
+            </div>
+            <p className="mt-2 text-[11px] text-ink-400">
+              De postnummers (D01, R01…) verschijnen als referentielabels in het Plan-tabblad.
+            </p>
           </section>
         )}
 

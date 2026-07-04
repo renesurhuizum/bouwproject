@@ -3,12 +3,16 @@
 // 3D-weergave: plattegrond geëxtrudeerd naar muren. Orbit-camera om rond te kijken.
 // Plan-coördinaten (x, y in meters) → wereld (x, z). Hoogte = y omhoog.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
-import { OrbitControls, Grid, Sky } from "@react-three/drei";
+import { OrbitControls, Grid, Sky, TransformControls } from "@react-three/drei";
+import { sunDirection } from "@/lib/sunPosition";
+import { makeTileTexture, makeWoodTexture, makeConcreteTexture, makeBrickTexture } from "@/lib/textures";
+import { downloadBlob } from "@/lib/exportImage";
+import { update as dbUpdate } from "@/lib/db/repo";
 import { useLiveQuery } from "dexie-react-hooks";
 import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer } from "@/lib/domain/types";
 import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers } from "@/lib/hooks";
@@ -69,13 +73,20 @@ function wallBoxes(length: number, height: number, openings: Opening[]): Box[] {
 
 function WallMesh({ wall, openings, wallColor }: { wall: Wall; openings: Opening[]; wallColor?: string }) {
   const length = dist(wall.start, wall.end);
+  const style = STATUS_3D[wall.status];
+  const finalColor = wallColor && wall.status === "existing" ? wallColor : style.color;
+
+  // Bakstenen muur krijgt een procedurele metselwerk-textuur.
+  const brickTex = useMemo(
+    () => (wall.material === "brick" && style.opacity >= 1 ? makeBrickTexture(finalColor) : null),
+    [wall.material, finalColor, style.opacity],
+  );
+
   if (length < 0.01) return null;
   const cx = (wall.start.x + wall.end.x) / 2;
   const cz = (wall.start.y + wall.end.y) / 2;
   const rotY = -angle(wall.start, wall.end);
-  const style = STATUS_3D[wall.status];
   const boxes = wallBoxes(length, wall.height, openings);
-  const finalColor = wallColor && wall.status === "existing" ? wallColor : style.color;
 
   return (
     <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
@@ -84,6 +95,7 @@ function WallMesh({ wall, openings, wallColor }: { wall: Wall; openings: Opening
           <boxGeometry args={[b.w, b.h, wall.thickness]} />
           <meshStandardMaterial
             color={finalColor}
+            map={brickTex}
             transparent={style.opacity < 1}
             opacity={style.opacity}
             roughness={wall.material === "concrete" ? 0.95 : wall.material === "brick" ? 0.88 : 0.80}
@@ -115,11 +127,23 @@ function RoomFloor3D({ room }: { room: Room }) {
     ? FLOOR_COLORS[room.floorMaterial]
     : (room.color ?? "#e6d6bf");
 
+  // Procedurele vloertextuur per materiaal (gecachet in lib/textures).
+  const texture = useMemo(() => {
+    switch (room.floorMaterial) {
+      case "tile": return makeTileTexture(floorColor);
+      case "wood": return makeWoodTexture(floorColor);
+      case "stone": return makeConcreteTexture(floorColor);
+      case "concrete": return makeConcreteTexture(floorColor);
+      default: return null; // carpet / standaard: vlakke kleur
+    }
+  }, [room.floorMaterial, floorColor]);
+
   return (
     <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} receiveShadow>
       <shapeGeometry args={[shape]} />
       <meshStandardMaterial
         color={floorColor}
+        map={texture}
         roughness={room.floorMaterial === "tile" ? 0.3 : room.floorMaterial === "wood" ? 0.65 : 0.9}
         side={THREE.DoubleSide}
       />
@@ -873,7 +897,16 @@ function KitchenCabinetModel({ w, d, h, color, mountY = 0, worktop = false }: {
   );
 }
 
-function FurnitureMesh3D({ item }: { item: Furniture }) {
+function FurnitureMesh3D({
+  item,
+  selected = false,
+  gizmoMode = "translate",
+}: {
+  item: Furniture;
+  selected?: boolean;
+  gizmoMode?: "translate" | "rotate";
+}) {
+  const groupRef = useRef<THREE.Group>(null);
   const def = FURNITURE_DEFAULTS[item.kind];
   const w = item.width ?? def.w;
   const d = item.depth ?? def.d;
@@ -914,8 +947,9 @@ function FurnitureMesh3D({ item }: { item: Furniture }) {
     model = <KitchenCabinetModel w={w} d={d} h={h} color={color} />;
   }
 
-  return (
+  const group = (
     <group
+      ref={groupRef}
       position={[item.position.x, 0, item.position.y]}
       rotation={[0, rotY, 0]}
       onClick={(e: ThreeEvent<MouseEvent>) => {
@@ -931,6 +965,28 @@ function FurnitureMesh3D({ item }: { item: Furniture }) {
     >
       {model}
     </group>
+  );
+
+  if (!selected) return group;
+
+  return (
+    <TransformControls
+      mode={gizmoMode}
+      showX={gizmoMode === "translate"}
+      showZ={gizmoMode === "translate"}
+      showY={gizmoMode === "rotate"}
+      onMouseUp={() => {
+        const g = groupRef.current;
+        if (!g) return;
+        const deg = (((-g.rotation.y * 180) / Math.PI) % 360 + 360) % 360;
+        void dbUpdate("furniture", item.id, {
+          position: { x: g.position.x, y: g.position.z },
+          rotation: deg,
+        });
+      }}
+    >
+      {group}
+    </TransformControls>
   );
 }
 
@@ -1219,9 +1275,13 @@ function FloorPlane({ levelId, elevation }: { levelId: string; elevation: number
 function LevelScene({
   level,
   visibleLayers,
+  selectedFurnitureId,
+  gizmoMode,
 }: {
   level: Level;
   visibleLayers: Record<string, boolean>;
+  selectedFurnitureId: string | null;
+  gizmoMode: "translate" | "rotate";
 }) {
   const walls = useWalls(level.id) ?? [];
   const electrical = useElectrical(level.id) ?? [];
@@ -1316,7 +1376,14 @@ function LevelScene({
           ),
         )}
       {visibleLayers.furniture &&
-        furniture.map((it) => <FurnitureMesh3D key={it.id} item={it} />)}
+        furniture.map((it) => (
+          <FurnitureMesh3D
+            key={it.id}
+            item={it}
+            selected={it.id === selectedFurnitureId}
+            gizmoMode={gizmoMode}
+          />
+        ))}
       {visibleLayers.hvac &&
         hvac.map((it) => <HvacMesh3D key={it.id} item={it} />)}
       {visibleLayers.construction && (
@@ -1351,8 +1418,63 @@ export function Scene3D() {
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const project = useProject();
   const editMode = use3DEdit((s) => s.mode);
+  const selectedItem = use3DEdit((s) => s.selectedItem);
   const [walkMode, setWalkMode] = useState(false);
   const [dayMode, setDayMode] = useState(true);
+  const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate">("translate");
+
+  // Zonnestand
+  const [sunDate, setSunDate] = useState("2026-06-21");
+  const [sunHour, setSunHour] = useState(13);
+  const lat = project?.lat ?? 52.3;
+  const lng = project?.lng ?? 5.3;
+  const sunVec = useMemo(() => {
+    const dt = new Date(`${sunDate}T00:00:00`);
+    dt.setMinutes(Math.round(sunHour * 60));
+    return sunDirection(dt, lat, lng);
+  }, [sunDate, sunHour, lat, lng]);
+  const sunUp = sunVec[1] > 0.02;
+
+  // Screenshot + clip-plane
+  const glRef = useRef<THREE.WebGLRenderer | null>(null);
+  const [clipEnabled, setClipEnabled] = useState(false);
+  const [clipX, setClipX] = useState(0);
+
+  // Globaal snijvlak langs de X-as. Via de renderer-ref (mutatie van een ref
+  // is toegestaan; de renderer uit useThree mag niet gemuteerd worden).
+  useEffect(() => {
+    const gl = glRef.current;
+    if (!gl) return;
+    gl.localClippingEnabled = clipEnabled;
+    gl.clippingPlanes = clipEnabled ? [new THREE.Plane(new THREE.Vector3(-1, 0, 0), clipX)] : [];
+  }, [clipEnabled, clipX]);
+
+  const selectedFurnitureId =
+    editMode === "none" && !walkMode && selectedItem?.kind === "furniture"
+      ? selectedItem.id
+      : null;
+
+  async function takeScreenshot() {
+    const gl = glRef.current;
+    if (!gl) return;
+    const blob = await new Promise<Blob | null>((res) =>
+      gl.domElement.toBlob((b) => res(b), "image/png"),
+    );
+    if (blob) downloadBlob(blob, `${(project?.name ?? "3d").replace(/\s+/g, "_")}_3d.png`);
+  }
+
+  // T = verplaatsen, R = roteren (alleen met een geselecteerd meubel).
+  useEffect(() => {
+    if (!selectedFurnitureId) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      if (el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
+      if (e.key === "t" || e.key === "T") setGizmoMode("translate");
+      if (e.key === "r" || e.key === "R") setGizmoMode("rotate");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedFurnitureId]);
 
   const levels = useLiveQuery(
     async () => {
@@ -1376,6 +1498,9 @@ export function Scene3D() {
   const maxElev = levels.length ? levels[levels.length - 1].elevation + levels[levels.length - 1].height : 8;
 
   const groundFloorElev = levels[0]?.elevation ?? 0;
+  const planB = pts.length
+    ? bounds(pts)
+    : { min: { x: center.x - 10, y: 0 }, max: { x: center.x + 10, y: 0 } };
 
   return (
     <div className="relative h-full w-full">
@@ -1385,23 +1510,31 @@ export function Scene3D() {
           position: [center.x + maxElev, maxElev * 0.9, center.y + maxElev],
           fov: walkMode ? 75 : 50,
         }}
-        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: dayMode ? 1.1 : 0.6 }}
+        gl={{
+          antialias: true,
+          preserveDrawingBuffer: true,
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: dayMode ? 1.1 : 0.6,
+        }}
+        onCreated={({ gl }) => {
+          glRef.current = gl;
+        }}
         style={{ cursor: editMode !== "none" ? "crosshair" : walkMode ? "none" : "grab" }}
       >
         {dayMode ? (
-          <Sky sunPosition={[100, 20, 100]} turbidity={8} rayleigh={0.5} />
+          <Sky sunPosition={[sunVec[0] * 100, Math.max(1, sunVec[1] * 100), sunVec[2] * 100]} turbidity={8} rayleigh={0.5} />
         ) : (
           <color attach="background" args={["#0a0e1a"]} />
         )}
 
-        <ambientLight intensity={dayMode ? 0.45 : 0.15} />
+        <ambientLight intensity={dayMode ? (sunUp ? 0.45 : 0.25) : 0.15} />
         <hemisphereLight args={dayMode ? ["#f0ecd8", "#8a9070", 0.6] : ["#1a2040", "#0a0e0a", 0.3]} />
         <directionalLight
-          position={[12, 20, 8]}
-          intensity={dayMode ? 1.8 : 0.1}
+          position={[sunVec[0] * 30, Math.max(4, sunVec[1] * 30), sunVec[2] * 30]}
+          intensity={dayMode ? (sunUp ? 1.8 : 0.25) : 0.1}
           castShadow
           shadow-mapSize={[2048, 2048]}
-          shadow-camera-far={60}
+          shadow-camera-far={80}
           shadow-camera-left={-20}
           shadow-camera-right={20}
           shadow-camera-top={20}
@@ -1428,7 +1561,13 @@ export function Scene3D() {
         />
 
         {levels.map((level) => (
-          <LevelScene key={level.id} level={level} visibleLayers={visibleLayers} />
+          <LevelScene
+            key={level.id}
+            level={level}
+            visibleLayers={visibleLayers}
+            selectedFurnitureId={selectedFurnitureId}
+            gizmoMode={gizmoMode}
+          />
         ))}
 
         {/* Eén klik-vlak voor de actieve verdieping, alleen tijdens plaatsen */}
@@ -1443,6 +1582,7 @@ export function Scene3D() {
           />
         ) : (
           <OrbitControls
+            makeDefault
             target={[center.x, maxElev / 2, center.y]}
             enableDamping
             maxPolarAngle={Math.PI / 2.05}
@@ -1468,6 +1608,83 @@ export function Scene3D() {
         >
           {dayMode ? "🌙" : "☀️"}
         </button>
+        <button
+          className="pointer-events-auto rounded-xl border border-white/20 bg-ink-900/80 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur hover:bg-ink-900"
+          onClick={() => void takeScreenshot()}
+          title="Screenshot downloaden (PNG)"
+        >
+          📷
+        </button>
+        <button
+          className={`pointer-events-auto rounded-xl border border-white/20 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur ${
+            clipEnabled ? "bg-accent" : "bg-ink-900/80 hover:bg-ink-900"
+          }`}
+          onClick={() => {
+            setClipX(center.x);
+            setClipEnabled((v) => !v);
+          }}
+          title="Doorsnede in 3D (snijvlak)"
+        >
+          ✂
+        </button>
+
+        {clipEnabled && (
+          <div className="pointer-events-auto rounded-xl border border-white/20 bg-ink-900/85 p-2 shadow-lg backdrop-blur">
+            <input
+              type="range"
+              min={planB.min.x}
+              max={planB.max.x}
+              step={0.05}
+              value={clipX}
+              onChange={(e) => setClipX(Number(e.target.value))}
+              className="w-32 accent-accent"
+            />
+          </div>
+        )}
+
+        {selectedFurnitureId && (
+          <div className="pointer-events-auto flex overflow-hidden rounded-xl border border-white/20 shadow-lg">
+            {(["translate", "rotate"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setGizmoMode(m)}
+                className={`px-3 py-2 text-xs font-semibold ${
+                  gizmoMode === m ? "bg-accent text-white" : "bg-ink-900/80 text-white/70 hover:bg-ink-900"
+                }`}
+                title={m === "translate" ? "Verplaatsen (T)" : "Roteren (R)"}
+              >
+                {m === "translate" ? "↔" : "⟳"}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {dayMode && (
+          <div className="pointer-events-auto space-y-1 rounded-xl border border-white/20 bg-ink-900/85 p-2 text-[10px] text-white/80 shadow-lg backdrop-blur">
+            <div className="flex items-center gap-1.5">
+              <span>☀️</span>
+              <input
+                type="date"
+                value={sunDate}
+                onChange={(e) => setSunDate(e.target.value)}
+                className="rounded bg-white/10 px-1 py-0.5 text-[10px] text-white"
+              />
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={24}
+              step={0.25}
+              value={sunHour}
+              onChange={(e) => setSunHour(Number(e.target.value))}
+              className="w-full accent-accent"
+            />
+            <div className="text-center tabular">
+              {String(Math.floor(sunHour)).padStart(2, "0")}:
+              {String(Math.round((sunHour % 1) * 60)).padStart(2, "0")}
+            </div>
+          </div>
+        )}
       </div>
 
       {walkMode && (

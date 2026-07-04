@@ -138,6 +138,26 @@ export function wallIntersection(
   return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
 }
 
+// Snijpunt van twee eindige segmenten a1-a2 en b1-b2. Geeft het punt plus de
+// parameters t (langs a) en u (langs b), of null als ze elkaar niet kruisen.
+export function segmentIntersection(
+  a1: Point,
+  a2: Point,
+  b1: Point,
+  b2: Point,
+): { point: Point; t: number; u: number } | null {
+  const rX = a2.x - a1.x;
+  const rY = a2.y - a1.y;
+  const sX = b2.x - b1.x;
+  const sY = b2.y - b1.y;
+  const denom = rX * sY - rY * sX;
+  if (Math.abs(denom) < 1e-9) return null; // parallel
+  const t = ((b1.x - a1.x) * sY - (b1.y - a1.y) * sX) / denom;
+  const u = ((b1.x - a1.x) * rY - (b1.y - a1.y) * rX) / denom;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return { point: { x: a1.x + t * rX, y: a1.y + t * rY }, t, u };
+}
+
 // Ligt punt p binnen de (as-georiënteerde) rechthoek min..max?
 export function pointInRect(p: Point, min: Point, max: Point): boolean {
   return p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y;

@@ -153,6 +153,10 @@ export function SelectionPanel() {
     async () => (selection?.kind === "dormer" ? await getDB().dormers.get(selection.id) : null),
     [selection?.kind, selection?.id],
   );
+  const sectionLine = useLiveQuery(
+    async () => (selection?.kind === "section" ? await getDB().sections.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
 
   const tool = useEditor((s) => s.tool);
   const isPlacementMode = tool === "place" || tool === "draw-pipe";
@@ -174,7 +178,7 @@ export function SelectionPanel() {
     const db = getDB();
     const data: ClipboardData = {
       walls: [], rooms: [], openings: [], electrical: [], plumbing: [], hvac: [], furniture: [],
-      stairs: [], columns: [], beams: [], roofs: [], dormers: [],
+      stairs: [], columns: [], beams: [], roofs: [], dormers: [], sections: [],
     };
     for (const s of sels) {
       const ent = await (db[TABLE_FOR_KIND[s.kind] as keyof typeof db] as import("dexie").Table).get(s.id);
@@ -227,10 +231,10 @@ export function SelectionPanel() {
   if (!selection && !multiActive) return null;
 
   return (
-    <div className="pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3 md:inset-x-auto md:right-3 md:bottom-[88px] md:w-80 md:px-0">
-      {/* Mobiel: bottom-sheet met beperkte hoogte zodat het canvas-midden vrij
-          blijft; op md+ een rechts gedokt paneel naast het werkgebied. */}
-      <div className="mx-auto max-h-[40vh] max-w-md overflow-y-auto overscroll-contain rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur md:max-h-[calc(100dvh-160px)] md:max-w-none">
+    // Mobiel: stapelt in flow boven de toolbar (max 40vh, scrollbaar) zodat
+    // het canvas-midden vrij blijft; op md+ een rechts gedokt paneel.
+    <div className="pointer-events-auto w-full px-3 pb-1 md:absolute md:inset-x-auto md:right-3 md:bottom-[76px] md:w-80 md:px-0 md:pb-0">
+      <div className="mx-auto max-h-[40vh] max-w-md overflow-y-auto overscroll-contain rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur md:max-h-[calc(100dvh-240px)] md:max-w-none">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink-900">
             {multiActive
@@ -259,7 +263,9 @@ export function SelectionPanel() {
                                 ? "Dak"
                                 : selection.kind === "dormer"
                                   ? "Dakkapel"
-                                  : "Elektra"}
+                                  : selection.kind === "section"
+                                    ? "Doorsnede"
+                                    : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -835,6 +841,24 @@ export function SelectionPanel() {
               <NumberField value={Math.round(dormer.height * 100)} unit="cm" onChange={(v) => update("dormers", dormer.id, { height: Math.max(0.3, v / 100) })} />
             </Row>
             <DeleteButton onClick={() => removeAnd("dormers", dormer.id, () => select(null))} />
+          </div>
+        )}
+
+        {sectionLine && (
+          <div className="space-y-2.5">
+            <Row label="Label">
+              <input
+                type="text"
+                defaultValue={sectionLine.label}
+                key={sectionLine.label}
+                onBlur={(e) => update("sections", sectionLine.id, { label: e.target.value || "A-A" })}
+                className="w-24 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              />
+            </Row>
+            <p className="text-[11px] text-ink-400">
+              Bekijk de doorsnede via <strong>Aanzichten → Doorsneden</strong>.
+            </p>
+            <DeleteButton onClick={() => removeAnd("sections", sectionLine.id, () => select(null))} />
           </div>
         )}
 
