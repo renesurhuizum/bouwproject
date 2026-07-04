@@ -1,24 +1,25 @@
 "use client";
 
 // Kolommen in bovenaanzicht: gevuld vierkant of gevulde cirkel, met markering
-// voor dragend. Selecteerbaar.
+// voor dragend. Selecteerbaar en versleepbaar.
 
 import { Fragment } from "react";
 import { Layer, Rect, Circle } from "react-konva";
 import type { Column } from "@/lib/domain/types";
-import { metersToScreen, metersToPx, type ViewState } from "./viewport";
+import { metersToScreen, metersToPx, screenToMeters, type ViewState } from "./viewport";
 
 interface Props {
   view: ViewState;
   columns: Column[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onMove?: (id: string, x: number, y: number) => void;
 }
 
 const FILL = "#9ca3af";
 const STROKE = "#0f766e";
 
-export function ColumnsLayer({ view, columns, selectedId, onSelect }: Props) {
+export function ColumnsLayer({ view, columns, selectedId, onSelect, onMove }: Props) {
   return (
     <Layer>
       {columns.map((c) => {
@@ -39,6 +40,11 @@ export function ColumnsLayer({ view, columns, selectedId, onSelect }: Props) {
                 fill={FILL}
                 stroke={stroke}
                 strokeWidth={sw}
+                draggable={!!onMove}
+                onDragEnd={(e) => {
+                  const m = screenToMeters(e.target.absolutePosition(), view);
+                  onMove?.(c.id, m.x, m.y);
+                }}
                 onClick={() => onSelect(c.id)}
                 onTap={() => onSelect(c.id)}
               />
@@ -53,6 +59,13 @@ export function ColumnsLayer({ view, columns, selectedId, onSelect }: Props) {
                 fill={FILL}
                 stroke={stroke}
                 strokeWidth={sw}
+                draggable={!!onMove}
+                onDragEnd={(e) => {
+                  // Rect staat op de linkerbovenhoek; terugrekenen naar het midden.
+                  const p = e.target.absolutePosition();
+                  const m = screenToMeters({ x: p.x + sz / 2, y: p.y + sz / 2 }, view);
+                  onMove?.(c.id, m.x, m.y);
+                }}
                 onClick={() => onSelect(c.id)}
                 onTap={() => onSelect(c.id)}
               />

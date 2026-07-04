@@ -2,12 +2,11 @@
 
 // Elektra-laag. Markers met constante schermgrootte, korte code + hoogtelabel.
 
-import { Fragment } from "react";
-import { Layer, Circle, Rect, Label, Tag, Text, Line } from "react-konva";
+import { Layer, Circle, Rect, Label, Tag, Text, Line, Group } from "react-konva";
 import type { ElectricalItem } from "@/lib/domain/types";
 import { ELECTRICAL_CODE } from "@/lib/domain/constants";
 import { formatHeight } from "@/lib/format";
-import { metersToScreen, type ViewState } from "./viewport";
+import { metersToScreen, screenToMeters, type ViewState } from "./viewport";
 
 const CODE = ELECTRICAL_CODE;
 
@@ -16,9 +15,10 @@ interface Props {
   items: ElectricalItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onMove?: (id: string, x: number, y: number) => void;
 }
 
-export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
+export function ElectricalLayer({ view, items, selectedId, onSelect, onMove }: Props) {
   const byId = new Map(items.map((it) => [it.id, it]));
 
   // Schakelaar → lichtpunt verbindingen (stippellijn), op basis van linkedIds.
@@ -51,17 +51,28 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
         const p = metersToScreen(it.position, view);
         const selected = it.id === selectedId;
         const r = 11;
+        // Groep op het middelpunt; kinderen relatief, zodat het geheel
+        // versleepbaar is en onDragEnd direct de nieuwe positie oplevert.
         return (
-          <Fragment key={it.id}>
+          <Group
+            key={it.id}
+            x={p.x}
+            y={p.y}
+            draggable={!!onMove}
+            onDragEnd={(e) => {
+              const m = screenToMeters(e.target.absolutePosition(), view);
+              onMove?.(it.id, m.x, m.y);
+            }}
+          >
             {selected && (
-              <Circle x={p.x} y={p.y} radius={r + 5} fill="#fb923c" opacity={0.5} listening={false} />
+              <Circle x={0} y={0} radius={r + 5} fill="#fb923c" opacity={0.5} listening={false} />
             )}
             {it.type === "switch" || it.type === "panel" ? (
               <Rect
                 id={it.id}
                 name="electrical"
-                x={p.x - r}
-                y={p.y - r}
+                x={-r}
+                y={-r}
                 width={r * 2}
                 height={r * 2}
                 cornerRadius={4}
@@ -73,8 +84,8 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
               <Circle
                 id={it.id}
                 name="electrical"
-                x={p.x}
-                y={p.y}
+                x={0}
+                y={0}
                 radius={r}
                 fill="#1d4ed8"
                 onClick={() => onSelect(it.id)}
@@ -83,8 +94,8 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
             )}
             <Text
               text={CODE[it.type]}
-              x={p.x - r}
-              y={p.y - 6}
+              x={-r}
+              y={-6}
               width={r * 2}
               align="center"
               fontSize={11}
@@ -93,7 +104,7 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
               fill="#ffffff"
               listening={false}
             />
-            <Label x={p.x} y={p.y + r + 2} listening={false}>
+            <Label x={0} y={r + 2} listening={false}>
               <Tag fill="#e8effc" cornerRadius={2} />
               <Text
                 text={formatHeight(it.heightZ)}
@@ -103,7 +114,7 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
                 padding={2}
               />
             </Label>
-          </Fragment>
+          </Group>
         );
       })}
     </Layer>

@@ -233,7 +233,7 @@ export const DEFAULT_PHASES: PhaseTemplate[] = [
 // Standaard verdiepingen bij een nieuw project.
 export const DEFAULT_LEVELS: { name: string; elevation: number; height: number; order: number }[] = [
   { name: "Begane grond", elevation: 0, height: 2.6, order: 1 },
-  { name: "Verdieping", elevation: 2.8, height: 2.5, order: 2 },
+  { name: "Verdieping", elevation: 2.8, height: 2.6, order: 2 },
 ];
 
 export const KOSTEN_CATEGORIEEN = [

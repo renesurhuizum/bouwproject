@@ -6,7 +6,7 @@ import type { Room, Wall, Level } from "@/lib/domain/types";
 import { polygonArea, polygonCentroid } from "@/lib/geometry";
 import { formatArea } from "@/lib/format";
 import { validateRooms } from "@/lib/validation";
-import { metersToScreen, type ViewState } from "./viewport";
+import { metersToScreen, metersToPx, type ViewState } from "./viewport";
 
 export type RoomPhaseStatus = "todo" | "in-progress" | "done";
 
@@ -69,7 +69,7 @@ function StaircaseLines({
   const h = maxY - minY;
 
   // Trede-hoogte in pixels (~21 cm)
-  const treadPx = Math.max(8, 0.21 * view.scale);
+  const treadPx = Math.max(8, metersToPx(0.21, view));
   const lines: number[][] = [];
 
   if (h >= w) {
