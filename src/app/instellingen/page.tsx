@@ -8,6 +8,7 @@ import { Download, Upload, RotateCcw, Compass, Check } from "lucide-react";
 import { useProject } from "@/lib/hooks";
 import { update } from "@/lib/db/repo";
 import { getDB } from "@/lib/db/db";
+import { useDialog } from "@/components/app-shell/Dialog";
 
 interface Backup {
   app: "bouwproject";
@@ -38,6 +39,7 @@ const BLOB_FIELDS: Record<string, string[] | undefined> = {
 
 export default function InstellingenPage() {
   const project = useProject();
+  const dialog = useDialog();
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -111,15 +113,16 @@ export default function InstellingenPage() {
       const text = await file.text();
       const backup = JSON.parse(text) as Backup;
       if (backup.app !== "bouwproject" || !backup.data) {
-        alert("Dit bestand is geen geldige bouwproject-backup.");
+        dialog.notify("Dit bestand is geen geldige bouwproject-backup.", "error");
         return;
       }
-      if (
-        !confirm(
-          "Importeren overschrijft alle huidige projectdata met de backup. Doorgaan?",
-        )
-      )
-        return;
+      const ok = await dialog.confirm({
+        title: "Backup importeren",
+        message: "Importeren overschrijft alle huidige projectdata met de backup. Doorgaan?",
+        confirmLabel: "Importeren",
+        danger: true,
+      });
+      if (!ok) return;
 
       const db = getDB();
       for (const table of db.tables) {
@@ -141,10 +144,10 @@ export default function InstellingenPage() {
         await table.clear();
         if (restored.length) await table.bulkPut(restored);
       }
-      alert("Backup hersteld. De pagina wordt herladen.");
-      location.reload();
+      dialog.notify("Backup hersteld — de pagina wordt herladen…");
+      setTimeout(() => location.reload(), 1200);
     } catch (e) {
-      alert("Importeren mislukt: " + (e as Error).message);
+      dialog.notify("Importeren mislukt: " + (e as Error).message, "error");
     } finally {
       setBusy(null);
       if (fileRef.current) fileRef.current.value = "";
@@ -152,13 +155,20 @@ export default function InstellingenPage() {
   }
 
   async function resetProject() {
-    if (
-      !confirm(
-        "Weet je het zeker? Dit verwijdert ALLE projectdata definitief van dit apparaat.",
-      )
-    )
-      return;
-    if (!confirm("Laatste waarschuwing: dit kan niet ongedaan worden gemaakt.")) return;
+    const eerste = await dialog.confirm({
+      title: "Project resetten",
+      message: "Weet je het zeker? Dit verwijdert ALLE projectdata definitief van dit apparaat.",
+      confirmLabel: "Verwijderen",
+      danger: true,
+    });
+    if (!eerste) return;
+    const tweede = await dialog.confirm({
+      title: "Laatste waarschuwing",
+      message: "Dit kan niet ongedaan worden gemaakt.",
+      confirmLabel: "Definitief verwijderen",
+      danger: true,
+    });
+    if (!tweede) return;
     setBusy("reset");
     try {
       const db = getDB();
@@ -343,6 +353,7 @@ export default function InstellingenPage() {
           </button>
         </section>
       </div>
+      {dialog.element}
     </div>
   );
 }

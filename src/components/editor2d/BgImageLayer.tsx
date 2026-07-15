@@ -47,7 +47,7 @@ export function BgImageLayer({ levelId, view }: Props) {
   const screenH = img.naturalHeight * mPerPx * BASE_PPM * view.scale;
 
   return (
-    <Layer>
+    <Layer listening={false}>
       <KonvaImage
         image={img}
         x={screenPos.x}

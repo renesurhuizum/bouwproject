@@ -6,7 +6,7 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import * as THREE from "three";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, invalidate } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, Grid, Sky, TransformControls } from "@react-three/drei";
 import { sunDirection } from "@/lib/sunPosition";
@@ -1447,6 +1447,9 @@ export function Scene3D() {
     if (!gl) return;
     gl.localClippingEnabled = clipEnabled;
     gl.clippingPlanes = clipEnabled ? [new THREE.Plane(new THREE.Vector3(-1, 0, 0), clipX)] : [];
+    // Mutatie buiten React om: onder frameloop="demand" expliciet een
+    // nieuw frame aanvragen, anders blijft het beeld staan.
+    invalidate();
   }, [clipEnabled, clipX]);
 
   const selectedFurnitureId =
@@ -1506,6 +1509,10 @@ export function Scene3D() {
     <div className="relative h-full w-full">
       <Canvas
         shadows
+        // Render alleen bij wijzigingen (batterij/warmte op tablet); de
+        // walkthrough beweegt per frame en heeft de continue loop nodig.
+        frameloop={walkMode ? "always" : "demand"}
+        dpr={[1, 2]}
         camera={{
           position: [center.x + maxElev, maxElev * 0.9, center.y + maxElev],
           fov: walkMode ? 75 : 50,
