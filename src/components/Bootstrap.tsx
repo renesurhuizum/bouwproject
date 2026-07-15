@@ -15,6 +15,9 @@ export function Bootstrap({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    // Vraag persistente opslag aan zodat de browser IndexedDB niet mag
+    // wissen bij schijfruimtedruk (fire-and-forget; weigeren is oké).
+    navigator.storage?.persist?.().catch(() => {});
     (async () => {
       const project = await ensureSeed();
       // Kies een standaard verdieping als er nog geen actieve is.

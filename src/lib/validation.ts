@@ -97,8 +97,13 @@ export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[]
     if (room.polygon.length < 3) continue;
     const area = polygonArea(room.polygon);
 
-    // Bouwbesluit 2012 - woonruimtes
-    if (isFuncMatch(room, FUNC_WOONRUIMTE)) {
+    // Bouwbesluit 2012 - woonruimtes. Badkamer/toilet eerst uitsluiten:
+    // "badkamer" bevat "kamer" en zou anders ook als woonruimte tellen.
+    if (
+      isFuncMatch(room, FUNC_WOONRUIMTE) &&
+      !isFuncMatch(room, FUNC_BADKAMER) &&
+      !isFuncMatch(room, FUNC_TOILET)
+    ) {
       if (area < 7.5) {
         issues.push({
           severity: "warn",

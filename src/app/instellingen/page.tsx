@@ -3,20 +3,11 @@
 // Projectinstellingen: naam, omschrijving, noordrichting, startdatum
 // en data-beheer (backup downloaden / importeren / project resetten).
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, Upload, RotateCcw, Compass, Check } from "lucide-react";
 import { useProject } from "@/lib/hooks";
 import { update } from "@/lib/db/repo";
-import { getDB, type BouwDB } from "@/lib/db/db";
-
-// Tabellen die in de backup mee gaan (volgorde = importvolgorde).
-const TABLES = [
-  "projects", "levels", "walls", "openings", "rooms",
-  "electrical", "plumbing", "hvac", "phases", "tasks",
-  "budget", "expenses", "materials", "photos", "furniture",
-] as const;
-
-type BackupTable = (typeof TABLES)[number];
+import { getDB } from "@/lib/db/db";
 
 interface Backup {
   app: "bouwproject";
@@ -40,7 +31,7 @@ async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   return res.blob();
 }
 
-const BLOB_FIELDS: Partial<Record<BackupTable, string[]>> = {
+const BLOB_FIELDS: Record<string, string[] | undefined> = {
   photos: ["blob"],
   levels: ["bgImageBlob"],
 };
@@ -50,6 +41,14 @@ export default function InstellingenPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [persisted, setPersisted] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    navigator.storage
+      ?.persisted?.()
+      .then((v) => setPersisted(v))
+      .catch(() => setPersisted(null));
+  }, []);
 
   function flashSaved() {
     setSaved(true);
@@ -67,23 +66,29 @@ export default function InstellingenPage() {
     try {
       const db = getDB();
       const data: Record<string, unknown[]> = {};
-      for (const t of TABLES) {
-        const rows = (await (db[t as keyof BouwDB] as unknown as { toArray(): Promise<unknown[]> }).toArray());
-        const blobFields = BLOB_FIELDS[t];
-        if (blobFields) {
-          for (const row of rows as Record<string, unknown>[]) {
-            for (const f of blobFields) {
-              if (row[f] instanceof Blob) {
-                row[f] = { __blob: await blobToDataUrl(row[f] as Blob) };
-              }
-            }
-          }
-        }
-        data[t] = rows;
+      // Tabellen komen uit het Dexie-schema zelf, zodat stores uit latere
+      // migraties automatisch in de backup meegaan.
+      for (const table of db.tables) {
+        const rows = (await table.toArray()) as Record<string, unknown>[];
+        const blobFields = BLOB_FIELDS[table.name];
+        data[table.name] = blobFields
+          ? await Promise.all(
+              rows.map(async (row) => {
+                // Serialiseer naar een kopie; muteer de live rijen niet.
+                const copy: Record<string, unknown> = { ...row };
+                for (const f of blobFields) {
+                  if (copy[f] instanceof Blob) {
+                    copy[f] = { __blob: await blobToDataUrl(copy[f] as Blob) };
+                  }
+                }
+                return copy;
+              }),
+            )
+          : rows;
       }
       const backup: Backup = {
         app: "bouwproject",
-        version: 2,
+        version: 3,
         exportedAt: new Date().toISOString(),
         data,
       };
@@ -117,25 +122,24 @@ export default function InstellingenPage() {
         return;
 
       const db = getDB();
-      for (const t of TABLES) {
-        const rows = (backup.data[t] ?? []) as Record<string, unknown>[];
-        const blobFields = BLOB_FIELDS[t];
-        if (blobFields) {
-          for (const row of rows) {
+      for (const table of db.tables) {
+        const rows = (backup.data[table.name] ?? []) as Record<string, unknown>[];
+        const blobFields = BLOB_FIELDS[table.name];
+        const restored: Record<string, unknown>[] = [];
+        for (const row of rows) {
+          const copy: Record<string, unknown> = { ...row };
+          if (blobFields) {
             for (const f of blobFields) {
-              const v = row[f] as { __blob?: string } | undefined;
+              const v = copy[f] as { __blob?: string } | undefined;
               if (v && typeof v === "object" && v.__blob) {
-                row[f] = await dataUrlToBlob(v.__blob);
+                copy[f] = await dataUrlToBlob(v.__blob);
               }
             }
           }
+          restored.push(copy);
         }
-        const table = db[t as keyof BouwDB] as unknown as {
-          clear(): Promise<void>;
-          bulkPut(items: unknown[]): Promise<unknown>;
-        };
         await table.clear();
-        if (rows.length) await table.bulkPut(rows);
+        if (restored.length) await table.bulkPut(restored);
       }
       alert("Backup hersteld. De pagina wordt herladen.");
       location.reload();
@@ -158,9 +162,7 @@ export default function InstellingenPage() {
     setBusy("reset");
     try {
       const db = getDB();
-      for (const t of TABLES) {
-        await (db[t as keyof BouwDB] as unknown as { clear(): Promise<void> }).clear();
-      }
+      for (const table of db.tables) await table.clear();
       location.reload();
     } finally {
       setBusy(null);
@@ -292,6 +294,13 @@ export default function InstellingenPage() {
           <p className="text-[11px] text-ink-400">
             Alle data staat lokaal op dit apparaat. Maak regelmatig een backup.
           </p>
+          {persisted !== null && (
+            <p className={`text-[11px] ${persisted ? "text-ok" : "text-ink-400"}`}>
+              {persisted
+                ? "Opslag is beschermd: de browser mag deze data niet automatisch wissen."
+                : "Opslag is nog niet beschermd — de browser mag lokale data wissen bij ruimtegebrek. Een backup is extra belangrijk."}
+            </p>
+          )}
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
               onClick={downloadBackup}
