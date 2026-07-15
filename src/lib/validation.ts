@@ -1,5 +1,9 @@
-// NEN 1010, NEN 2580 en Bouwbesluit 2012 validatie-regels.
-// Geeft waarschuwingen + fouten terug als leesbare meldingen.
+// NEN 1010, NEN 2580 en Bbl-validatieregels (Besluit bouwwerken leefomgeving,
+// de opvolger van het Bouwbesluit 2012 sinds 1-1-2024).
+// Geeft waarschuwingen + fouten terug als leesbare meldingen. Het Bbl kent
+// aparte niveaus per situatie: nieuwbouw, bestaande bouw en verbouw; bij
+// verbouw geldt doorgaans het "rechtens verkregen niveau" (bestaand mag
+// blijven). De meldingen benoemen daarom het niveau waar dat relevant is.
 
 import type {
   ElectricalItem,
@@ -79,7 +83,7 @@ export function validateWalls(walls: Wall[]): ValidationIssue[] {
   return issues;
 }
 
-// ── Bouwbesluit 2012 ruimte-controles ─────────────────────────────────────────
+// ── Bbl ruimte-controles ─────────────────────────────────────────────────────
 
 const FUNC_WOONRUIMTE = ["woonkamer", "slaapkamer", "kamer", "woon", "slaap", "bedroom", "living"];
 const FUNC_BADKAMER = ["badkamer", "bathroom", "bad", "douche"];
@@ -97,7 +101,7 @@ export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[]
     if (room.polygon.length < 3) continue;
     const area = polygonArea(room.polygon);
 
-    // Bouwbesluit 2012 - woonruimtes. Badkamer/toilet eerst uitsluiten:
+    // Bbl - verblijfsruimtes. Badkamer/toilet eerst uitsluiten:
     // "badkamer" bevat "kamer" en zou anders ook als woonruimte tellen.
     if (
       isFuncMatch(room, FUNC_WOONRUIMTE) &&
@@ -107,7 +111,7 @@ export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[]
       if (area < 7.5) {
         issues.push({
           severity: "warn",
-          message: `"${room.name}" is ${area.toFixed(1)} m² — Bouwbesluit vereist minimaal 7,5 m² voor woonruimte`,
+          message: `"${room.name}" is ${area.toFixed(1)} m² — Bbl-nieuwbouweis is min. 7,5 m² verblijfsruimte (bij verbouw geldt het rechtens verkregen niveau)`,
           entityId: room.id,
         });
       }
@@ -118,7 +122,7 @@ export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[]
       if (area < 1.6) {
         issues.push({
           severity: "warn",
-          message: `"${room.name}" is ${area.toFixed(1)} m² — badkamer moet minimaal 1,6 m² zijn (Bouwbesluit)`,
+          message: `"${room.name}" is ${area.toFixed(1)} m² — badkamer minimaal 1,6 m² (Bbl-nieuwbouweis)`,
           entityId: room.id,
         });
       }
@@ -129,7 +133,7 @@ export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[]
       if (area < 0.9 * 1.2) {
         issues.push({
           severity: "warn",
-          message: `"${room.name}" is ${area.toFixed(1)} m² — toiletruimte minimaal 0,9×1,2 m (Bouwbesluit)`,
+          message: `"${room.name}" is ${area.toFixed(1)} m² — toiletruimte minimaal 0,9×1,2 m (Bbl-nieuwbouweis)`,
           entityId: room.id,
         });
       }
@@ -141,7 +145,7 @@ export function validateRooms(rooms: Room[], levels: Level[]): ValidationIssue[]
     if (level.height < 2.6) {
       issues.push({
         severity: "warn",
-        message: `Verdieping "${level.name}": hoogte ${(level.height * 100).toFixed(0)} cm — Bouwbesluit vereist 260 cm voor woonruimtes`,
+        message: `Verdieping "${level.name}": hoogte ${(level.height * 100).toFixed(0)} cm — Bbl-nieuwbouweis is 260 cm; bij verbouw mag de bestaande hoogte blijven (rechtens verkregen niveau)`,
         entityId: level.id,
       });
     }
@@ -232,7 +236,7 @@ export function validateRoomServices(
         if (!hasPipe("drain")) add("warn", "afvoerleiding ontbreekt nog");
       }
       if (!hasVent) {
-        add("warn", "badkamer vereist mechanische ventilatie (Bouwbesluit, min. 14 dm³/s)");
+        add("warn", "badkamer vereist mechanische ventilatie (Bbl, min. 14 dm³/s)");
       }
       if (hasSocket) {
         add(
@@ -250,7 +254,7 @@ export function validateRoomServices(
         if (!hasPipe("drain")) add("warn", "afvoer (110 mm standleiding) ontbreekt nog");
       }
       if (!hasVent) {
-        add("info", "toiletruimte heeft ventilatie nodig (Bouwbesluit, min. 7 dm³/s)");
+        add("info", "toiletruimte heeft ventilatie nodig (Bbl, min. 7 dm³/s)");
       }
     }
 

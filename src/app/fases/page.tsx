@@ -2,21 +2,30 @@
 
 // Fasering: de juiste volgorde met afhankelijkheden + taken per fase.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Lock, Check, Plus, ListPlus, ListChecks, CalendarRange } from "lucide-react";
-import { useProject, usePhases, useTasks, useProjectRooms } from "@/lib/hooks";
+import { useProject, usePhases, useTasks, useProjectRooms, useBudget, useExpenses } from "@/lib/hooks";
 import { analyzePhases, type PhaseStatusInfo } from "@/lib/phases";
+import { analyzePhaseCosts, type PhaseCost } from "@/lib/costAnalysis";
 import { create, update, remove } from "@/lib/db/repo";
 import type { Phase, PhaseStatus, Room, TaskItem } from "@/lib/domain/types";
 import { PHASE_STATUS_LABEL, PHASE_TASK_TEMPLATES } from "@/lib/domain/constants";
 import { GanttChart } from "@/components/fases/GanttChart";
+import { PhotoSection } from "@/components/PhotoSection";
+import { formatEuro } from "@/lib/format";
 
 export default function FasesPage() {
   const project = useProject();
   const phases = usePhases(project?.id) ?? [];
   const tasks = useTasks(project?.id) ?? [];
   const rooms = useProjectRooms(project?.id) ?? [];
+  const budget = useBudget(project?.id) ?? [];
+  const expenses = useExpenses(project?.id) ?? [];
   const analysis = analyzePhases(phases);
+  const costByPhase = useMemo(
+    () => new Map(analyzePhaseCosts(phases, budget, expenses).map((c) => [c.phase.id, c])),
+    [phases, budget, expenses],
+  );
   const [tab, setTab] = useState<"taken" | "tijdlijn">("taken");
 
   const hasAnyTasks = tasks.length > 0;
@@ -88,6 +97,7 @@ export default function FasesPage() {
                 tasks={tasks.filter((t) => t.phaseId === info.phase.id)}
                 projectId={project?.id ?? ""}
                 rooms={rooms}
+                cost={costByPhase.get(info.phase.id)}
               />
             ))}
           </>
@@ -118,11 +128,13 @@ function PhaseCard({
   tasks,
   projectId,
   rooms,
+  cost,
 }: {
   info: PhaseStatusInfo;
   tasks: TaskItem[];
   projectId: string;
   rooms: Room[];
+  cost?: PhaseCost;
 }) {
   const { phase, blocked, blockedBy, ready } = info;
   const [newTask, setNewTask] = useState("");
@@ -169,11 +181,27 @@ function PhaseCard({
               {String(phase.order).padStart(2, "0")}
             </span>
             <h2 className="text-base font-semibold text-ink-900">{phase.name}</h2>
-            {tasks.length > 0 && (
-              <span className="tabular ml-auto rounded-full bg-paper-sunken px-2 py-0.5 text-[10px] text-ink-500">
-                {doneCount}/{tasks.length}
-              </span>
-            )}
+            <span className="ml-auto flex shrink-0 items-center gap-1.5">
+              {cost && (cost.begroot > 0 || cost.besteed > 0) && (
+                <span
+                  className={`tabular rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    cost.signal === "over"
+                      ? "bg-danger text-white"
+                      : cost.signal === "bijna"
+                        ? "bg-warn text-white"
+                        : "bg-paper-sunken text-ink-500"
+                  }`}
+                  title="Besteed / begroot voor deze fase"
+                >
+                  {formatEuro(cost.besteed)} / {formatEuro(cost.begroot)}
+                </span>
+              )}
+              {tasks.length > 0 && (
+                <span className="tabular rounded-full bg-paper-sunken px-2 py-0.5 text-[10px] text-ink-500">
+                  {doneCount}/{tasks.length}
+                </span>
+              )}
+            </span>
           </div>
           {phase.note && <p className="mt-0.5 text-xs text-ink-500">{phase.note}</p>}
 
@@ -290,6 +318,11 @@ function PhaseCard({
         >
           <Plus size={16} />
         </button>
+      </div>
+
+      {/* Voortgangsfoto's van deze fase */}
+      <div className="mt-3 border-t border-line/60 pt-3">
+        <PhotoSection projectId={projectId} link={{ field: "phaseId", id: phase.id }} />
       </div>
     </section>
   );

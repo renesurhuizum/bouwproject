@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Camera, Trash2, X, FlipHorizontal2, FlipVertical2, Copy } from "lucide-react";
+import { Trash2, X, FlipHorizontal2, FlipVertical2, Copy } from "lucide-react";
+import { PhotoSection } from "@/components/PhotoSection";
 import { getDB } from "@/lib/db/db";
 import { create, update, remove } from "@/lib/db/repo";
 import type { TableName } from "@/lib/db/repo";
@@ -60,8 +61,6 @@ export function SelectionPanel() {
   const setClipboard = useEditor((s) => s.setClipboard);
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const project = useProject();
-  const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const furnitureItems = useFurniture(activeLevelId) ?? [];
   const selectedFurniture = furnitureItems.find((f) => f.id === selection?.id) ?? null;
@@ -73,26 +72,6 @@ export function SelectionPanel() {
     [activeLevelId],
     [],
   );
-
-  const photos = useLiveQuery(
-    async () => {
-      if (selection?.kind !== "room") return [];
-      const rows = await getDB().photos.where("roomId").equals(selection.id).toArray();
-      return rows.filter((p) => !p.deleted);
-    },
-    [selection?.kind, selection?.id],
-    [] as Photo[],
-  );
-
-  async function addPhoto(file: File) {
-    if (!project?.id || !selection?.id) return;
-    await create<Photo>("photos", {
-      projectId: project.id,
-      roomId: selection.id,
-      blob: file,
-      caption: file.name,
-    });
-  }
 
   const wall = useLiveQuery(
     async () => (selection?.kind === "wall" ? await getDB().walls.get(selection.id) : null),
@@ -605,35 +584,10 @@ export function SelectionPanel() {
             <DeleteButton onClick={() => removeAnd("rooms", room.id, () => select(null))} />
 
             {/* Foto's sectie */}
-            <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-xs text-ink-500">Foto&apos;s</span>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1 rounded-md bg-paper-sunken px-2 py-1 text-[11px] text-ink-700 hover:bg-line"
-                >
-                  <Camera size={11} /> Toevoegen
-                </button>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void addPhoto(file);
-                  e.target.value = "";
-                }}
-              />
-              {photos && photos.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {photos.map((ph) => (
-                    <PhotoThumb key={ph.id} photo={ph} onClick={() => setLightboxPhoto(ph)} />
-                  ))}
-                </div>
-              )}
-            </div>
+            <PhotoSection
+              projectId={project?.id ?? ""}
+              link={{ field: "roomId", id: room.id }}
+            />
           </div>
         )}
 
@@ -860,10 +814,6 @@ export function SelectionPanel() {
           </div>
         )}
 
-        {lightboxPhoto && (
-          <Lightbox photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />
-        )}
-
         {selection?.kind === "furniture" && selectedFurniture && (
           <div className="space-y-2.5">
             <Row label="Rotatie">
@@ -1082,56 +1032,6 @@ function WallLengthField({ wall }: { wall: Wall }) {
         className="tabular w-20 rounded-md border border-line bg-paper px-2 py-1 text-right text-xs text-ink-900"
       />
       <span className="text-[11px] text-ink-500">cm</span>
-    </div>
-  );
-}
-
-function PhotoThumb({ photo, onClick }: { photo: Photo; onClick: () => void }) {
-  // Object-URL tijdens render aanmaken; cleanup via effect (geen setState-cascade).
-  const src = useMemo(
-    () => (photo.blob ? URL.createObjectURL(photo.blob) : null),
-    [photo.blob],
-  );
-  useEffect(() => {
-    return () => {
-      if (src) URL.revokeObjectURL(src);
-    };
-  }, [src]);
-  if (!src) return null;
-  return (
-    <button
-      onClick={onClick}
-      className="h-14 w-14 overflow-hidden rounded-lg border border-line bg-paper-sunken"
-    >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={photo.caption ?? ""} className="h-full w-full object-cover" />
-    </button>
-  );
-}
-
-function Lightbox({ photo, onClose }: { photo: Photo; onClose: () => void }) {
-  const src = useMemo(
-    () => (photo.blob ? URL.createObjectURL(photo.blob) : null),
-    [photo.blob],
-  );
-  useEffect(() => {
-    return () => {
-      if (src) URL.revokeObjectURL(src);
-    };
-  }, [src]);
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-      onClick={onClose}
-    >
-      {src && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={src}
-          alt={photo.caption ?? ""}
-          className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
-        />
-      )}
     </div>
   );
 }

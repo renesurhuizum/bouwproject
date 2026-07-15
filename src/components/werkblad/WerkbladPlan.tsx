@@ -197,6 +197,7 @@ interface Props {
   furniture?: Furniture[];
   northDegrees?: number;
   maxWidth?: number;
+  ppm?: number; // vaste pixels-per-meter voor maatvaste export; gaat vóór maxWidth
   openingCodes?: Map<string, string>; // kozijnstaat-referenties (D01/R01) bij openingen
   svgId?: string; // voor PNG-export
 }
@@ -210,6 +211,7 @@ export function WerkbladPlan({
   furniture = [],
   northDegrees = 0,
   maxWidth = 700,
+  ppm,
   openingCodes,
   svgId,
 }: Props) {
@@ -224,7 +226,7 @@ export function WerkbladPlan({
   const b = bounds(pts);
   const wM = Math.max(0.1, b.max.x - b.min.x);
   const hM = Math.max(0.1, b.max.y - b.min.y);
-  const scale = maxWidth / wM;
+  const scale = ppm ?? maxWidth / wM;
   const PAD = 30;
   const DIM = 30;    // ruimte voor maatlijnen (boven + rechts)
   const FOOT = 70;   // ruimte voor schaalbalk + legenda onderaan
