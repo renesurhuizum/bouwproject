@@ -4,10 +4,13 @@
 
 import Link from "next/link";
 import { Suspense } from "react";
-import { LayoutTemplate, Box, Receipt, ListChecks, FileText, Frame, Settings, ArrowRight, TrendingUp } from "lucide-react";
-import { useProject, usePhases, useExpenses, useBudget } from "@/lib/hooks";
+import { FileText, ArrowRight, TrendingUp, Pencil } from "lucide-react";
+import { useProject, usePhases, useExpenses, useBudget, useLevels, useWalls, useRooms } from "@/lib/hooks";
 import { analyzePhases, phaseProgress } from "@/lib/phases";
 import { formatEuro } from "@/lib/format";
+import { bounds } from "@/lib/geometry";
+import { WALL_STATUS_COLOR } from "@/lib/domain/constants";
+import type { Room, Wall } from "@/lib/domain/types";
 
 export default function Home() {
   return (
@@ -24,6 +27,10 @@ function DashboardContent() {
   const phases = usePhases(project?.id) ?? [];
   const expenses = useExpenses(project?.id) ?? [];
   const budget = useBudget(project?.id) ?? [];
+  const levels = useLevels(project?.id) ?? [];
+  const groundLevelId = levels[0]?.id ?? null;
+  const walls = useWalls(groundLevelId) ?? [];
+  const rooms = useRooms(groundLevelId) ?? [];
 
   const analysis = analyzePhases(phases);
   const progress = phaseProgress(phases);
@@ -31,6 +38,7 @@ function DashboardContent() {
   const spent = expenses.reduce((s, e) => s + e.amount, 0);
   const budgeted = budget.reduce((s, b) => s + b.amount, 0);
   const budgetRatio = budgeted > 0 ? spent / budgeted : null;
+  const overBudget = budgeted > 0 && spent > budgeted;
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-4 pb-24">
@@ -81,20 +89,44 @@ function DashboardContent() {
         </div>
       </section>
 
-      {/* Snelle acties — icoon-grid */}
-      <section aria-label="Snelle acties">
-        <h2 className="mb-2 px-0.5 text-[11px] font-semibold uppercase tracking-widest text-ink-400">
-          Ga naar
-        </h2>
-        <div className="grid grid-cols-4 gap-2 sm:grid-cols-4">
-          <QuickLink href="/plattegrond" label="Plattegrond" icon={LayoutTemplate} />
-          <QuickLink href="/3d" label="3D" icon={Box} />
-          <QuickLink href="/aanzichten" label="Aanzichten" icon={Frame} />
-          <QuickLink href="/fases" label="Fases" icon={ListChecks} />
-          <QuickLink href="/kosten" label="Kosten" icon={Receipt} />
-          <QuickLink href="/werkblad" label="Werkblad" icon={FileText} />
-          <QuickLink href="/instellingen" label="Instellingen" icon={Settings} />
+      {/* Jouw plattegrond — mini-preview van de digital twin */}
+      <section className="overflow-hidden rounded-xl border border-line bg-paper-raised shadow-sm">
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+          <h2 className="text-xs font-bold uppercase tracking-widest text-ink-500">
+            Plattegrond
+          </h2>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/werkblad"
+              className="flex items-center gap-1 text-[11px] font-semibold text-ink-500 hover:text-ink-900"
+            >
+              <FileText size={12} /> Werkblad
+            </Link>
+            <Link
+              href="/plattegrond"
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline"
+            >
+              <Pencil size={12} /> Bewerken
+            </Link>
+          </div>
         </div>
+        {walls.length > 0 ? (
+          <Link href="/plattegrond" className="block bg-white p-3 hover:bg-paper" aria-label="Open de plattegrond-editor">
+            <MiniPlan walls={walls} rooms={rooms} />
+          </Link>
+        ) : (
+          <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+            <p className="text-sm text-ink-400">
+              Nog geen plattegrond — teken hem zelf of importeer een foto/scan.
+            </p>
+            <Link
+              href="/plattegrond"
+              className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-white"
+            >
+              Teken of importeer je plattegrond
+            </Link>
+          </div>
+        )}
       </section>
 
       {/* Volgende stap */}
@@ -129,8 +161,13 @@ function DashboardContent() {
         <StatCard
           label="Uitgegeven"
           value={formatEuro(spent)}
-          accent
-          sub={budgetRatio != null ? `${Math.round(budgetRatio * 100)}% van budget` : undefined}
+          accent={!overBudget}
+          danger={overBudget}
+          sub={
+            budgetRatio != null
+              ? `${Math.round(budgetRatio * 100)}% van budget${overBudget ? " — over budget" : ""}`
+              : undefined
+          }
         />
         <StatCard
           label="Begroot"
@@ -181,23 +218,43 @@ function DashboardContent() {
 
 // --- Sub-components ---
 
-function QuickLink({
-  href,
-  label,
-  icon: Icon,
-}: {
-  href: string;
-  label: string;
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
-}) {
+// Compacte plattegrond-preview: alleen muren + ruimtevullingen, geen maatvoering.
+function MiniPlan({ walls, rooms }: { walls: Wall[]; rooms: Room[] }) {
+  const pts = walls.flatMap((w) => [w.start, w.end]);
+  if (pts.length === 0) return null;
+  const b = bounds(pts);
+  const wM = Math.max(0.1, b.max.x - b.min.x);
+  const hM = Math.max(0.1, b.max.y - b.min.y);
+  const scale = 560 / wM;
+  const PAD = 14;
+  const W = wM * scale + PAD * 2;
+  const H = hM * scale + PAD * 2;
+  const sx = (x: number) => (x - b.min.x) * scale + PAD;
+  const sy = (y: number) => (y - b.min.y) * scale + PAD;
+
   return (
-    <Link
-      href={href}
-      className="group flex flex-col items-center gap-2 rounded-xl border border-line bg-paper-raised py-4 text-[11px] font-semibold text-ink-500 transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:text-accent hover:shadow-sm active:translate-y-0"
-    >
-      <Icon size={22} strokeWidth={1.7} className="transition-colors" />
-      {label}
-    </Link>
+    <svg viewBox={`0 0 ${W} ${H}`} className="mx-auto block max-h-56 w-full">
+      {rooms.map((r) =>
+        r.polygon.length >= 3 ? (
+          <path
+            key={r.id}
+            d={r.polygon.map((p, i) => `${i ? "L" : "M"}${sx(p.x)},${sy(p.y)}`).join(" ") + " Z"}
+            fill="rgba(234,88,12,0.06)"
+            stroke="none"
+          />
+        ) : null,
+      )}
+      {walls.map((w) => (
+        <line
+          key={w.id}
+          x1={sx(w.start.x)} y1={sy(w.start.y)} x2={sx(w.end.x)} y2={sy(w.end.y)}
+          stroke={WALL_STATUS_COLOR[w.status]}
+          strokeWidth={Math.max(2, w.thickness * scale)}
+          strokeLinecap="square"
+          strokeDasharray={w.status === "demolish" ? "6 4" : undefined}
+        />
+      ))}
+    </svg>
   );
 }
 
@@ -205,25 +262,29 @@ function StatCard({
   label,
   value,
   accent,
+  danger,
   sub,
 }: {
   label: string;
   value: string;
   accent?: boolean;
+  danger?: boolean;
   sub?: string;
 }) {
   return (
-    <div className="rounded-xl border border-line bg-paper-raised p-4 shadow-sm">
+    <div className={`rounded-xl border p-4 shadow-sm ${danger ? "border-danger/40 bg-danger/5" : "border-line bg-paper-raised"}`}>
       <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-400">
         {label}
       </div>
       <div
-        className={`tabular mt-1.5 text-2xl font-black leading-none ${accent ? "text-accent" : "text-ink-900"}`}
+        className={`tabular mt-1.5 text-2xl font-black leading-none ${
+          danger ? "text-danger" : accent ? "text-accent" : "text-ink-900"
+        }`}
       >
         {value}
       </div>
       {sub && (
-        <div className="mt-1 text-[11px] text-ink-400">{sub}</div>
+        <div className={`mt-1 text-[11px] ${danger ? "font-medium text-danger" : "text-ink-400"}`}>{sub}</div>
       )}
     </div>
   );

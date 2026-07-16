@@ -84,6 +84,11 @@ export class BouwDB extends Dexie {
     this.version(5).stores({
       sections: "id, levelId, updatedAt, deleted",
     });
+    // v6: foto's per ruimte én per fase — indexen op roomId/phaseId
+    // (roomId werd al gequeryd maar was nooit geïndexeerd).
+    this.version(6).stores({
+      photos: "id, projectId, roomId, phaseId, updatedAt, deleted",
+    });
   }
 }
 

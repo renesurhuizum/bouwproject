@@ -306,6 +306,8 @@ export interface Photo extends Entity {
   caption?: string;
   roomId?: string;
   levelId?: string;
+  phaseId?: string;  // voortgangsfoto gekoppeld aan een renovatiefase
+  takenAt?: string;  // ISO yyyy-mm-dd
 }
 
 // Layer-zichtbaarheid in de editor

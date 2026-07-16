@@ -10,8 +10,9 @@ import { Toolbar } from "@/components/editor2d/Toolbar";
 import { SelectionPanel } from "@/components/editor2d/SelectionPanel";
 import { ComplianceBanner } from "@/components/editor2d/ComplianceBanner";
 import { LevelSwitcher } from "@/components/editor2d/LevelSwitcher";
+import { ImportWizard } from "@/components/editor2d/ImportWizard";
 import { IndelingGenerator } from "@/components/indeling/IndelingGenerator";
-import { useProject } from "@/lib/hooks";
+import { useProject, useLevels } from "@/lib/hooks";
 import { update } from "@/lib/db/repo";
 
 // Konva heeft window nodig → alleen in de browser laden.
@@ -29,10 +30,15 @@ const PlanEditor = dynamic(
 
 export default function PlattegrondPage() {
   const [showGen, setShowGen] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const project = useProject();
+  const levels = useLevels(project?.id) ?? [];
+  const activeLevelId = useEditor((s) => s.activeLevelId);
+  const setTool = useEditor((s) => s.setTool);
+  const activeLevel = levels.find((l) => l.id === activeLevelId) ?? levels[0];
   const phaseOverlay = useEditor((s) => s.phaseOverlay);
   const togglePhaseOverlay = useEditor((s) => s.togglePhaseOverlay);
 
@@ -59,8 +65,8 @@ export default function PlattegrondPage() {
 
   return (
     <div className="absolute inset-0 overflow-hidden">
-      <PlanEditor />
-      <LevelSwitcher />
+      <PlanEditor onImport={() => setShowImport(true)} />
+      <LevelSwitcher onImport={() => setShowImport(true)} />
       <ComplianceBanner />
 
       {/* Onderste bediening: het selectie-paneel stapelt in normale flow bóven
@@ -73,7 +79,8 @@ export default function PlattegrondPage() {
 
       {/* Projectnaam — klikbaar om te bewerken */}
       {project && (
-        <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 px-3 py-2 shadow-lg backdrop-blur">
+        // Op mobiel verborgen: de projectnaam staat daar al in de topbalk.
+        <div className="absolute right-3 top-3 z-10 hidden items-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 px-3 py-2 shadow-lg backdrop-blur sm:flex">
           {editingName ? (
             <input
               ref={inputRef}
@@ -119,6 +126,18 @@ export default function PlattegrondPage() {
       </div>
 
       {showGen && <IndelingGenerator onClose={() => setShowGen(false)} />}
+
+      {showImport && activeLevel && (
+        <ImportWizard
+          levelId={activeLevel.id}
+          levelHeight={activeLevel.height}
+          onClose={(result) => {
+            setShowImport(false);
+            // "Zelf natekenen": zet direct de muur-tool aan zodat je kunt overtrekken.
+            if (result === "draw") setTool("wall");
+          }}
+        />
+      )}
     </div>
   );
 }

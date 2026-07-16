@@ -3,13 +3,14 @@
 // Begroting per fase: begroot vs werkelijk uitgegeven.
 
 import { useMemo, useState } from "react";
-import { Plus, Trash2, Lightbulb, Ruler } from "lucide-react";
+import { Plus, Trash2, Lightbulb, Ruler, TrendingUp } from "lucide-react";
 import { useProject, useBudget, useExpenses, usePhases, useProjectRooms } from "@/lib/hooks";
 import { create, remove } from "@/lib/db/repo";
 import type { BudgetLine } from "@/lib/domain/types";
 import { KOSTEN_CATEGORIEEN } from "@/lib/domain/constants";
 import { formatEuro } from "@/lib/format";
 import { polygonArea } from "@/lib/geometry";
+import { analyzePhaseCosts, forecastProjectCosts, type CostSignal } from "@/lib/costAnalysis";
 
 // NL-renovatie benchmark: gangbare totaalkosten per m² woonoppervlak.
 const BENCHMARK_MIN_PER_M2 = 1000;
@@ -53,14 +54,15 @@ export function Begroting() {
 
   const perM2 = totalArea > 0 ? totals.begroot / totalArea : null;
 
-  // Per fase optellen.
-  const perPhase = useMemo(() => {
-    return phases.map((p) => {
-      const begroot = budget.filter((b) => b.phaseId === p.id).reduce((s, b) => s + b.amount, 0);
-      const besteed = expenses.filter((e) => e.phaseId === p.id).reduce((s, e) => s + e.amount, 0);
-      return { phase: p, begroot, besteed };
-    });
-  }, [phases, budget, expenses]);
+  // Per fase optellen + signalering en eindprognose.
+  const perPhase = useMemo(
+    () => analyzePhaseCosts(phases, budget, expenses),
+    [phases, budget, expenses],
+  );
+  const forecast = useMemo(
+    () => forecastProjectCosts(phases, budget, expenses),
+    [phases, budget, expenses],
+  );
 
   return (
     <div className="space-y-4">
@@ -74,6 +76,23 @@ export function Begroting() {
           good={totals.begroot - totals.besteed >= 0}
         />
       </div>
+
+      {/* Eindprognose: verwachte overschrijding vroeg signaleren */}
+      {forecast.begroot > 0 && forecast.verschil < 0 && (
+        <div className="flex items-start gap-2.5 rounded-card border border-danger/40 bg-danger/10 p-3">
+          <TrendingUp size={16} className="mt-0.5 shrink-0 text-danger" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-ink-900">
+              Verwachte eindstand: <span className="tabular">{formatEuro(forecast.prognose)}</span>{" "}
+              — {formatEuro(-forecast.verschil)} boven budget
+            </p>
+            <p className="mt-0.5 text-[11px] leading-snug text-ink-500">
+              Afgeronde fases tellen op werkelijke kosten; lopende en komende fases op
+              begroot bedrag of hoger als er al meer is uitgegeven.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Onvoorzien-advies: NL-vuistregel is 10–15% van het bouwbudget reserveren */}
       {!hasOnvoorzien && onvoorzienSuggestie > 0 && (
@@ -160,9 +179,7 @@ export function Begroting() {
       <section className="space-y-2">
         {perPhase
           .filter((r) => r.begroot > 0 || r.besteed > 0)
-          .map(({ phase, begroot, besteed }) => {
-            const pct = begroot > 0 ? Math.min(100, (besteed / begroot) * 100) : besteed > 0 ? 100 : 0;
-            const over = besteed > begroot && begroot > 0;
+          .map(({ phase, begroot, besteed, pct, signal }) => {
             return (
               <div key={phase.id} className="rounded-card border border-line bg-paper-raised p-3">
                 <div className="mb-1 flex items-center gap-2">
@@ -171,6 +188,7 @@ export function Begroting() {
                     style={{ background: phase.color ?? "#78716c" }}
                   />
                   <span className="flex-1 text-sm font-medium text-ink-900">{phase.name}</span>
+                  <SignalBadge signal={signal} pct={pct} />
                   <span className="tabular text-xs text-ink-500">
                     {formatEuro(besteed)} / {formatEuro(begroot)}
                   </span>
@@ -178,7 +196,7 @@ export function Begroting() {
                 <div className="h-1.5 overflow-hidden rounded-full bg-paper-sunken">
                   <div
                     className="h-full rounded-full"
-                    style={{ width: `${pct}%`, background: over ? "#dc2626" : "#16a34a" }}
+                    style={{ width: `${Math.min(100, pct)}%`, background: SIGNAL_COLOR[signal] }}
                   />
                 </div>
                 {/* Begrotingsregels van deze fase */}
@@ -209,6 +227,25 @@ export function Begroting() {
         )}
       </section>
     </div>
+  );
+}
+
+const SIGNAL_COLOR: Record<CostSignal, string> = {
+  ok: "#16a34a",
+  bijna: "#d97706",
+  over: "#dc2626",
+};
+
+function SignalBadge({ signal, pct }: { signal: CostSignal; pct: number }) {
+  if (signal === "ok") return null;
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold text-white ${
+        signal === "over" ? "bg-danger" : "bg-warn"
+      }`}
+    >
+      {signal === "over" ? "Over budget" : `${Math.round(pct)}% verbruikt`}
+    </span>
   );
 }
 

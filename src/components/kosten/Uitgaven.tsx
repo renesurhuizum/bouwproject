@@ -2,21 +2,28 @@
 
 // Uitgaven boeken en bekijken, per categorie.
 
-import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
-import { useProject, useExpenses, usePhases } from "@/lib/hooks";
-import { create, remove } from "@/lib/db/repo";
-import type { Expense } from "@/lib/domain/types";
+import { useRef, useState } from "react";
+import { Plus, Trash2, Camera } from "lucide-react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { getDB } from "@/lib/db/db";
+import { useProject, useExpenses, usePhases, useBudget } from "@/lib/hooks";
+import { create, remove, update } from "@/lib/db/repo";
+import type { Expense, Photo } from "@/lib/domain/types";
 import { KOSTEN_CATEGORIEEN } from "@/lib/domain/constants";
 import { formatEuro, formatDate } from "@/lib/format";
+import { PhotoThumb, Lightbox } from "@/components/PhotoSection";
 
 export function Uitgaven() {
   const project = useProject();
   const expenses = useExpenses(project?.id) ?? [];
   const phases = usePhases(project?.id) ?? [];
+  const budget = useBudget(project?.id) ?? [];
   const [open, setOpen] = useState(false);
 
   const total = expenses.reduce((s, e) => s + e.amount, 0);
+  const budgeted = budget.reduce((s, b) => s + b.amount, 0);
+  const overBudget = budgeted > 0 && total > budgeted;
+  const phaseName = new Map(phases.map((p) => [p.id, p.name]));
 
   // Geen handmatige useMemo: React Compiler memoïseert dit zelf en struikelde
   // over de instabiele referentie uit de live query.
@@ -26,9 +33,24 @@ export function Uitgaven() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between rounded-card border border-line bg-paper-raised px-4 py-3">
+      <div
+        className={`flex items-center justify-between rounded-card border px-4 py-3 ${
+          overBudget ? "border-danger/40 bg-danger/5" : "border-line bg-paper-raised"
+        }`}
+      >
         <span className="text-sm text-ink-500">Totaal uitgegeven</span>
-        <span className="tabular text-xl font-bold text-accent">{formatEuro(total)}</span>
+        <div className="text-right">
+          <span className={`tabular text-xl font-bold ${overBudget ? "text-danger" : "text-accent"}`}>
+            {formatEuro(total)}
+          </span>
+          {budgeted > 0 && (
+            <div className={`text-[11px] ${overBudget ? "font-medium text-danger" : "text-ink-400"}`}>
+              {overBudget
+                ? `${formatEuro(total - budgeted)} boven de begroting (${formatEuro(budgeted)})`
+                : `van ${formatEuro(budgeted)} begroot`}
+            </div>
+          )}
+        </div>
       </div>
 
       {open ? (
@@ -81,11 +103,19 @@ export function Uitgaven() {
               <li key={e.id} className="flex items-center gap-3 p-3">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-ink-900">{e.description}</div>
-                  <div className="text-[11px] text-ink-500">
-                    {e.category}
-                    {e.vendor ? ` · ${e.vendor}` : ""} · {formatDate(e.date)}
+                  <div className="flex flex-wrap items-center gap-x-1.5 text-[11px] text-ink-500">
+                    <span>
+                      {e.category}
+                      {e.vendor ? ` · ${e.vendor}` : ""} · {formatDate(e.date)}
+                    </span>
+                    {e.phaseId && phaseName.get(e.phaseId) && (
+                      <span className="rounded-full bg-paper-sunken px-1.5 py-0.5 text-[10px] text-ink-500">
+                        {phaseName.get(e.phaseId)}
+                      </span>
+                    )}
                   </div>
                 </div>
+                <ReceiptCell expense={e} projectId={project?.id ?? ""} />
                 <span className="tabular text-sm font-semibold text-ink-900">
                   {formatEuro(e.amount, true)}
                 </span>
@@ -102,6 +132,69 @@ export function Uitgaven() {
         )}
       </section>
     </div>
+  );
+}
+
+// Bonnetje bij een uitgave: camera-knop → foto in de photos-tabel + koppeling
+// via expense.photoId; thumbnail op de rij met lightbox en verwijderen.
+function ReceiptCell({ expense, projectId }: { expense: Expense; projectId: string }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [showLightbox, setShowLightbox] = useState(false);
+
+  const photo = useLiveQuery(
+    async () => (expense.photoId ? await getDB().photos.get(expense.photoId) : null),
+    [expense.photoId],
+  );
+  const hasPhoto = photo && !photo.deleted && photo.blob;
+
+  async function addReceipt(file: File) {
+    if (!projectId) return;
+    const p = await create<Photo>("photos", {
+      projectId,
+      blob: file,
+      caption: `Bon: ${expense.description}`,
+      takenAt: new Date().toISOString().slice(0, 10),
+    });
+    await update("expenses", expense.id, { photoId: p.id });
+  }
+
+  return (
+    <>
+      {hasPhoto ? (
+        <PhotoThumb photo={photo} onClick={() => setShowLightbox(true)} className="h-9 w-9 shrink-0" />
+      ) : (
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="shrink-0 rounded-lg p-1.5 text-ink-300 hover:bg-paper-sunken hover:text-ink-700"
+          title="Bonnetje toevoegen (foto)"
+          aria-label="Bonnetje toevoegen"
+        >
+          <Camera size={15} />
+        </button>
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void addReceipt(f);
+          e.target.value = "";
+        }}
+      />
+      {showLightbox && hasPhoto && (
+        <Lightbox
+          photo={photo}
+          onClose={() => setShowLightbox(false)}
+          onDelete={() => {
+            void remove("photos", photo.id);
+            void update("expenses", expense.id, { photoId: undefined });
+            setShowLightbox(false);
+          }}
+        />
+      )}
+    </>
   );
 }
 

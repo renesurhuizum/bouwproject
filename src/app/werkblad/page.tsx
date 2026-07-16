@@ -4,9 +4,9 @@
 // Plan (plattegrond + maatvoering), Aanzichten (wand-elevaties) en
 // Specificaties (ruimtes, installaties, hoeveelheidsstaat). Print → "Bewaar als PDF".
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Printer, ArrowLeft, Map as MapIcon, Frame, ListTree, Download, DoorOpen } from "lucide-react";
+import { Printer, ArrowLeft, Map as MapIcon, Frame, ListTree, Download, DoorOpen, FileText } from "lucide-react";
 import {
   useProject,
   useLevels,
@@ -30,6 +30,8 @@ import { computeQuantities } from "@/lib/quantityTakeoff";
 import { polygonArea } from "@/lib/geometry";
 import { buildOpeningSchedule } from "@/lib/openingSchedule";
 import { svgToPngBlob, downloadBlob } from "@/lib/exportImage";
+import { exportWerkbladPdf, exportPpm, type PdfPaper } from "@/lib/exportPdf";
+import { useDialog } from "@/components/app-shell/Dialog";
 import { formatArea, formatHeight } from "@/lib/format";
 import {
   ELECTRICAL_LABEL,
@@ -48,6 +50,7 @@ const TABS: { key: Tab; label: string; icon: typeof MapIcon }[] = [
 ];
 
 const PLAN_SVG_ID = "werkblad-plan-svg";
+const PDF_SVG_ID = "werkblad-plan-svg-pdf";
 const DRAWING_SCALES = [50, 100, 200];
 
 const QTY_CAT_LABEL: Record<string, string> = {
@@ -74,10 +77,17 @@ export default function WerkbladPage() {
   const tasks = useTasks(project?.id) ?? [];
 
   const [tab, setTab] = useState<Tab>("plan");
+  const [paper, setPaper] = useState<PdfPaper>("a4");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const dialog = useDialog();
 
-  const { codeById } = useMemo(() => buildOpeningSchedule(openings), [openings]);
+  const { rows: scheduleRows, codeById } = useMemo(
+    () => buildOpeningSchedule(openings),
+    [openings],
+  );
   const drawingScale = project?.drawingScale ?? 100;
   const planMaxWidth = Math.round(700 * (100 / drawingScale));
+  const datum = new Intl.DateTimeFormat("nl-NL", { dateStyle: "long" }).format(new Date());
 
   async function downloadPng() {
     const svg = document.getElementById(PLAN_SVG_ID) as SVGSVGElement | null;
@@ -88,6 +98,56 @@ export default function WerkbladPage() {
       `${(project?.name ?? "plattegrond").replace(/\s+/g, "_")}_${level?.name ?? ""}.png`,
     );
   }
+  // PDF-export: render (verderop in de JSX) een verborgen plan-SVG met vaste
+  // ppm en zet die na de commit om naar een maatvaste vector-PDF.
+  useEffect(() => {
+    if (!pdfBusy) return;
+    let cancelled = false;
+    (async () => {
+      const svg = document.getElementById(PDF_SVG_ID) as SVGSVGElement | null;
+      if (!svg) {
+        dialog.notify("Geen plattegrond om te exporteren.", "error");
+        setPdfBusy(false);
+        return;
+      }
+      try {
+        const result = await exportWerkbladPdf({
+          svg,
+          scale: drawingScale,
+          paper,
+          title: {
+            projectName: project?.name ?? "Bouwproject",
+            description: project?.description,
+            levelName: level?.name ?? "—",
+            revision: project?.revisionDate
+              ? `${project.revisionNumber ?? 0} · ${project.revisionDate}`
+              : String(project?.revisionNumber ?? 0),
+            date: datum,
+          },
+          schedule: scheduleRows,
+        });
+        if (cancelled) return;
+        if (result.ok) {
+          downloadBlob(
+            result.blob,
+            `${(project?.name ?? "werkblad").replace(/\s+/g, "_")}_1-${drawingScale}_${paper.toUpperCase()}.pdf`,
+          );
+          dialog.notify(`PDF op schaal 1:${drawingScale} (${paper.toUpperCase()}) gedownload.`);
+        } else {
+          dialog.notify(result.reason, "error");
+        }
+      } catch (e) {
+        if (!cancelled) dialog.notify("PDF-export mislukt: " + (e as Error).message, "error");
+      } finally {
+        if (!cancelled) setPdfBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfBusy]);
+
   async function bumpRevision() {
     if (!project?.id) return;
     await update("projects", project.id, {
@@ -110,8 +170,6 @@ export default function WerkbladPage() {
     [walls, rooms, openings, level],
   );
 
-  const datum = new Intl.DateTimeFormat("nl-NL", { dateStyle: "long" }).format(new Date());
-
   return (
     <div className="print-area h-full overflow-y-auto bg-paper">
       {/* Actiebalk (niet printen) */}
@@ -119,7 +177,7 @@ export default function WerkbladPage() {
         <Link href="/" className="flex items-center gap-1.5 text-sm text-ink-700">
           <ArrowLeft size={16} /> Terug
         </Link>
-        <div className="flex gap-1 rounded-full bg-paper-sunken p-1">
+        <div className="flex max-w-[55vw] gap-1 overflow-x-auto rounded-full bg-paper-sunken p-1 sm:max-w-none">
           {TABS.map((t) => {
             const Icon = t.icon;
             return (
@@ -144,11 +202,20 @@ export default function WerkbladPage() {
               <Download size={16} /> PNG
             </button>
           )}
+          {tab === "plan" && (
+            <button
+              onClick={() => setPdfBusy(true)}
+              disabled={pdfBusy || walls.length + rooms.length === 0}
+              className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              <FileText size={16} /> {pdfBusy ? "Bezig…" : `PDF 1:${drawingScale}`}
+            </button>
+          )}
           <button
             onClick={() => window.print()}
-            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
+            className="flex items-center gap-2 rounded-lg bg-paper-sunken px-3 py-2 text-sm font-semibold text-ink-700 hover:bg-line"
           >
-            <Printer size={16} /> Print / PDF
+            <Printer size={16} /> Print
           </button>
         </div>
       </div>
@@ -201,6 +268,17 @@ export default function WerkbladPage() {
                     {DRAWING_SCALES.map((s) => (
                       <option key={s} value={s}>1:{s}</option>
                     ))}
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-ink-500">
+                  Papier
+                  <select
+                    value={paper}
+                    onChange={(e) => setPaper(e.target.value as PdfPaper)}
+                    className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+                  >
+                    <option value="a4">A4</option>
+                    <option value="a3">A3</option>
                   </select>
                 </label>
                 <button
@@ -397,6 +475,25 @@ export default function WerkbladPage() {
           </div>
         )}
       </div>
+
+      {/* Verborgen maatvaste render voor de PDF-export */}
+      {pdfBusy && (
+        <div aria-hidden className="absolute -left-[99999px] top-0">
+          <WerkbladPlan
+            svgId={PDF_SVG_ID}
+            walls={walls}
+            rooms={rooms}
+            openings={openings}
+            electrical={electrical}
+            plumbing={plumbing}
+            furniture={furniture}
+            northDegrees={project?.northDegrees ?? 0}
+            ppm={exportPpm(drawingScale)}
+            openingCodes={codeById}
+          />
+        </div>
+      )}
+      {dialog.element}
     </div>
   );
 }

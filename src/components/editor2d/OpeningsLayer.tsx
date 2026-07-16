@@ -4,7 +4,7 @@
 // deurzwaai-symbool (deur) of dubbele lijn (raam).
 
 import { Fragment } from "react";
-import { Layer, Line, Circle } from "react-konva";
+import { Group, Layer, Line, Circle } from "react-konva";
 import type { Opening, Wall, Point } from "@/lib/domain/types";
 import { OPENING_COLOR } from "@/lib/domain/constants";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
@@ -107,11 +107,14 @@ export function OpeningsLayer({ view, walls, openings, selectedId, onSelect }: P
 
         return (
           <Fragment key={op.id}>
-            {cut}
-            {selected && (
-              <Circle x={center.x} y={center.y} radius={metersToPx(half, view) + 6} stroke="#fb923c" strokeWidth={2} />
-            )}
-            {symbol}
+            {/* Decoratief: alleen het tikvlak hieronder luistert. */}
+            <Group listening={false}>
+              {cut}
+              {selected && (
+                <Circle x={center.x} y={center.y} radius={metersToPx(half, view) + 6} stroke="#fb923c" strokeWidth={2} />
+              )}
+              {symbol}
+            </Group>
             {/* Onzichtbaar tikvlak voor selectie */}
             <Line
               id={op.id}

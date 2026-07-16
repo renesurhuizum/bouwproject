@@ -9,7 +9,7 @@ import { useEditor } from "@/lib/store/editor";
 import { useProject } from "@/lib/hooks";
 import type { Level, Wall, Room } from "@/lib/domain/types";
 
-export function LevelSwitcher() {
+export function LevelSwitcher({ onImport }: { onImport?: () => void }) {
   const project = useProject();
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const setActiveLevel = useEditor((s) => s.setActiveLevel);
@@ -123,7 +123,9 @@ export function LevelSwitcher() {
     activeLevelId !== null && levels.find((l) => l.id === activeLevelId)?.order !== 1;
 
   return (
-    <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
+    // Op mobiel een rij lager: de bovenste rij is daar al bezet door de
+    // Indeling/Voortgang-knoppen (anders overlappen ze elkaar).
+    <div className="absolute left-1/2 top-14 z-20 -translate-x-1/2 sm:top-3">
       <div className="flex items-center gap-1 rounded-xl border border-line bg-paper-raised/95 p-1 shadow-lg backdrop-blur">
         {levels.map((level) => (
           <div key={level.id} className="relative">
@@ -156,8 +158,8 @@ export function LevelSwitcher() {
 
         <div className="mx-0.5 h-4 w-px bg-line" />
         <button
-          onClick={() => bgInputRef.current?.click()}
-          title="Achtergrondafbeelding uploaden"
+          onClick={() => (onImport ? onImport() : bgInputRef.current?.click())}
+          title="Plattegrond importeren (foto/scan)"
           className={`rounded-lg p-1.5 transition-colors hover:bg-paper-sunken ${activeLevel?.bgImageBlob ? "text-accent" : "text-ink-400 hover:text-ink-700"}`}
         >
           <Image size={14} />

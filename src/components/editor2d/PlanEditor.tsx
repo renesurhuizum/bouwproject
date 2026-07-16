@@ -79,7 +79,7 @@ import { ElectricalLegend } from "./ElectricalLegend";
 import { Minimap } from "./Minimap";
 import type { LayoutRect } from "@/lib/roomDivider";
 
-export function PlanEditor() {
+export function PlanEditor({ onImport }: { onImport?: () => void } = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [view, setView] = useState<ViewState>({ x: 60, y: 90, scale: 1 });
@@ -156,6 +156,7 @@ export function PlanEditor() {
     async () => (activeLevelId ? await getDB().levels.get(activeLevelId) : null),
     [activeLevelId],
   ) as Level | null | undefined;
+  const activeLevelHasBg = Boolean(activeLevel?.bgImageBlob);
 
   // Fase-overlay: status per ruimte op basis van taken met roomId.
   const phaseOverlay = useEditor((s) => s.phaseOverlay);
@@ -1438,6 +1439,38 @@ export function PlanEditor() {
       )}
 
       <RoomDivider divideRect={divideRect} onClear={() => setDivideRect(null)} />
+
+      {/* Lege staat: help de eerste actie op weg (tekenen of importeren). */}
+      {tool === "select" &&
+        walls.length === 0 &&
+        rooms.length === 0 &&
+        !activeLevelHasBg && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-4">
+            <div className="pointer-events-auto max-w-sm rounded-card border border-line bg-paper-raised/95 p-5 text-center shadow-xl backdrop-blur">
+              <h2 className="text-sm font-bold text-ink-900">Begin je plattegrond</h2>
+              <p className="mt-1 text-xs leading-snug text-ink-500">
+                Teken je eerste muur, of importeer een foto/scan van een bestaande
+                plattegrond en trek die maatvast over.
+              </p>
+              <div className="mt-3 flex justify-center gap-2">
+                <button
+                  onClick={() => setTool("wall")}
+                  className="rounded-lg bg-ink-900 px-4 py-2 text-xs font-semibold text-paper-raised"
+                >
+                  Muur tekenen
+                </button>
+                {onImport && (
+                  <button
+                    onClick={onImport}
+                    className="rounded-lg border border-accent/50 bg-accent-soft px-4 py-2 text-xs font-semibold text-accent"
+                  >
+                    Plattegrond importeren
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* Elektra-legenda: alleen zichtbaar als elektra-laag aan staat */}
       {visibleLayers.electrical && <ElectricalLegend />}

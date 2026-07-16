@@ -197,6 +197,7 @@ interface Props {
   furniture?: Furniture[];
   northDegrees?: number;
   maxWidth?: number;
+  ppm?: number; // vaste pixels-per-meter voor maatvaste export; gaat vóór maxWidth
   openingCodes?: Map<string, string>; // kozijnstaat-referenties (D01/R01) bij openingen
   svgId?: string; // voor PNG-export
 }
@@ -210,6 +211,7 @@ export function WerkbladPlan({
   furniture = [],
   northDegrees = 0,
   maxWidth = 700,
+  ppm,
   openingCodes,
   svgId,
 }: Props) {
@@ -224,7 +226,7 @@ export function WerkbladPlan({
   const b = bounds(pts);
   const wM = Math.max(0.1, b.max.x - b.min.x);
   const hM = Math.max(0.1, b.max.y - b.min.y);
-  const scale = maxWidth / wM;
+  const scale = ppm ?? maxWidth / wM;
   const PAD = 30;
   const DIM = 30;    // ruimte voor maatlijnen (boven + rechts)
   const FOOT = 70;   // ruimte voor schaalbalk + legenda onderaan
@@ -302,6 +304,10 @@ export function WerkbladPlan({
         const len = dist(w.start, w.end);
         const mid = { x: (w.start.x + w.end.x) / 2, y: (w.start.y + w.end.y) / 2 };
         const thick = Math.max(2, w.thickness * scale);
+        // Label parallel aan de muur, net buiten de muurdikte — voorkomt dat
+        // het label van verticale muren dwars over de muur valt.
+        const rawAngle = (Math.atan2(w.end.y - w.start.y, w.end.x - w.start.x) * 180) / Math.PI;
+        const labelAngle = rawAngle > 90 ? rawAngle - 180 : rawAngle < -90 ? rawAngle + 180 : rawAngle;
         return (
           <g key={w.id}>
             <line
@@ -317,7 +323,9 @@ export function WerkbladPlan({
             {len * scale > 36 && (
               <text
                 x={sx(mid.x)}
-                y={sy(mid.y) - 3}
+                y={sy(mid.y)}
+                dy={-(thick / 2 + 4)}
+                transform={`rotate(${labelAngle} ${sx(mid.x)} ${sy(mid.y)})`}
                 textAnchor="middle"
                 fontSize={9}
                 fontFamily="monospace"
