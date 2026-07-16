@@ -177,7 +177,7 @@ export default function WerkbladPage() {
         <Link href="/" className="flex items-center gap-1.5 text-sm text-ink-700">
           <ArrowLeft size={16} /> Terug
         </Link>
-        <div className="flex gap-1 rounded-full bg-paper-sunken p-1">
+        <div className="flex max-w-[55vw] gap-1 overflow-x-auto rounded-full bg-paper-sunken p-1 sm:max-w-none">
           {TABS.map((t) => {
             const Icon = t.icon;
             return (

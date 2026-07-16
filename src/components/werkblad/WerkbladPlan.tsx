@@ -304,6 +304,10 @@ export function WerkbladPlan({
         const len = dist(w.start, w.end);
         const mid = { x: (w.start.x + w.end.x) / 2, y: (w.start.y + w.end.y) / 2 };
         const thick = Math.max(2, w.thickness * scale);
+        // Label parallel aan de muur, net buiten de muurdikte — voorkomt dat
+        // het label van verticale muren dwars over de muur valt.
+        const rawAngle = (Math.atan2(w.end.y - w.start.y, w.end.x - w.start.x) * 180) / Math.PI;
+        const labelAngle = rawAngle > 90 ? rawAngle - 180 : rawAngle < -90 ? rawAngle + 180 : rawAngle;
         return (
           <g key={w.id}>
             <line
@@ -319,7 +323,9 @@ export function WerkbladPlan({
             {len * scale > 36 && (
               <text
                 x={sx(mid.x)}
-                y={sy(mid.y) - 3}
+                y={sy(mid.y)}
+                dy={-(thick / 2 + 4)}
+                transform={`rotate(${labelAngle} ${sx(mid.x)} ${sy(mid.y)})`}
                 textAnchor="middle"
                 fontSize={9}
                 fontFamily="monospace"

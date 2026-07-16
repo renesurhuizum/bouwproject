@@ -85,7 +85,15 @@ export function PhotoSection({ projectId, link }: Props) {
   );
 }
 
-function PhotoThumb({ photo, onClick }: { photo: Photo; onClick: () => void }) {
+export function PhotoThumb({
+  photo,
+  onClick,
+  className = "h-14 w-14",
+}: {
+  photo: Photo;
+  onClick: () => void;
+  className?: string;
+}) {
   // Object-URL tijdens render aanmaken; cleanup via effect (geen setState-cascade).
   const src = useMemo(
     () => (photo.blob ? URL.createObjectURL(photo.blob) : null),
@@ -100,7 +108,7 @@ function PhotoThumb({ photo, onClick }: { photo: Photo; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="h-14 w-14 overflow-hidden rounded-lg border border-line bg-paper-sunken"
+      className={`${className} overflow-hidden rounded-lg border border-line bg-paper-sunken`}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={photo.caption ?? ""} className="h-full w-full object-cover" />
@@ -108,7 +116,7 @@ function PhotoThumb({ photo, onClick }: { photo: Photo; onClick: () => void }) {
   );
 }
 
-function Lightbox({
+export function Lightbox({
   photo,
   onClose,
   onDelete,

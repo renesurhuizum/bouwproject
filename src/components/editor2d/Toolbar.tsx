@@ -513,8 +513,8 @@ export function Toolbar() {
         </div>
       )}
 
-      {/* Hoofd-dock */}
-      <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-line bg-paper-raised/95 p-1.5 shadow-xl backdrop-blur">
+      {/* Hoofd-dock — scrollt horizontaal op smalle schermen i.p.v. uit beeld lopen */}
+      <div className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-2xl border border-line bg-paper-raised/95 p-1.5 shadow-xl backdrop-blur [scrollbar-width:thin]">
         <button
           onClick={() => void undo()}
           aria-label="Ongedaan maken"

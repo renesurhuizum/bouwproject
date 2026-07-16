@@ -23,6 +23,7 @@ import { WallElevation } from "@/components/werkblad/WallElevation";
 import { CrossSection, type SectionLevelData } from "@/components/werkblad/CrossSection";
 import { roomWalls } from "@/lib/roomWalls";
 import { dist } from "@/lib/geometry";
+import { formatLength } from "@/lib/format";
 import type { Wall } from "@/lib/domain/types";
 
 export default function AanzichtenPage() {
@@ -75,7 +76,7 @@ export default function AanzichtenPage() {
 
   function wallLabel(w: Wall, idx: number) {
     const len = dist(w.start, w.end);
-    return `Muur ${idx + 1} (${(len * 100).toFixed(0)} cm)`;
+    return `Muur ${idx + 1} · ${formatLength(len)}`;
   }
 
   if (!level) {
@@ -162,13 +163,13 @@ export default function AanzichtenPage() {
               </h2>
               <span className="text-xs text-ink-400">{level.name}</span>
             </div>
+            {/* Geen wallName: de kaartkop hierboven is al de titel. */}
             <WallElevation
               wall={activeWall}
               openings={openings}
               electrical={electrical}
               plumbing={plumbing}
               hvac={hvac}
-              wallName={`${activeRoom?.name ?? ""} — ${wallLabel(activeWall, selectedWallIdx)}`}
             />
           </section>
         ) : (

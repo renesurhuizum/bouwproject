@@ -1611,16 +1611,18 @@ export function Scene3D() {
         <button
           className="pointer-events-auto rounded-xl border border-white/20 bg-ink-900/80 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur hover:bg-ink-900"
           onClick={() => setDayMode((d) => !d)}
-          title={dayMode ? "Avondlicht" : "Daglicht"}
+          title={dayMode ? "Wissel naar avondlicht" : "Wissel naar daglicht"}
+          aria-label={dayMode ? "Wissel naar avondlicht" : "Wissel naar daglicht"}
         >
-          {dayMode ? "🌙" : "☀️"}
+          {dayMode ? "🌙" : "☀️"} <span className="hidden sm:inline">{dayMode ? "Avond" : "Dag"}</span>
         </button>
         <button
           className="pointer-events-auto rounded-xl border border-white/20 bg-ink-900/80 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur hover:bg-ink-900"
           onClick={() => void takeScreenshot()}
           title="Screenshot downloaden (PNG)"
+          aria-label="Screenshot downloaden"
         >
-          📷
+          📷 <span className="hidden sm:inline">Foto</span>
         </button>
         <button
           className={`pointer-events-auto rounded-xl border border-white/20 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur ${
@@ -1631,8 +1633,9 @@ export function Scene3D() {
             setClipEnabled((v) => !v);
           }}
           title="Doorsnede in 3D (snijvlak)"
+          aria-label="Doorsnede in 3D"
         >
-          ✂
+          ✂ <span className="hidden sm:inline">Doorsnede</span>
         </button>
 
         {clipEnabled && (

@@ -184,6 +184,19 @@ Cloud-sync (§4.7) en AI (§4.8) zijn bewuste vervolgtrajecten ná deze drie spr
 
 ---
 
+## Ronde 2 — kritische UX-doorloop (na sprint 1–3)
+
+Tweede analyse op verzoek: alle schermen zijn met testdata én in lege staat vastgelegd (desktop + mobiel 390px) en kritisch beoordeeld, aangevuld met research naar mobile-CAD-UX, empty-state-onboarding en plattegrondherkenning. De bevindingen zijn in sprint 4 opgepakt.
+
+**Gevonden & gefixt (sprint 4):**
+- 📱 Mobiel was de plattegrond-editor kapot: overlappende verdiepingswissel/knoppen, toolbar liep aan twee kanten uit beeld, elektra-legenda blokkeerde de halve canvas, werkbladtabs liepen uit beeld.
+- 🆕 **Plattegrond-import-wizard** (gebruikerswens #1): upload een foto/scan, kalibreer de schaal met twee klikken op een bekende afstand (maatvast resultaat), en neem muren over via geassisteerd natekenen of experimentele autodetectie (`src/lib/planDetect.ts`, client-side lijndetectie voor strakke zwart-witplannen). Volwaardige automatische herkenning van rommelige foto's blijft deep-learning-werk (zie bronnen) en is bewust buiten scope gehouden.
+- 🧭 Lege staten waren dode einden: het lege plan toont nu een start-hint (tekenen of importeren); het dashboard toont een mini-plattegrondpreview i.p.v. een tegelgrid dat de navigatie dupliceerde.
+- 🔗 Slimme koppelingen: bonnetjesfoto per uitgave (het veld `Expense.photoId` bestond al maar had geen UI), budgetcontext + overschrijdingssignaal op de Uitgaven-tab en het dashboard, fase-chip op uitgaveregels.
+- 🎨 Afwerking: kompas-icoon in Instellingen stond half buiten zijn cirkel; dubbele titel en geclipte hoogtemaat in Aanzichten; muurlengte-labels op het werkblad vielen over verticale muren; 3D-knoppen kregen labels/tooltips.
+
+**Bewust open gelaten voor later:** aanzichten-galerij (alle muren in een grid i.p.v. één tegelijk), 3D-standaardweergaven (boven/voor/zij), NL-datumnotatie in datumvelden, kozijnstaat→plan-selectie-koppeling.
+
 ## Bronnen
 
 **Vergelijkbare apps / feature-benchmark**

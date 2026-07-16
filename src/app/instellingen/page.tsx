@@ -237,10 +237,10 @@ export default function InstellingenPage() {
           <div className="flex items-center gap-4">
             <div className="relative h-20 w-20 shrink-0 rounded-full border-2 border-line">
               <div
-                className="absolute left-1/2 top-1/2 flex h-full w-full -translate-x-1/2 -translate-y-1/2 items-start justify-center"
-                style={{ transform: `translate(-50%, -50%) rotate(${north}deg)` }}
+                className="absolute inset-0 flex items-center justify-center"
+                style={{ transform: `rotate(${north}deg)` }}
               >
-                <Compass size={72} className="text-accent" />
+                <Compass size={52} className="text-accent" />
               </div>
             </div>
             <div className="flex-1">

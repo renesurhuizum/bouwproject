@@ -154,7 +154,8 @@ export function WallElevation({
   const PAD = 48;
   const DIM_OFFSET = 32; // px voor maatlijnen boven/rechts
   const scale = maxWidth / wallLen;
-  const W = wallLen * scale + PAD * 2 + DIM_OFFSET;
+  // +16: extra rechtermarge zodat de hoogtemaat-tekst nooit clipt.
+  const W = wallLen * scale + PAD * 2 + DIM_OFFSET + 16;
   const H = wallH * scale + PAD * 2 + DIM_OFFSET;
 
   const sx = (x: number) => PAD + DIM_OFFSET + x * scale;
@@ -270,10 +271,12 @@ export function WallElevation({
         outside
       />
 
-      {/* Header label */}
-      <text x={sx(0)} y={12} fontSize={11} fontWeight="600" fill="#1c1917">
-        {wallName ?? `Wand (${formatLength(wallLen)} × ${formatLength(wallH)})`}
-      </text>
+      {/* Header label — alleen als de omgeving zelf geen titel toont */}
+      {wallName && (
+        <text x={sx(0)} y={12} fontSize={11} fontWeight="600" fill="#1c1917">
+          {wallName}
+        </text>
+      )}
     </svg>
   );
 }
