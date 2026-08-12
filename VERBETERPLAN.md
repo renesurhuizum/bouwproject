@@ -1,5 +1,8 @@
 # Verbeterplan Bouwproject — UX, inkoopmeters, kabeltrekplan & constructie
 
+> **Status.** Fase 0, 1 (grotendeels), 2, 3 en 5 zijn uitgevoerd. Wat er nog
+> open staat, staat onderaan onder "Nog te doen".
+
 ## Context
 
 De app (Next.js 16 + react-konva + zustand + Dexie, offline-first PWA, digital twin voor de boerderijrenovatie) staat functioneel al ver, maar drie verkenningen over de hele codebase bevestigen het gevoel van de gebruiker:
@@ -129,3 +132,50 @@ Doel: één samenhangend, gefaseerd plan dat (a) de editor intuïtief maakt, (b)
 ## Aanbevolen startvolgorde
 
 Fase 0 → A1/A2 (grootste dagelijkse frictie weg) → B (inkoopcijfers kloppen) → C (kabeltrekplan, grootste nieuwe waarde) → D → E → F.
+
+
+---
+
+## Uitgevoerd
+
+**Fase 0 — testinfra + quick wins.** Vitest opgezet; 119 tests dekken de
+rekenmodules. Enter-bug bij leiding opslaan gefixt, pan/lasso omgedraaid,
+snapping losgekoppeld van het raster (met Alt-bypass), toolbar scrollbaar,
+HUD-botsingen weg, Werkblad in de onderbalk.
+
+**Fase 1 — editor-fundament.** Volledig undo/redo via een centrale mutatielaag
+(`src/lib/db/mutate.ts`); alles versleepbaar via `DraggableEntity`, inclusief
+deuren en ramen die langs hun muur schuiven; long-press-contextmenu voor touch;
+maatvoering tijdens tekenen bij elk gereedschap; leidingen na het tekenen
+bewerkbaar met vertex-handles.
+
+**Fase 2 — hoeveelheden.** Eén engine (`src/lib/takeoff/`) met catalogus,
+verliesfactoren, verpakkingsafronding en prijzen; idempotente sync naar de
+materiaallijst op `sourceId`. De twee oude, tegenstrijdige berekeningen zijn
+verwijderd.
+
+**Fase 3 — elektra.** `ElectricalCircuit`-entiteit (Dexie v6 met migratie van de
+oude vrije-tekstgroepen), kabelroutering over het muurskelet met Dijkstra,
+groepenkast-scherm, routes op de plattegrond, en een trekplan op het werkblad
+met inkoop per kabeltype.
+
+**Fase 4 (deels) — leidingen.** `PIPE_SPECS` met diameters per type, bewerkbare
+diameter, afschot via begin- en eindhoogte, plus validatieregel op de NL-eis van
+5 mm/m.
+
+**Fase 5 — constructie.** `src/lib/structural/` met doorsnedetabel
+(HEA/HEB/IPE/hout, mét Wy/Iy/gewicht), NL-belastingaannames en profielkeuze
+getoetst op sterkte én doorbuiging; balk- en lateiadvies in het paneel;
+constructiestaat op het werkblad. Alles met een onontkoombare disclaimer.
+
+## Nog te doen
+
+- **A5/A6** — meubels resizen (model steunt het al), zoomknoppen en
+  fit-to-content, viewport onthouden, lege-staat en sneltoets-overlay.
+- **D2** — HVAC-padtool (het `path`-veld bestaat, er is geen tekentool) en
+  vloerverwarmingsschatting per ruimte.
+- **F1** — validatiemeldingen klikbaar maken en over alle verdiepingen laten
+  lopen; trapformule en daglichteis toevoegen.
+- **F2** — fasering koppelen aan het model ("wanden dicht" blokkeren zolang een
+  groep geen route heeft); Gantt-pijlen en kritiek pad.
+- **F3** — print-CSS aanscherpen voor nette PDF-export per tabblad.
