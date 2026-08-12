@@ -5,6 +5,7 @@ import type {
   FixtureKind,
   HvacType,
   OpeningType,
+  BreakerKind,
   PlumbingPipeType,
   WallMaterial,
   WallStatus,
@@ -332,6 +333,41 @@ export const FIXTURE_DEFAULT_HEIGHT: Record<FixtureKind, number> = {
   boiler: 1.5,
   "outdoor-tap": 0.5,
 };
+
+// ── Elektra: eindgroepen en kabels ───────────────────────────────────────────
+
+// Kleuren waarmee groepen op de plattegrond uit elkaar te houden zijn.
+export const CIRCUIT_PALETTE = [
+  "#1d4ed8", "#dc2626", "#16a34a", "#d97706", "#7c3aed",
+  "#0891b2", "#db2777", "#65a30d", "#c2410c", "#4f46e5",
+];
+
+// Per zekering: de gangbare NL-kabel en het maximale aantal punten dat je er
+// volgens de NEN 1010-praktijkregel op hangt.
+export interface BreakerSpec {
+  label: string;
+  cableSpec: string;
+  /** Aantal aders inclusief aarde — nodig om kabelmeters naar draad om te rekenen. */
+  cores: number;
+  /** Aderdoorsnede in mm². */
+  crossSection: number;
+  maxPoints: number;
+}
+
+export const BREAKER_SPECS: Record<BreakerKind, BreakerSpec> = {
+  B10: { label: "B10 – lichtgroep", cableSpec: "3×1,5 mm²", cores: 3, crossSection: 1.5, maxPoints: 12 },
+  B16: { label: "B16 – standaard", cableSpec: "3×2,5 mm²", cores: 3, crossSection: 2.5, maxPoints: 12 },
+  C16: { label: "C16 – aanloopstroom", cableSpec: "3×2,5 mm²", cores: 3, crossSection: 2.5, maxPoints: 12 },
+  B20: { label: "B20 – zware groep", cableSpec: "3×4 mm²", cores: 3, crossSection: 4, maxPoints: 8 },
+  perilex: { label: "Perilex – kookgroep", cableSpec: "5×2,5 mm²", cores: 5, crossSection: 2.5, maxPoints: 1 },
+};
+
+// Toeslagen op de gemeten routelengte, zodat de inkooplengte klopt met de
+// praktijk: je knipt nooit exact op maat.
+export const CABLE_SLACK_PER_POINT_M = 0.3; // speling per aansluitpunt
+export const CABLE_PANEL_TAIL_M = 2.0; // staart in de meterkast per groep
+export const CABLE_WASTE_FACTOR = 1.1; // 10% snij-/trekverlies
+export const CABLE_DRUM_M = 100; // installatiedraad komt per rol van 100 m
 
 export const PLUMBING_COLOR = "#0891b2"; // teal
 

@@ -3,6 +3,7 @@
 // eenvoudig.
 
 import Dexie, { type Table } from "dexie";
+import { CIRCUIT_PALETTE } from "../domain/constants";
 import type {
   Project,
   Level,
@@ -10,6 +11,7 @@ import type {
   Opening,
   Room,
   ElectricalItem,
+  ElectricalCircuit,
   PlumbingItem,
   HvacItem,
   Phase,
@@ -34,6 +36,7 @@ export class BouwDB extends Dexie {
   openings!: Table<Opening, string>;
   rooms!: Table<Room, string>;
   electrical!: Table<ElectricalItem, string>;
+  circuits!: Table<ElectricalCircuit, string>;
   plumbing!: Table<PlumbingItem, string>;
   hvac!: Table<HvacItem, string>;
   phases!: Table<Phase, string>;
@@ -84,6 +87,46 @@ export class BouwDB extends Dexie {
     this.version(5).stores({
       sections: "id, levelId, updatedAt, deleted",
     });
+    // v6: eindgroepen (meterkast). Bestaande items droegen alleen een vrij
+    // tekstveld `group`; die tekst wordt omgezet naar echte groepen zodat er
+    // kabelspecificaties en -lengtes aan te hangen zijn.
+    this.version(6)
+      .stores({ circuits: "id, projectId, updatedAt, deleted" })
+      .upgrade(async (tx) => {
+        const project = await tx.table("projects").toCollection().first();
+        if (!project) return;
+        const items = await tx.table("electrical").toArray();
+        const names = [
+          ...new Set(
+            items
+              .filter((i) => !i.deleted && typeof i.group === "string" && i.group.trim())
+              .map((i) => (i.group as string).trim()),
+          ),
+        ].sort();
+        const idByName = new Map<string, string>();
+        for (const [i, name] of names.entries()) {
+          const id = crypto.randomUUID();
+          idByName.set(name, id);
+          await tx.table("circuits").add({
+            id,
+            projectId: project.id,
+            number: name,
+            name: `Groep ${name}`,
+            breaker: "B16",
+            cableSpec: "3×2,5 mm²",
+            color: CIRCUIT_PALETTE[i % CIRCUIT_PALETTE.length],
+            routeAt: "ceiling",
+            updatedAt: Date.now(),
+          });
+        }
+        for (const item of items) {
+          const name = typeof item.group === "string" ? item.group.trim() : "";
+          const circuitId = idByName.get(name);
+          if (circuitId) {
+            await tx.table("electrical").update(item.id, { circuitId });
+          }
+        }
+      });
   }
 }
 

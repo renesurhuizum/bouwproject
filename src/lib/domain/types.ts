@@ -100,16 +100,40 @@ export type ElectricalType =
   | "perilex" // kookgroep 2-fase (krachtstroom)
   | "outdoor"; // buitenpunt
 
+// Zekeringtype van een eindgroep. Bepaalt de benodigde aderdoorsnede.
+export type BreakerKind = "B10" | "B16" | "C16" | "B20" | "perilex";
+
+// Een eindgroep in de meterkast. Voorheen was dit alleen een vrij tekstveld op
+// elk item, waardoor er niets over een groep te zeggen viel: geen zekering,
+// geen kabeltype, geen totaal aantal meters.
+export interface ElectricalCircuit extends Entity {
+  projectId: string;
+  number: string; // "1", "2a"
+  name: string; // "Keuken achterwand"
+  breaker: BreakerKind;
+  cableSpec: string; // "3×2,5 mm²"
+  residualCurrent?: string; // aardlekgroep-cluster, bv. "ALS1"
+  color: string; // kleur van de route-overlay op de plattegrond
+  panelId?: string; // ElectricalItem van type "panel" waar de groep vertrekt
+  /** Loopt de kabel via het plafond of via de vloer? Bepaalt de stijglengtes. */
+  routeAt?: "ceiling" | "floor";
+}
+
 export interface ElectricalItem extends Entity {
   levelId: string;
   type: ElectricalType;
   position: Point;
   heightZ: number; // m boven vloer
-  group?: string; // groepnummer
+  circuitId?: string; // eindgroep-ref
+  group?: string; // verouderd: vrij tekstveld, vervangen door circuitId
   wallId?: string;
   label?: string;
   note?: string;
-  path?: Point[]; // kabeltraject (optioneel)
+  /**
+   * Handmatig kabeltraject. Leeg = de route wordt automatisch bepaald langs de
+   * muren vanaf de meterkast (zie lib/routing/cableRouting.ts).
+   */
+  path?: Point[];
   linkedIds?: string[]; // gekoppelde elementen (schakelaar → lichtpunt)
 }
 

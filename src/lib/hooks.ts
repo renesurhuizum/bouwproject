@@ -149,6 +149,37 @@ export function useBudget(projectId?: string | null) {
   );
 }
 
+// Eindgroepen (meterkast) van het project.
+export function useCircuits(projectId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!projectId) return [];
+      const rows = notDeleted(
+        await getDB().circuits.where("projectId").equals(projectId).toArray(),
+      );
+      return rows.sort((a, b) =>
+        a.number.localeCompare(b.number, "nl", { numeric: true }),
+      );
+    },
+    [projectId],
+    [],
+  );
+}
+
+// Alle elektra van het project (over alle verdiepingen) — nodig omdat een groep
+// verdiepingen kan overspannen.
+export function useAllElectrical(levelIds: string[]) {
+  const key = levelIds.join(",");
+  return useLiveQuery(
+    async () => {
+      if (levelIds.length === 0) return [];
+      return notDeleted(await getDB().electrical.where("levelId").anyOf(levelIds).toArray());
+    },
+    [key],
+    [],
+  );
+}
+
 export function useMaterials(projectId?: string | null) {
   return useLiveQuery(
     async () => {

@@ -16,9 +16,13 @@ interface Props {
   items: ElectricalItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Kleur per eindgroep, zodat je ziet welk punt bij welke groep hoort. */
+  circuitColors?: Map<string, string>;
+  /** Nummer per eindgroep, als klein label bij het punt. */
+  circuitNumbers?: Map<string, string>;
 }
 
-export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
+export function ElectricalLayer({ view, items, selectedId, onSelect, circuitColors, circuitNumbers }: Props) {
   const byId = new Map(items.map((it) => [it.id, it]));
 
   // Schakelaar → lichtpunt verbindingen (stippellijn), op basis van linkedIds.
@@ -51,6 +55,10 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
         const p = metersToScreen(it.position, view);
         const selected = it.id === selectedId;
         const r = 11;
+        // Punten zonder groep blijven standaardblauw; dat maakt meteen zichtbaar
+        // welke punten nog nergens bij horen (en dus niet meetellen in de meters).
+        const color = (it.circuitId && circuitColors?.get(it.circuitId)) || "#1d4ed8";
+        const groupNo = it.circuitId ? circuitNumbers?.get(it.circuitId) : undefined;
         return (
           <DraggableEntity
             key={it.id}
@@ -70,10 +78,23 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
                 width={r * 2}
                 height={r * 2}
                 cornerRadius={4}
-                fill="#1d4ed8"
+                fill={color}
               />
             ) : (
-              <Circle x={p.x} y={p.y} radius={r} fill="#1d4ed8" />
+              <Circle x={p.x} y={p.y} radius={r} fill={color} />
+            )}
+            {groupNo && (
+              <Label x={p.x + r - 2} y={p.y - r - 8} listening={false}>
+                <Tag fill={color} cornerRadius={2} />
+                <Text
+                  text={groupNo}
+                  fontSize={8}
+                  fontStyle="bold"
+                  fontFamily="monospace"
+                  fill="#fff"
+                  padding={2}
+                />
+              </Label>
             )}
             <Text
               text={CODE[it.type]}
@@ -93,7 +114,7 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
                 text={formatHeight(it.heightZ)}
                 fontSize={9}
                 fontFamily="monospace"
-                fill="#1d4ed8"
+                fill={color}
                 padding={2}
               />
             </Label>

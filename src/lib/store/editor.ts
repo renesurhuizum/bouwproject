@@ -112,6 +112,11 @@ interface EditorState {
   // Lasso-modus: slepen op leeg canvas selecteert i.p.v. pannen. Nodig op
   // touch, waar geen Shift-toets is. Niet persistent — het is een momentmodus.
   lassoMode: boolean;
+  // Toewijsmodus vanuit de groepenkast: elk aangetikt elektra-punt gaat naar
+  // deze eindgroep. null = uit.
+  assignCircuitId: string | null;
+  // Kabelroutes als overlay op de plattegrond tonen.
+  showCableRoutes: boolean;
 
   setActiveLevel: (id: string) => void;
   setTool: (t: Tool) => void;
@@ -132,6 +137,8 @@ interface EditorState {
   togglePhaseOverlay: () => void;
   toggleLegend: () => void;
   setLassoMode: (v: boolean) => void;
+  setAssignCircuitId: (id: string | null) => void;
+  toggleCableRoutes: () => void;
 }
 
 export const useEditor = create<EditorState>()(
@@ -180,6 +187,8 @@ export const useEditor = create<EditorState>()(
       phaseOverlay: false,
       showLegend: true,
       lassoMode: false,
+      assignCircuitId: null,
+      showCableRoutes: true,
 
       setActiveLevel: (id) => set({ activeLevelId: id, selection: null, multi: [] }),
       setTool: (tool) =>
@@ -190,6 +199,8 @@ export const useEditor = create<EditorState>()(
           selection: null,
           multi: [],
           lassoMode: false,
+          // Van gereedschap wisselen stopt ook het toewijzen aan een groep.
+          assignCircuitId: null,
         })),
       setPlaceKind: (placeKind) => set({ placeKind, tool: "place" }),
       setConstructionKind: (constructionKind) => set({ constructionKind, tool: "construction" }),
@@ -215,6 +226,8 @@ export const useEditor = create<EditorState>()(
       togglePhaseOverlay: () => set((s) => ({ phaseOverlay: !s.phaseOverlay })),
       toggleLegend: () => set((s) => ({ showLegend: !s.showLegend })),
       setLassoMode: (lassoMode) => set({ lassoMode }),
+      setAssignCircuitId: (assignCircuitId) => set({ assignCircuitId }),
+      toggleCableRoutes: () => set((s) => ({ showCableRoutes: !s.showCableRoutes })),
       cycleGridSnap: () =>
         set((s) => {
           const order: GridSnap[] = ["fine", "normal", "coarse"];
@@ -233,6 +246,7 @@ export const useEditor = create<EditorState>()(
         snapEnabled: s.snapEnabled,
         gridSnap: s.gridSnap,
         showLegend: s.showLegend,
+        showCableRoutes: s.showCableRoutes,
       }),
     },
   ),

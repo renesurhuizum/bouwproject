@@ -31,7 +31,7 @@ import { getDB } from "@/lib/db/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useHistory } from "@/lib/history";
 import { useEditor, type SelKind, type Selection } from "@/lib/store/editor";
-import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers, useSections } from "@/lib/hooks";
+import { useWalls, useRooms, useElectrical, useOpenings, usePlumbing, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers, useSections, useProject, useLevels, useCircuits, useAllElectrical } from "@/lib/hooks";
 import {
   ELECTRICAL_DEFAULT_HEIGHT,
   FIXTURE_DEFAULT_HEIGHT,
@@ -44,6 +44,7 @@ import {
 } from "@/lib/domain/constants";
 import { dist, pathLength, polygonArea, snapToGrid, snapToPoints, projectOnSegment, constrainToAngle, bounds, pointInRect } from "@/lib/geometry";
 import { copySelection, pasteClipboard, type ClipboardData } from "@/lib/clipboard";
+import { computeCircuitRoutes } from "@/lib/routing/cableRouting";
 import {
   LAYER_FOR,
   entityPoints,
@@ -80,6 +81,7 @@ import { RoomDivider } from "./RoomDivider";
 import { ElectricalLegend } from "./ElectricalLegend";
 import { Minimap } from "./Minimap";
 import { PathVertexHandles } from "./PathVertexHandles";
+import { CableRoutesLayer } from "./CableRoutesLayer";
 import type { LayoutRect } from "@/lib/roomDivider";
 
 export function PlanEditor() {
@@ -113,6 +115,8 @@ export function PlanEditor() {
   const lockedLayers = useEditor((s) => s.lockedLayers);
   const lassoMode = useEditor((s) => s.lassoMode);
   const setLassoMode = useEditor((s) => s.setLassoMode);
+  const assignCircuitId = useEditor((s) => s.assignCircuitId);
+  const showCableRoutes = useEditor((s) => s.showCableRoutes);
 
   const walls = useWalls(activeLevelId) ?? [];
   const rooms = useRooms(activeLevelId) ?? [];
@@ -128,6 +132,29 @@ export function PlanEditor() {
   const roofIds = useMemo(() => roofs.map((r) => r.id), [roofs]);
   const dormers = useDormers(roofIds) ?? [];
   const sections = useSections(activeLevelId) ?? [];
+
+  // Kabelroutes worden over het hele project berekend: een eindgroep loopt vaak
+  // door meerdere verdiepingen.
+  const project = useProject();
+  const levels = useLevels(project?.id) ?? [];
+  const levelIds = useMemo(() => levels.map((l) => l.id), [levels]);
+  const circuits = useCircuits(project?.id) ?? [];
+  const allElectrical = useAllElectrical(levelIds) ?? [];
+  const circuitColors = useMemo(
+    () => new Map(circuits.map((c) => [c.id, c.color])),
+    [circuits],
+  );
+  const circuitNumbers = useMemo(
+    () => new Map(circuits.map((c) => [c.id, c.number])),
+    [circuits],
+  );
+  const cableRoutes = useMemo(
+    () =>
+      circuits.length > 0
+        ? computeCircuitRoutes({ circuits, items: allElectrical, walls, levels })
+        : [],
+    [circuits, allElectrical, walls, levels],
+  );
 
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
@@ -1037,6 +1064,17 @@ export function PlanEditor() {
   function onSelectEntity(kind: SelKind, id: string) {
     if (tool !== "select") return; // bij tekenen niet selecteren
     if (lockedLayers[LAYER_FOR[kind]]) return; // vergrendelde laag: niet selecteerbaar
+    // Toewijsmodus vanuit de groepenkast: aantikken hangt het punt aan de groep
+    // (nogmaals tikken haalt het er weer af).
+    if (assignCircuitId && kind === "electrical") {
+      const item = allElectrical.find((e) => e.id === id);
+      if (item && item.type !== "panel") {
+        void mUpdate("electrical", id, {
+          circuitId: item.circuitId === assignCircuitId ? undefined : assignCircuitId,
+        });
+      }
+      return;
+    }
     if (shiftRef.current) {
       // Shift-klik: toggle in/uit de meervoudige selectie.
       const cur = multi.length ? multi : selection ? [selection] : [];
@@ -1160,6 +1198,8 @@ export function PlanEditor() {
               items={electrical}
               selectedId={selection?.kind === "electrical" ? selection.id : null}
               onSelect={(id) => onSelectEntity("electrical", id)}
+              circuitColors={circuitColors}
+              circuitNumbers={circuitNumbers}
             />
           )}
 
@@ -1242,6 +1282,15 @@ export function PlanEditor() {
               onRotate={async (id, rotation) => {
                 await mUpdate("furniture", id, { rotation });
               }}
+            />
+          )}
+
+          {visibleLayers.electrical && showCableRoutes && cableRoutes.length > 0 && (
+            <CableRoutesLayer
+              view={view}
+              circuits={circuits}
+              routes={cableRoutes}
+              focusCircuitId={assignCircuitId}
             />
           )}
 

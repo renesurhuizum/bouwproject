@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Printer, ArrowLeft, Map as MapIcon, Frame, ListTree, Download, DoorOpen } from "lucide-react";
+import { Printer, ArrowLeft, Map as MapIcon, Frame, ListTree, Download, DoorOpen, Zap } from "lucide-react";
 import {
   useProject,
   useLevels,
@@ -19,6 +19,8 @@ import {
   useHvac,
   usePhases,
   useTasks,
+  useCircuits,
+  useAllElectrical,
 } from "@/lib/hooks";
 import { useEditor } from "@/lib/store/editor";
 import { update } from "@/lib/db/repo";
@@ -29,6 +31,9 @@ import { roomWalls } from "@/lib/roomWalls";
 import { computeQuantities } from "@/lib/quantityTakeoff";
 import { polygonArea } from "@/lib/geometry";
 import { buildOpeningSchedule } from "@/lib/openingSchedule";
+import { computeCircuitRoutes } from "@/lib/routing/cableRouting";
+import { BREAKER_SPECS, CABLE_DRUM_M } from "@/lib/domain/constants";
+import { formatLength } from "@/lib/format";
 import { svgToPngBlob, downloadBlob } from "@/lib/exportImage";
 import { formatArea, formatHeight } from "@/lib/format";
 import {
@@ -38,12 +43,13 @@ import {
 } from "@/lib/domain/constants";
 import type { ElectricalType, FixtureKind } from "@/lib/domain/types";
 
-type Tab = "plan" | "aanzichten" | "kozijnstaat" | "specs";
+type Tab = "plan" | "aanzichten" | "kozijnstaat" | "elektra" | "specs";
 
 const TABS: { key: Tab; label: string; icon: typeof MapIcon }[] = [
   { key: "plan", label: "Plan", icon: MapIcon },
   { key: "aanzichten", label: "Aanzichten", icon: Frame },
   { key: "kozijnstaat", label: "Kozijnstaat", icon: DoorOpen },
+  { key: "elektra", label: "Trekplan", icon: Zap },
   { key: "specs", label: "Specificaties", icon: ListTree },
 ];
 
@@ -72,6 +78,39 @@ export default function WerkbladPage() {
   const hvac = useHvac(level?.id) ?? [];
   const phases = usePhases(project?.id) ?? [];
   const tasks = useTasks(project?.id) ?? [];
+
+  // Trekplan: kabelroutes worden over het hele project berekend, want een
+  // eindgroep loopt vaak door meerdere verdiepingen.
+  const circuits = useCircuits(project?.id) ?? [];
+  const levelIds = useMemo(() => levels.map((l) => l.id), [levels]);
+  const allElectrical = useAllElectrical(levelIds) ?? [];
+  const cableRoutes = useMemo(
+    () =>
+      circuits.length > 0
+        ? computeCircuitRoutes({ circuits, items: allElectrical, walls, levels })
+        : [],
+    [circuits, allElectrical, walls, levels],
+  );
+  const routeById = useMemo(
+    () => new Map(cableRoutes.map((r) => [r.circuitId, r])),
+    [cableRoutes],
+  );
+  // Inkoop per kabeltype: draad komt per rol van 100 m, dus afronden op rollen.
+  const cableTotals = useMemo(() => {
+    const byCable = new Map<string, number>();
+    for (const c of circuits) {
+      const route = routeById.get(c.id);
+      if (!route || route.purchaseM <= 0) continue;
+      byCable.set(c.cableSpec, (byCable.get(c.cableSpec) ?? 0) + route.purchaseM);
+    }
+    return [...byCable.entries()]
+      .map(([cableSpec, meters]) => ({
+        cableSpec,
+        meters: Math.round(meters * 10) / 10,
+        drums: Math.ceil(meters / CABLE_DRUM_M),
+      }))
+      .sort((a, b) => a.cableSpec.localeCompare(b.cableSpec));
+  }, [circuits, routeById]);
 
   const [tab, setTab] = useState<Tab>("plan");
 
@@ -275,6 +314,129 @@ export default function WerkbladPage() {
               De postnummers (D01, R01…) verschijnen als referentielabels in het Plan-tabblad.
             </p>
           </section>
+        )}
+
+        {/* ── TREKPLAN (elektra) ───────────────────────────────── */}
+        {tab === "elektra" && (
+          <div className="space-y-6">
+            {circuits.length === 0 ? (
+              <p className="rounded-card border border-dashed border-line px-4 py-6 text-center text-sm text-ink-500">
+                Nog geen eindgroepen. Maak ze aan via{" "}
+                <Link href="/plattegrond" className="font-medium text-accent underline">
+                  Plattegrond → Groepen
+                </Link>{" "}
+                en wijs de punten toe; hier verschijnt dan per groep hoeveel meter
+                kabel je moet trekken.
+              </p>
+            ) : (
+              <>
+                <Section title="Trekkabellijst">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-500">
+                        <th className="py-1.5">Groep</th>
+                        <th className="py-1.5">Zekering</th>
+                        <th className="py-1.5">Kabel</th>
+                        <th className="py-1.5 text-right">Punten</th>
+                        <th className="py-1.5 text-right">Gemeten</th>
+                        <th className="py-1.5 text-right">Inkoop</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {circuits.map((c) => {
+                        const route = routeById.get(c.id);
+                        const points = allElectrical.filter(
+                          (e) => e.circuitId === c.id && e.type !== "panel",
+                        ).length;
+                        return (
+                          <tr key={c.id} className="border-b border-line/60">
+                            <td className="py-1.5 font-medium text-ink-900">
+                              <span
+                                aria-hidden
+                                className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle"
+                                style={{ background: c.color }}
+                              />
+                              {c.number} · {c.name}
+                            </td>
+                            <td className="py-1.5 text-ink-500">{c.breaker}</td>
+                            <td className="tabular py-1.5 text-ink-700">{c.cableSpec}</td>
+                            <td className="tabular py-1.5 text-right text-ink-700">{points}</td>
+                            <td className="tabular py-1.5 text-right text-ink-500">
+                              {route ? formatLength(route.measuredM) : "—"}
+                            </td>
+                            <td className="tabular py-1.5 text-right font-semibold text-ink-900">
+                              {route ? formatLength(route.purchaseM) : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <p className="mt-2 text-[11px] leading-snug text-ink-400">
+                    Gemeten = route langs de muren plus de stijgstukken naar
+                    montagehoogte. Inkoop = gemeten plus speling per punt, een
+                    staart in de meterkast en 10% snijverlies.
+                  </p>
+                </Section>
+
+                <Section title="Inkoop per kabeltype">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-500">
+                        <th className="py-1.5">Kabel</th>
+                        <th className="py-1.5 text-right">Meters</th>
+                        <th className="py-1.5 text-right">Rollen à {CABLE_DRUM_M} m</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cableTotals.map((t) => (
+                        <tr key={t.cableSpec} className="border-b border-line/60">
+                          <td className="tabular py-1.5 font-medium text-ink-900">{t.cableSpec}</td>
+                          <td className="tabular py-1.5 text-right text-ink-700">
+                            {t.meters.toFixed(1)} m
+                          </td>
+                          <td className="tabular py-1.5 text-right font-semibold text-ink-900">
+                            {t.drums}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Section>
+
+                <Section title="Aansluitpunten per groep">
+                  <div className="space-y-3">
+                    {circuits.map((c) => {
+                      const members = allElectrical.filter(
+                        (e) => e.circuitId === c.id && e.type !== "panel",
+                      );
+                      if (members.length === 0) return null;
+                      const byType = new Map<ElectricalType, number>();
+                      for (const m of members) {
+                        byType.set(m.type, (byType.get(m.type) ?? 0) + 1);
+                      }
+                      const spec = BREAKER_SPECS[c.breaker];
+                      return (
+                        <div key={c.id} className="rounded-lg bg-paper-sunken px-3 py-2">
+                          <p className="text-xs font-semibold text-ink-900">
+                            Groep {c.number} — {c.name}{" "}
+                            <span className="font-normal text-ink-500">
+                              ({spec.cableSpec}, {spec.cores}×{spec.crossSection} mm²)
+                            </span>
+                          </p>
+                          <p className="mt-1 text-xs text-ink-600">
+                            {[...byType.entries()]
+                              .map(([t, n]) => `${n}× ${ELECTRICAL_LABEL[t]}`)
+                              .join(" · ")}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Section>
+              </>
+            )}
+          </div>
         )}
 
         {/* ── SPECIFICATIES ────────────────────────────────────── */}
