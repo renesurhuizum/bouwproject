@@ -29,7 +29,7 @@ import { WerkbladPlan } from "@/components/werkblad/WerkbladPlan";
 import { WallElevation } from "@/components/werkblad/WallElevation";
 import { OpeningSchedule } from "@/components/werkblad/OpeningSchedule";
 import { roomWalls } from "@/lib/roomWalls";
-import { computeQuantities } from "@/lib/quantityTakeoff";
+import { computeTakeoff } from "@/lib/takeoff/engine";
 import { polygonArea } from "@/lib/geometry";
 import { buildOpeningSchedule } from "@/lib/openingSchedule";
 import { computeCircuitRoutes } from "@/lib/routing/cableRouting";
@@ -58,13 +58,6 @@ const TABS: { key: Tab; label: string; icon: typeof MapIcon }[] = [
 
 const PLAN_SVG_ID = "werkblad-plan-svg";
 const DRAWING_SCALES = [50, 100, 200];
-
-const QTY_CAT_LABEL: Record<string, string> = {
-  walls: "Wanden",
-  floors: "Vloeren & plafonds",
-  openings: "Deuren & ramen",
-  finishes: "Afwerking",
-};
 
 export default function WerkbladPage() {
   const project = useProject();
@@ -170,8 +163,15 @@ export default function WerkbladPage() {
   for (const p of plumbing) if (p.fixture) fixByType.set(p.fixture, (fixByType.get(p.fixture) ?? 0) + 1);
 
   const quantities = useMemo(
-    () => (level ? computeQuantities(walls, rooms, openings, level) : []),
-    [walls, rooms, openings, level],
+    () =>
+      level
+        ? computeTakeoff({
+            levels: [level], walls, rooms, openings, plumbing,
+            electrical: allElectrical.filter((e) => e.levelId === level.id),
+            circuits, beams,
+          })
+        : [],
+    [level, walls, rooms, openings, plumbing, allElectrical, circuits, beams],
   );
 
   const datum = new Intl.DateTimeFormat("nl-NL", { dateStyle: "long" }).format(new Date());
@@ -556,15 +556,18 @@ export default function WerkbladPage() {
             )}
 
             {quantities.length > 0 && (
-              <Section title="Hoeveelheidsstaat">
+              <Section title="Hoeveelheidsstaat (gemeten → inkoop)">
                 <table className="w-full text-xs">
                   <tbody>
-                    {quantities.map((q, i) => (
-                      <tr key={`${q.name}-${i}`} className="border-b border-line/50">
-                        <td className="py-1 text-ink-400">{QTY_CAT_LABEL[q.category]}</td>
+                    {quantities.map((q) => (
+                      <tr key={q.sourceId} className="border-b border-line/50">
+                        <td className="py-1 text-ink-400">{q.category}</td>
                         <td className="py-1 text-ink-700">{q.name}</td>
-                        <td className="tabular py-1 text-right text-ink-900">
-                          {q.quantity} {q.unit}
+                        <td className="tabular py-1 text-right text-ink-500">
+                          {q.netQty} {q.unit}
+                        </td>
+                        <td className="tabular py-1 text-right font-semibold text-ink-900">
+                          {q.packs != null ? `${q.packs} × ${q.packName ?? "pak"}` : `${q.buyQty} ${q.unit}`}
                         </td>
                       </tr>
                     ))}

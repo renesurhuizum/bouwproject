@@ -338,6 +338,18 @@ export interface MaterialItem extends Entity {
   unitPrice?: number;
   status: MaterialStatus;
   phaseId?: string;
+  /**
+   * Herkomst uit de hoeveelheidsberekening. Aanwezig = deze regel is automatisch
+   * afgeleid uit de plattegrond en wordt bijgewerkt als het plan verandert.
+   * Leeg = handmatig toegevoegd; daar blijft de sync vanaf.
+   */
+  sourceId?: string;
+  articleKey?: string;
+  /** Verpakkingsnaam, bv. "rol à 100 m" — zodat duidelijk is wat je bestelt. */
+  packName?: string;
+  /** Gebruiker heeft het aantal zelf aangepast; de sync overschrijft dat niet. */
+  quantityOverridden?: boolean;
+  supplier?: string;
 }
 
 export interface Photo extends Entity {
