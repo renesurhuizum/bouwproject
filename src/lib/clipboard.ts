@@ -467,18 +467,5 @@ export async function pasteClipboard(
 }
 
 // Soort → tabelnaam (voor multi-delete e.d.).
-export const TABLE_FOR_KIND: Record<SelKind, string> = {
-  wall: "walls",
-  opening: "openings",
-  electrical: "electrical",
-  room: "rooms",
-  plumbing: "plumbing",
-  hvac: "hvac",
-  furniture: "furniture",
-  staircase: "stairs",
-  column: "columns",
-  beam: "beams",
-  roof: "roofs",
-  dormer: "dormers",
-  section: "sections",
-};
+// Woont in domain/tables.ts; hier hergeexporteerd voor bestaande imports.
+export { TABLE_FOR_KIND } from "./domain/tables";

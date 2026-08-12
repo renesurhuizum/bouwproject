@@ -2,11 +2,11 @@
 
 // Elektra-laag. Markers met constante schermgrootte, korte code + hoogtelabel.
 
-import { Fragment } from "react";
 import { Layer, Circle, Rect, Label, Tag, Text, Line } from "react-konva";
 import type { ElectricalItem } from "@/lib/domain/types";
 import { ELECTRICAL_CODE } from "@/lib/domain/constants";
 import { formatHeight } from "@/lib/format";
+import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, type ViewState } from "./viewport";
 
 const CODE = ELECTRICAL_CODE;
@@ -52,34 +52,28 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
         const selected = it.id === selectedId;
         const r = 11;
         return (
-          <Fragment key={it.id}>
+          <DraggableEntity
+            key={it.id}
+            kind="electrical"
+            entity={it}
+            anchor={it.position}
+            view={view}
+            onSelect={onSelect}
+          >
             {selected && (
               <Circle x={p.x} y={p.y} radius={r + 5} fill="#fb923c" opacity={0.5} listening={false} />
             )}
             {it.type === "switch" || it.type === "panel" ? (
               <Rect
-                id={it.id}
-                name="electrical"
                 x={p.x - r}
                 y={p.y - r}
                 width={r * 2}
                 height={r * 2}
                 cornerRadius={4}
                 fill="#1d4ed8"
-                onClick={() => onSelect(it.id)}
-                onTap={() => onSelect(it.id)}
               />
             ) : (
-              <Circle
-                id={it.id}
-                name="electrical"
-                x={p.x}
-                y={p.y}
-                radius={r}
-                fill="#1d4ed8"
-                onClick={() => onSelect(it.id)}
-                onTap={() => onSelect(it.id)}
-              />
+              <Circle x={p.x} y={p.y} radius={r} fill="#1d4ed8" />
             )}
             <Text
               text={CODE[it.type]}
@@ -103,7 +97,7 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
                 padding={2}
               />
             </Label>
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>

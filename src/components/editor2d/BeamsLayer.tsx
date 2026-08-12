@@ -3,11 +3,11 @@
 // Stalen balken in bovenaanzicht: dubbele lijn (I-profiel) langs start→end,
 // met profielbreedte. Selecteerbaar.
 
-import { Fragment } from "react";
 import { Layer, Line } from "react-konva";
 import type { Beam } from "@/lib/domain/types";
 import { BEAM_PROFILE_DIMS } from "@/lib/domain/constants";
 import { dist } from "@/lib/geometry";
+import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
 
 interface Props {
@@ -37,23 +37,26 @@ export function BeamsLayer({ view, beams, selectedId, onSelect }: Props) {
         const selected = b.id === selectedId;
         const stroke = selected ? "#ea580c" : STROKE;
         return (
-          <Fragment key={b.id}>
+          <DraggableEntity
+            key={b.id}
+            kind="beam"
+            entity={b}
+            anchor={b.start}
+            view={view}
+            onSelect={onSelect}
+          >
             {/* twee flenslijnen */}
             <Line points={[a.x + nx, a.y + ny, c.x + nx, c.y + ny]} stroke={stroke} strokeWidth={selected ? 2.5 : 1.6} listening={false} />
             <Line points={[a.x - nx, a.y - ny, c.x - nx, c.y - ny]} stroke={stroke} strokeWidth={selected ? 2.5 : 1.6} listening={false} />
-            {/* lijfas (klikbaar) */}
+            {/* lijfas (klikbaar/sleepbaar) */}
             <Line
-              id={b.id}
-              name="beam"
               points={[a.x, a.y, c.x, c.y]}
               stroke={stroke}
               strokeWidth={1}
               dash={[6, 4]}
               hitStrokeWidth={Math.max(12, flange)}
-              onClick={() => onSelect(b.id)}
-              onTap={() => onSelect(b.id)}
             />
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>

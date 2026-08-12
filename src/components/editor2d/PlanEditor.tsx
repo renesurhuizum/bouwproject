@@ -25,6 +25,7 @@ import type {
   SectionLine,
 } from "@/lib/domain/types";
 import type { TableName } from "@/lib/db/repo";
+import { TABLE_FOR_KIND } from "@/lib/domain/tables";
 import { mBatch, mCreate, mRemove, mUpdate, recordCreate } from "@/lib/db/mutate";
 import { getDB } from "@/lib/db/db";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -318,24 +319,8 @@ export function PlanEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, undo, redo]);
 
-  const TABLE_FOR: Record<SelKind, TableName> = {
-    wall: "walls",
-    opening: "openings",
-    electrical: "electrical",
-    room: "rooms",
-    plumbing: "plumbing",
-    hvac: "hvac",
-    furniture: "furniture",
-    staircase: "stairs",
-    column: "columns",
-    beam: "beams",
-    roof: "roofs",
-    dormer: "dormers",
-    section: "sections",
-  };
-
   async function deleteEntity(kind: SelKind, id: string) {
-    await mRemove(TABLE_FOR[kind], id);
+    await mRemove(TABLE_FOR_KIND[kind], id);
     setMenu(null);
     if (selection?.id === id) select(null);
   }
@@ -407,7 +392,7 @@ export function PlanEditor() {
         const ent = findEntity(s.kind, s.id);
         if (!ent) continue;
         const patch = translatePatch(s.kind, ent, dx, dy);
-        if (Object.keys(patch).length) await mUpdate(TABLE_FOR[s.kind], s.id, patch);
+        if (Object.keys(patch).length) await mUpdate(TABLE_FOR_KIND[s.kind], s.id, patch);
       }
     });
   }
@@ -422,7 +407,7 @@ export function PlanEditor() {
     await mBatch(async () => {
       for (const { kind, id, entity } of ents) {
         const patch = mirrorPatch(kind, entity, axis, pivot);
-        if (Object.keys(patch).length) await mUpdate(TABLE_FOR[kind], id, patch);
+        if (Object.keys(patch).length) await mUpdate(TABLE_FOR_KIND[kind], id, patch);
       }
     });
   }
@@ -441,7 +426,7 @@ export function PlanEditor() {
   async function doDeleteSelection(sels: Selection[]) {
     // Eén undo-stap voor de hele selectie.
     await mBatch(async () => {
-      for (const s of sels) await mRemove(TABLE_FOR[s.kind], s.id);
+      for (const s of sels) await mRemove(TABLE_FOR_KIND[s.kind], s.id);
     });
     setMenu(null);
     select(null);
@@ -966,14 +951,28 @@ export function PlanEditor() {
     setView((v) => zoomAround(v, pos, factor));
   }
 
+  // Zoek vanaf de aangeklikte vorm omhoog naar de node die de entiteit
+  // identificeert: sinds de sleep-wrapper dragen groepen id + name, niet de
+  // losse vormen erin.
+  function entityNodeFor(node: import("konva/lib/Node").Node | null) {
+    let cur = node;
+    while (cur) {
+      const id = cur.id();
+      const name = cur.name();
+      if (id && name && name in LAYER_FOR) return { id, kind: name as SelKind };
+      cur = cur.getParent();
+    }
+    return null;
+  }
+
   // Rechtermuisknop op een item → selecteren + contextmenu.
   function onContextMenu(e: KonvaEventObject<MouseEvent>) {
     e.evt.preventDefault();
     const stage = e.target.getStage();
     if (!stage) return;
-    const node = e.target;
-    const id = node.id();
-    const name = node.name();
+    const found = entityNodeFor(e.target);
+    const id = found?.id ?? "";
+    const name = found?.kind ?? "";
     if (id && name) {
       if (lockedLayers[LAYER_FOR[name as SelKind]]) return; // vergrendeld
       const rect = stage.container().getBoundingClientRect();
@@ -1142,9 +1141,6 @@ export function PlanEditor() {
               furniture={furniture}
               selectedId={selection?.kind === "furniture" ? selection.id : null}
               onSelect={(id) => onSelectEntity("furniture", id)}
-              onMove={async (id, x, y) => {
-                await mUpdate("furniture", id, { position: { x, y } });
-              }}
               onRotate={async (id, rotation) => {
                 await mUpdate("furniture", id, { rotation });
               }}

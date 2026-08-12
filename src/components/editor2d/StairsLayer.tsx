@@ -3,9 +3,9 @@
 // Trap-symbolen in bovenaanzicht (NEN-stijl): treden als evenwijdige lijnen
 // met een looprichting-pijl en "op"/"af"-label. Recht / kwartslag / spiltrap.
 
-import { Fragment } from "react";
 import { Layer, Group, Rect, Line, Circle, Text } from "react-konva";
 import type { Staircase } from "@/lib/domain/types";
+import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
 
 interface Props {
@@ -118,7 +118,14 @@ export function StairsLayer({ view, stairs, selectedId, onSelect }: Props) {
         const boxH = s.kind === "spiral" ? Math.max(sw, run) : run;
         const selected = s.id === selectedId;
         return (
-          <Fragment key={s.id}>
+          <DraggableEntity
+            key={s.id}
+            kind="staircase"
+            entity={s}
+            anchor={s.position}
+            view={view}
+            onSelect={onSelect}
+          >
             <Group x={pos.x} y={pos.y} rotation={s.rotation}>
               {selected && (
                 <Rect
@@ -134,17 +141,7 @@ export function StairsLayer({ view, stairs, selectedId, onSelect }: Props) {
                 />
               )}
               {/* klikvlak */}
-              <Rect
-                id={s.id}
-                name="staircase"
-                x={0}
-                y={0}
-                width={boxW}
-                height={boxH}
-                fill="rgba(15,118,110,0.06)"
-                onClick={() => onSelect(s.id)}
-                onTap={() => onSelect(s.id)}
-              />
+              <Rect x={0} y={0} width={boxW} height={boxH} fill="rgba(15,118,110,0.06)" />
               <StairSymbol s={s} view={view} />
               <Text
                 text={s.direction === "up" ? "op" : "af"}
@@ -156,7 +153,7 @@ export function StairsLayer({ view, stairs, selectedId, onSelect }: Props) {
                 listening={false}
               />
             </Group>
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>

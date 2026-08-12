@@ -1,11 +1,12 @@
 "use client";
 
-import { Fragment, useMemo } from "react";
+import { useMemo } from "react";
 import { Layer, Line, Text, Rect, Group, Arrow } from "react-konva";
 import type { Room, Wall, Level } from "@/lib/domain/types";
 import { polygonArea, polygonCentroid } from "@/lib/geometry";
 import { formatArea } from "@/lib/format";
 import { validateRooms } from "@/lib/validation";
+import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, type ViewState } from "./viewport";
 
 export type RoomPhaseStatus = "todo" | "in-progress" | "done";
@@ -171,17 +172,20 @@ export function RoomsLayer({ view, rooms, selectedId, onSelect, walls = [], leve
         const labelH = 34;
 
         return (
-          <Fragment key={room.id}>
+          <DraggableEntity
+            key={room.id}
+            kind="room"
+            entity={room}
+            anchor={room.polygon[0]}
+            view={view}
+            onSelect={onSelect}
+          >
             <Line
-              id={room.id}
-              name="room"
               points={pts}
               closed
               fill={fillColor}
               stroke={strokeColor}
               strokeWidth={selected ? 2 : 1}
-              onClick={() => onSelect(room.id)}
-              onTap={() => onSelect(room.id)}
             />
             {staircase && <StaircaseLines polygon={room.polygon} view={view} />}
             <Group x={c.x - labelW / 2} y={c.y - labelH / 2} listening={false}>
@@ -227,7 +231,7 @@ export function RoomsLayer({ view, rooms, selectedId, onSelect, walls = [], leve
                 align="center"
               />
             </Group>
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>
