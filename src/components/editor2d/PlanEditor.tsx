@@ -100,6 +100,7 @@ export function PlanEditor() {
   const wallDefaults = useEditor((s) => s.wallDefaults);
   const visibleLayers = useEditor((s) => s.visibleLayers);
   const showGrid = useEditor((s) => s.showGrid);
+  const snapEnabled = useEditor((s) => s.snapEnabled);
   const gridSnap = useEditor((s) => s.gridSnap);
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const selection = useEditor((s) => s.selection);
@@ -108,6 +109,8 @@ export function PlanEditor() {
   const setMulti = useEditor((s) => s.setMulti);
   const setClipboard = useEditor((s) => s.setClipboard);
   const lockedLayers = useEditor((s) => s.lockedLayers);
+  const lassoMode = useEditor((s) => s.lassoMode);
+  const setLassoMode = useEditor((s) => s.setLassoMode);
 
   const walls = useWalls(activeLevelId) ?? [];
   const rooms = useRooms(activeLevelId) ?? [];
@@ -129,6 +132,10 @@ export function PlanEditor() {
   const [snapTarget, setSnapTarget] = useState<Point | null>(null);
   const [roomDraft, setRoomDraft] = useState<Point[]>([]);
   const [pipePoints, setPipePoints] = useState<Point[]>([]);
+  // De sneltoets-handler wordt niet opnieuw geregistreerd tijdens het klikken
+  // van leidingpunten; via deze ref leest Enter altijd de actuele punten.
+  const pipePointsRef = useRef<Point[]>([]);
+  pipePointsRef.current = pipePoints;
   const [menu, setMenu] = useState<{ x: number; y: number; kind: SelKind; id: string } | null>(null);
   const [divideRect, setDivideRect] = useState<LayoutRect | null>(null);
   const divideStartRef = useRef<Point | null>(null);
@@ -144,8 +151,9 @@ export function PlanEditor() {
   });
   entitiesRef.current = { walls, rooms, openings, electrical, plumbing, hvac, furniture, stairs, columns, beams, roofs, dormers, sections };
 
-  // Shift-toets tracking voor orthogonaal tekenen
+  // Shift-toets tracking voor orthogonaal tekenen; Alt = snapping tijdelijk uit.
   const shiftRef = useRef(false);
+  const altRef = useRef(false);
   // Wall length editing overlay
   const [editingWallId, setEditingWallId] = useState<string | null>(null);
   const [editLengthValue, setEditLengthValue] = useState("");
@@ -187,13 +195,26 @@ export function PlanEditor() {
     { id: number; start: Point; time: number; moved: boolean; onStage: boolean } | null
   >(null);
 
-  // Shift-toets bijhouden voor orthogonaal tekenen.
+  // Shift (ortho) en Alt (snap-bypass) bijhouden. Blur reset beide, anders
+  // blijft een toets "hangen" als het venster focus verliest tijdens indrukken.
   useEffect(() => {
-    const onDown = (e: KeyboardEvent) => { if (e.key === "Shift") shiftRef.current = true; };
-    const onUp = (e: KeyboardEvent) => { if (e.key === "Shift") shiftRef.current = false; };
+    const onDown = (e: KeyboardEvent) => {
+      if (e.key === "Shift") shiftRef.current = true;
+      if (e.key === "Alt") altRef.current = true;
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") shiftRef.current = false;
+      if (e.key === "Alt") altRef.current = false;
+    };
+    const onBlur = () => { shiftRef.current = false; altRef.current = false; };
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
-    return () => { window.removeEventListener("keydown", onDown); window.removeEventListener("keyup", onUp); };
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
+    };
   }, []);
 
   // Containergrootte volgen.
@@ -254,18 +275,9 @@ export function PlanEditor() {
           const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
           void doNudge(dx, dy);
         }
-      } else if (e.key === "Enter" && tool === "draw-pipe" && pipePoints.length >= 2 && activeLevelId) {
+      } else if (e.key === "Enter" && useEditor.getState().tool === "draw-pipe") {
         e.preventDefault();
-        void (async () => {
-          await create<import("@/lib/domain/types").PlumbingItem>("plumbing", {
-            levelId: activeLevelId,
-            type: pipeType as import("@/lib/domain/types").PlumbingType,
-            path: pipePoints,
-            diameter: pipeType === "drain" ? 50 : 22,
-            heightZ: pipeType === "drain" ? 0.05 : 1.0,
-          });
-          setPipePoints([]);
-        })();
+        void commitPipe();
       } else if (e.key === "Escape") {
         setDraftStart(null);
         setRoomDraft([]);
@@ -469,6 +481,11 @@ export function PlanEditor() {
   }
 
   function snapPoint(m: Point): Point {
+    // Snapping staat uit (knop) of wordt tijdelijk overruled met Alt.
+    if (!snapEnabled || altRef.current) {
+      setSnapTarget(null);
+      return shiftRef.current && draftStart ? constrainToAngle(m, draftStart, 45) : m;
+    }
     const near = snapToPoints(m, endpoints, pxToMeters(SNAP_RADIUS_PX, view));
     setSnapTarget(near);
     let result = near ?? snapToGrid(m, GRID_SNAP_M[gridSnap]);
@@ -610,6 +627,23 @@ export function PlanEditor() {
     });
     pushAction({ type: "create", table: "beams", id: bm.id });
     select({ kind: "beam", id: bm.id });
+  }
+
+  // Leiding vastleggen. Leest de punten uit de ref en de rest uit de store,
+  // zodat zowel Enter als de Opslaan-knop dezelfde verse state gebruiken.
+  async function commitPipe() {
+    const pts = pipePointsRef.current;
+    const st = useEditor.getState();
+    if (pts.length < 2 || !st.activeLevelId) return;
+    const item = await create<PlumbingItem>("plumbing", {
+      levelId: st.activeLevelId,
+      type: st.pipeType as PlumbingType,
+      path: pts,
+      diameter: st.pipeType === "drain" ? 50 : 22,
+      heightZ: st.pipeType === "drain" ? 0.05 : 1.0,
+    });
+    pushAction({ type: "create", table: "plumbing", id: item.id });
+    setPipePoints([]);
   }
 
   async function createSection(start: Point, end: Point) {
@@ -785,12 +819,14 @@ export function PlanEditor() {
         moved: false,
         onStage: e.target === stage,
       };
-      // Muis + select-tool op leeg canvas = lasso starten; anders pannen.
+      // Slepen op leeg canvas pant (wat iedereen verwacht). Lasso-selectie
+      // start alleen bewust: met Shift ingedrukt of in de lasso-modus — en
+      // die modus werkt óók op touch, waar Shift niet bestaat.
       const startLasso =
         tool === "select" &&
         e.target === stage &&
-        evt.pointerType === "mouse" &&
-        evt.button === 0;
+        evt.button === 0 &&
+        (lassoMode || shiftRef.current);
       if (startLasso) {
         const startM = screenToMeters(pos, view);
         lassoRef.current = { id: evt.pointerId, start: startM };
@@ -894,6 +930,7 @@ export function PlanEditor() {
       } else {
         select(null); // klik op leeg vlak = deselecteren
       }
+      setLassoMode(false); // eenmalige modus: na het slepen weer normaal pannen
       return;
     }
 
@@ -1359,7 +1396,7 @@ export function PlanEditor() {
 
       {/* Leiding-tekenhulp */}
       {tool === "draw-pipe" && (
-        <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
+        <div className="pointer-events-none absolute inset-x-0 top-16 flex justify-center px-3">
           <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 px-2 py-1.5 shadow-lg backdrop-blur">
             <span className="px-1 text-[11px] text-ink-500">
               {pipePoints.length === 0
@@ -1382,19 +1419,7 @@ export function PlanEditor() {
             </button>
             <button
               disabled={pipePoints.length < 2}
-              onClick={() => {
-                if (!activeLevelId || pipePoints.length < 2) return;
-                void (async () => {
-                  await create<import("@/lib/domain/types").PlumbingItem>("plumbing", {
-                    levelId: activeLevelId,
-                    type: pipeType as import("@/lib/domain/types").PlumbingType,
-                    path: pipePoints,
-                    diameter: pipeType === "drain" ? 50 : 22,
-                    heightZ: pipeType === "drain" ? 0.05 : 1.0,
-                  });
-                  setPipePoints([]);
-                })();
-              }}
+              onClick={() => void commitPipe()}
               className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
             >
               Opslaan
@@ -1405,7 +1430,7 @@ export function PlanEditor() {
 
       {/* Ruimte-tekenhulp */}
       {tool === "room" && (
-        <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
+        <div className="pointer-events-none absolute inset-x-0 top-16 flex justify-center px-3">
           <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 px-2 py-1.5 shadow-lg backdrop-blur">
             <span className="px-1 text-[11px] text-ink-500">
               {roomDraft.length === 0

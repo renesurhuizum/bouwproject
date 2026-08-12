@@ -21,6 +21,8 @@ import {
   Building2,
   Triangle,
   Scissors,
+  Magnet,
+  SquareDashed,
 } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import { useHistory } from "@/lib/history";
@@ -115,6 +117,10 @@ export function Toolbar() {
   const toggleLock = useEditor((s) => s.toggleLock);
   const showGrid = useEditor((s) => s.showGrid);
   const toggleGrid = useEditor((s) => s.toggleGrid);
+  const snapEnabled = useEditor((s) => s.snapEnabled);
+  const toggleSnap = useEditor((s) => s.toggleSnap);
+  const lassoMode = useEditor((s) => s.lassoMode);
+  const setLassoMode = useEditor((s) => s.setLassoMode);
   const gridSnap = useEditor((s) => s.gridSnap);
   const cycleGridSnap = useEditor((s) => s.cycleGridSnap);
   const furniturePaletteKind = useEditor((s) => s.furniturePaletteKind);
@@ -513,12 +519,12 @@ export function Toolbar() {
         </div>
       )}
 
-      {/* Hoofd-dock */}
-      <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-line bg-paper-raised/95 p-1.5 shadow-xl backdrop-blur">
+      {/* Hoofd-dock — scrollt horizontaal op smalle schermen i.p.v. af te kappen */}
+      <div className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-2xl border border-line bg-paper-raised/95 p-1.5 shadow-xl backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <button
           onClick={() => void undo()}
           aria-label="Ongedaan maken"
-          className="flex h-11 w-10 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
+          className="flex h-11 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
         >
           <Undo2 size={17} />
           <span>Undo</span>
@@ -526,14 +532,24 @@ export function Toolbar() {
         <button
           onClick={() => void redo()}
           aria-label="Opnieuw"
-          className="flex h-11 w-10 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
+          className="flex h-11 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
         >
           <Redo2 size={17} />
           <span>Redo</span>
         </button>
-        <div className="mx-0.5 h-7 w-px bg-line" />
+        <div className="mx-0.5 h-7 w-px shrink-0 bg-line" />
         <ToolBtn active={tool === "select"} onClick={() => setTool("select")} label="Kies">
           <MousePointer2 size={20} />
+        </ToolBtn>
+        <ToolBtn
+          active={lassoMode}
+          onClick={() => {
+            if (tool !== "select") setTool("select");
+            setLassoMode(!lassoMode);
+          }}
+          label="Lasso"
+        >
+          <SquareDashed size={20} />
         </ToolBtn>
         <ToolBtn active={tool === "wall"} onClick={() => setTool("wall")} label="Muur">
           <Minus size={20} strokeWidth={3} />
@@ -600,20 +616,29 @@ export function Toolbar() {
         >
           <Scissors size={20} />
         </ToolBtn>
-        <div className="mx-0.5 h-7 w-px bg-line" />
+        <div className="mx-0.5 h-7 w-px shrink-0 bg-line" />
         <ToolBtn active={showLayers} onClick={() => setShowLayers((v) => !v)} label="Lagen">
           <Layers size={20} />
         </ToolBtn>
         <ToolBtn active={showGrid} onClick={toggleGrid} label="Raster">
           <Grid3x3 size={20} />
         </ToolBtn>
+        <ToolBtn active={snapEnabled} onClick={toggleSnap} label="Magneet">
+          <Magnet size={20} />
+        </ToolBtn>
         <button
           onClick={cycleGridSnap}
-          className="flex h-11 w-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-700 hover:bg-paper-sunken"
+          disabled={!snapEnabled}
+          title={
+            snapEnabled
+              ? "Snap-maat wijzigen · Alt ingedrukt = snapping tijdelijk uit"
+              : "Snapping staat uit"
+          }
+          className="flex h-11 w-12 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-700 hover:bg-paper-sunken disabled:opacity-40"
           aria-label="Wijzig snap-maat"
         >
           <span className="text-[10px] font-bold text-ink-900">{SNAP_LABEL[gridSnap]}</span>
-          <span>Snap</span>
+          <span>Maat</span>
         </button>
       </div>
     </div>
@@ -636,7 +661,7 @@ function ToolBtn({
       onClick={onClick}
       aria-label={label}
       aria-pressed={active}
-      className={`flex h-11 w-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium transition-colors ${
+      className={`flex h-11 w-12 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium transition-colors ${
         active ? "bg-accent text-white" : "text-ink-700 hover:bg-paper-sunken"
       }`}
     >

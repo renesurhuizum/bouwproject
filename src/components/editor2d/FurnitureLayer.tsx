@@ -85,14 +85,6 @@ export function FurnitureLayer({ view, furniture, selectedId, onSelect, onMove, 
                   listening={false}
                 />
               )}
-              {selected && (
-                <>
-                  <Circle x={0}   y={0}   radius={5} fill="#ea580c" />
-                  <Circle x={sw}  y={0}   radius={5} fill="#ea580c" />
-                  <Circle x={0}   y={sd}  radius={5} fill="#ea580c" />
-                  <Circle x={sw}  y={sd}  radius={5} fill="#ea580c" />
-                </>
-              )}
             </Group>
 
             {/* Vrije rotatie-handle (alleen bij selectie) */}
