@@ -96,3 +96,14 @@ export function getDB(): BouwDB {
   if (!_db) _db = new BouwDB();
   return _db;
 }
+
+// Gooit de database weg en begint schoon. Alleen bedoeld voor tests — in de app
+// is de lokale database de bron van waarheid en mag niets hem zomaar wissen.
+export async function resetDB(): Promise<void> {
+  if (_db) {
+    _db.close();
+    await _db.delete();
+    _db = null;
+  }
+  getDB();
+}

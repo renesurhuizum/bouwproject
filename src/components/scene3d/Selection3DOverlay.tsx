@@ -2,7 +2,7 @@
 
 import { X, RotateCw, Trash2 } from "lucide-react";
 import { use3DEdit } from "./use3DEdit";
-import { update, remove } from "@/lib/db/repo";
+import { mUpdate, mRemove } from "@/lib/db/mutate";
 import { getDB } from "@/lib/db/db";
 
 export function Selection3DOverlay() {
@@ -28,7 +28,7 @@ export function Selection3DOverlay() {
           <button
             onClick={async () => {
               const item = await getDB().furniture.get(selectedItem.id);
-              if (item) await update("furniture", selectedItem.id, { rotation: (item.rotation + 90) % 360 });
+              if (item) await mUpdate("furniture", selectedItem.id, { rotation: (item.rotation + 90) % 360 });
             }}
             className="flex items-center gap-1 rounded-lg bg-paper-sunken px-2 py-1 text-[11px] text-ink-600 hover:bg-paper-raised"
           >
@@ -37,7 +37,7 @@ export function Selection3DOverlay() {
         )}
         <button
           onClick={async () => {
-            await remove(selectedItem.kind === "furniture" ? "furniture" : "electrical", selectedItem.id);
+            await mRemove(selectedItem.kind === "furniture" ? "furniture" : "electrical", selectedItem.id);
             clearSelection();
           }}
           className="flex items-center gap-1 rounded-lg bg-danger/10 px-2 py-1 text-[11px] text-danger hover:bg-danger/20"

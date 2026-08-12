@@ -24,8 +24,8 @@ import type {
   Roof,
   SectionLine,
 } from "@/lib/domain/types";
-import { create, remove, update } from "@/lib/db/repo";
 import type { TableName } from "@/lib/db/repo";
+import { mBatch, mCreate, mRemove, mUpdate, recordCreate } from "@/lib/db/mutate";
 import { getDB } from "@/lib/db/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useHistory } from "@/lib/history";
@@ -86,7 +86,6 @@ export function PlanEditor() {
 
   const undo = useHistory((s) => s.undo);
   const redo = useHistory((s) => s.redo);
-  const pushAction = useHistory((s) => s.pushAction);
 
   const tool = useEditor((s) => s.tool);
   const setTool = useEditor((s) => s.setTool);
@@ -336,10 +335,7 @@ export function PlanEditor() {
   };
 
   async function deleteEntity(kind: SelKind, id: string) {
-    const tbl = TABLE_FOR[kind];
-    const snapshot = await (getDB()[tbl] as import("dexie").Table).get(id);
-    if (snapshot) pushAction({ type: "remove", table: tbl, snapshot });
-    await remove(tbl, id);
+    await mRemove(TABLE_FOR[kind], id);
     setMenu(null);
     if (selection?.id === id) select(null);
   }
@@ -385,8 +381,12 @@ export function PlanEditor() {
   async function pasteClip(clip: ReturnType<typeof copySelection>, offset: Point) {
     const st = useEditor.getState();
     if (!st.activeLevelId) return;
-    const { selections, created } = await pasteClipboard(clip, offset, st.activeLevelId);
-    for (const c of created) pushAction({ type: "create", table: c.table as TableName, id: c.id });
+    // Plakken van meerdere entiteiten is één undo-stap.
+    const selections = await mBatch(async () => {
+      const res = await pasteClipboard(clip, offset, st.activeLevelId!);
+      for (const c of res.created) recordCreate(c.table as TableName, c.id);
+      return res.selections;
+    });
     selectResult(selections);
   }
 
@@ -402,12 +402,14 @@ export function PlanEditor() {
   }
 
   async function doNudge(dx: number, dy: number) {
-    for (const s of currentSels()) {
-      const ent = findEntity(s.kind, s.id);
-      if (!ent) continue;
-      const patch = translatePatch(s.kind, ent, dx, dy);
-      if (Object.keys(patch).length) await update(TABLE_FOR[s.kind], s.id, patch);
-    }
+    await mBatch(async () => {
+      for (const s of currentSels()) {
+        const ent = findEntity(s.kind, s.id);
+        if (!ent) continue;
+        const patch = translatePatch(s.kind, ent, dx, dy);
+        if (Object.keys(patch).length) await mUpdate(TABLE_FOR[s.kind], s.id, patch);
+      }
+    });
   }
 
   async function doMirror(axis: "h" | "v") {
@@ -417,28 +419,30 @@ export function PlanEditor() {
     if (!ents.length) return;
     const bb = selectionBounds(ents);
     const pivot = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2 };
-    for (const { kind, id, entity } of ents) {
-      const patch = mirrorPatch(kind, entity, axis, pivot);
-      if (Object.keys(patch).length) await update(TABLE_FOR[kind], id, patch);
-    }
+    await mBatch(async () => {
+      for (const { kind, id, entity } of ents) {
+        const patch = mirrorPatch(kind, entity, axis, pivot);
+        if (Object.keys(patch).length) await mUpdate(TABLE_FOR[kind], id, patch);
+      }
+    });
   }
 
   async function doRotateFurniture(delta: number) {
-    for (const s of currentSels()) {
-      if (s.kind !== "furniture") continue;
-      const f = findEntity("furniture", s.id) as Furniture | null;
-      if (!f) continue;
-      await update("furniture", s.id, { rotation: (((f.rotation + delta) % 360) + 360) % 360 });
-    }
+    await mBatch(async () => {
+      for (const s of currentSels()) {
+        if (s.kind !== "furniture") continue;
+        const f = findEntity("furniture", s.id) as Furniture | null;
+        if (!f) continue;
+        await mUpdate("furniture", s.id, { rotation: (((f.rotation + delta) % 360) + 360) % 360 });
+      }
+    });
   }
 
   async function doDeleteSelection(sels: Selection[]) {
-    for (const s of sels) {
-      const tbl = TABLE_FOR[s.kind];
-      const snapshot = await (getDB()[tbl] as import("dexie").Table).get(s.id);
-      if (snapshot) pushAction({ type: "remove", table: tbl, snapshot });
-      await remove(tbl, s.id);
-    }
+    // Eén undo-stap voor de hele selectie.
+    await mBatch(async () => {
+      for (const s of sels) await mRemove(TABLE_FOR[s.kind], s.id);
+    });
     setMenu(null);
     select(null);
   }
@@ -516,7 +520,7 @@ export function PlanEditor() {
       if (lenM > 0) {
         const dx = (wall.end.x - wall.start.x) / lenM;
         const dy = (wall.end.y - wall.start.y) / lenM;
-        await update("walls", wall.id, {
+        await mUpdate("walls", wall.id, {
           end: { x: wall.start.x + dx * newLenM, y: wall.start.y + dy * newLenM },
         });
       }
@@ -527,13 +531,13 @@ export function PlanEditor() {
   async function handleMoveEndpoint(wallId: string, which: "start" | "end", screenX: number, screenY: number) {
     const worldM = screenToMeters({ x: screenX, y: screenY }, view);
     const snapped = snapPoint(worldM);
-    await update("walls", wallId, { [which]: snapped });
+    await mUpdate("walls", wallId, { [which]: snapped });
   }
 
   async function createWall(start: Point, end: Point) {
     if (!activeLevelId) return;
     if (dist(start, end) < 0.01) return;
-    const w = await create<Wall>("walls", {
+    const w = await mCreate<Wall>("walls", {
       levelId: activeLevelId,
       start,
       end,
@@ -543,51 +547,47 @@ export function PlanEditor() {
       loadBearing: wallDefaults.loadBearing,
       status: wallDefaults.status,
     });
-    pushAction({ type: "create", table: "walls", id: w.id });
   }
 
   async function placeElectrical(at: Point) {
     if (!activeLevelId || !placeKind || placeKind.domain !== "electrical") return;
-    const item = await create<ElectricalItem>("electrical", {
+    const item = await mCreate<ElectricalItem>("electrical", {
       levelId: activeLevelId,
       type: placeKind.type,
       position: at,
       heightZ: ELECTRICAL_DEFAULT_HEIGHT[placeKind.type],
     });
-    pushAction({ type: "create", table: "electrical", id: item.id });
     select({ kind: "electrical", id: item.id });
   }
 
   async function placePlumbing(at: Point) {
     if (!activeLevelId || !placeKind || placeKind.domain !== "plumbing") return;
-    const item = await create<PlumbingItem>("plumbing", {
+    const item = await mCreate<PlumbingItem>("plumbing", {
       levelId: activeLevelId,
       type: "fixture",
       fixture: placeKind.fixture,
       position: at,
       heightZ: FIXTURE_DEFAULT_HEIGHT[placeKind.fixture],
     });
-    pushAction({ type: "create", table: "plumbing", id: item.id });
     select({ kind: "plumbing", id: item.id });
   }
 
   async function placeHvac(at: Point) {
     if (!activeLevelId || !placeKind || placeKind.domain !== "hvac") return;
     const heights: Record<string, number> = { radiator: 0.3, "floor-heating": 0, ventilation: 2.3, wtw: 0.5 };
-    const item = await create<import("@/lib/domain/types").HvacItem>("hvac", {
+    const item = await mCreate<import("@/lib/domain/types").HvacItem>("hvac", {
       levelId: activeLevelId,
       type: placeKind.type,
       position: at,
       heightZ: heights[placeKind.type] ?? 0.3,
     });
-    pushAction({ type: "create", table: "hvac", id: item.id });
     select({ kind: "hvac", id: item.id });
   }
 
   async function placeStaircase(at: Point) {
     if (!activeLevelId || constructionKind?.domain !== "staircase") return;
     const def = STAIRCASE_DEFAULTS[constructionKind.kind];
-    const st = await create<Staircase>("stairs", {
+    const st = await mCreate<Staircase>("stairs", {
       levelId: activeLevelId,
       kind: constructionKind.kind,
       position: at,
@@ -597,13 +597,12 @@ export function PlanEditor() {
       rotation: 0,
       direction: "up",
     });
-    pushAction({ type: "create", table: "stairs", id: st.id });
     select({ kind: "staircase", id: st.id });
   }
 
   async function placeColumn(at: Point) {
     if (!activeLevelId || constructionKind?.domain !== "column") return;
-    const col = await create<Column>("columns", {
+    const col = await mCreate<Column>("columns", {
       levelId: activeLevelId,
       position: at,
       shape: constructionKind.shape,
@@ -611,21 +610,19 @@ export function PlanEditor() {
       material: "concrete",
       loadBearing: true,
     });
-    pushAction({ type: "create", table: "columns", id: col.id });
     select({ kind: "column", id: col.id });
   }
 
   async function createBeam(start: Point, end: Point) {
     if (!activeLevelId || constructionKind?.domain !== "beam") return;
     if (dist(start, end) < 0.05) return;
-    const bm = await create<Beam>("beams", {
+    const bm = await mCreate<Beam>("beams", {
       levelId: activeLevelId,
       start,
       end,
       profile: constructionKind.profile,
       height: 2.4,
     });
-    pushAction({ type: "create", table: "beams", id: bm.id });
     select({ kind: "beam", id: bm.id });
   }
 
@@ -635,27 +632,25 @@ export function PlanEditor() {
     const pts = pipePointsRef.current;
     const st = useEditor.getState();
     if (pts.length < 2 || !st.activeLevelId) return;
-    const item = await create<PlumbingItem>("plumbing", {
+    const item = await mCreate<PlumbingItem>("plumbing", {
       levelId: st.activeLevelId,
       type: st.pipeType as PlumbingType,
       path: pts,
       diameter: st.pipeType === "drain" ? 50 : 22,
       heightZ: st.pipeType === "drain" ? 0.05 : 1.0,
     });
-    pushAction({ type: "create", table: "plumbing", id: item.id });
     setPipePoints([]);
   }
 
   async function createSection(start: Point, end: Point) {
     if (!activeLevelId || dist(start, end) < 0.2) return;
     const letter = String.fromCharCode(65 + (entitiesRef.current.sections.length % 26));
-    const sec = await create<SectionLine>("sections", {
+    const sec = await mCreate<SectionLine>("sections", {
       levelId: activeLevelId,
       start,
       end,
       label: `${letter}-${letter}`,
     });
-    pushAction({ type: "create", table: "sections", id: sec.id });
     select({ kind: "section", id: sec.id });
   }
 
@@ -668,14 +663,13 @@ export function PlanEditor() {
       return;
     }
     const def = ROOF_DEFAULTS[roofType];
-    const r = await create<Roof>("roofs", {
+    const r = await mCreate<Roof>("roofs", {
       levelId: activeLevelId,
       type: roofType,
       pitch: def.pitch,
       ridgeDirection: 0,
       overhang: def.overhang,
     });
-    pushAction({ type: "create", table: "roofs", id: r.id });
     select({ kind: "roof", id: r.id });
   }
 
@@ -693,7 +687,7 @@ export function PlanEditor() {
     // Houd de opening binnen de muur.
     const half = def.width / 2;
     const offset = Math.min(Math.max(best.t * len, half), Math.max(half, len - half));
-    const op = await create<Opening>("openings", {
+    const op = await mCreate<Opening>("openings", {
       wallId: best.wall.id,
       type: placeKind.type,
       width: def.width,
@@ -701,18 +695,16 @@ export function PlanEditor() {
       sillHeight: def.sillHeight,
       offset,
     });
-    pushAction({ type: "create", table: "openings", id: op.id });
     select({ kind: "opening", id: op.id });
   }
 
   async function finalizeRoom(points: Point[]) {
     if (!activeLevelId || points.length < 3) return;
-    const room = await create<Room>("rooms", {
+    const room = await mCreate<Room>("rooms", {
       levelId: activeLevelId,
       name: `Ruimte ${rooms.length + 1}`,
       polygon: points,
     });
-    pushAction({ type: "create", table: "rooms", id: room.id });
     setRoomDraft([]);
     select({ kind: "room", id: room.id });
   }
@@ -753,7 +745,7 @@ export function PlanEditor() {
     }
     if (tool === "place-furniture" && furniturePaletteKind && activeLevelId) {
       void (async () => {
-        const item = await create<Furniture>("furniture", {
+        const item = await mCreate<Furniture>("furniture", {
           levelId: activeLevelId,
           kind: furniturePaletteKind,
           position: snapped,
@@ -1151,10 +1143,10 @@ export function PlanEditor() {
               selectedId={selection?.kind === "furniture" ? selection.id : null}
               onSelect={(id) => onSelectEntity("furniture", id)}
               onMove={async (id, x, y) => {
-                await update("furniture", id, { position: { x, y } });
+                await mUpdate("furniture", id, { position: { x, y } });
               }}
               onRotate={async (id, rotation) => {
-                await update("furniture", id, { rotation });
+                await mUpdate("furniture", id, { rotation });
               }}
             />
           )}
@@ -1505,7 +1497,7 @@ export function PlanEditor() {
                 <button
                   key={st}
                   onClick={() => {
-                    void update("walls", menu.id, { status: st });
+                    void mUpdate("walls", menu.id, { status: st });
                     setMenu(null);
                   }}
                   className="flex-1 rounded-md bg-paper-sunken py-1 text-[10px] font-medium text-ink-700"
@@ -1527,7 +1519,7 @@ export function PlanEditor() {
                 <button
                   key={t}
                   onClick={() => {
-                    void update("openings", menu.id, { type: t });
+                    void mUpdate("openings", menu.id, { type: t });
                     setMenu(null);
                   }}
                   className="flex-1 rounded-md bg-paper-sunken py-1 text-[10px] font-medium text-ink-700"

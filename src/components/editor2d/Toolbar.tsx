@@ -134,6 +134,8 @@ export function Toolbar() {
 
   const undo = useHistory((s) => s.undo);
   const redo = useHistory((s) => s.redo);
+  const canUndo = useHistory((s) => s.past.length > 0);
+  const canRedo = useHistory((s) => s.future.length > 0);
 
   const SNAP_LABEL = { fine: "10cm", normal: "50cm", coarse: "1m" };
   const [showLayers, setShowLayers] = useState(false);
@@ -523,16 +525,20 @@ export function Toolbar() {
       <div className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-2xl border border-line bg-paper-raised/95 p-1.5 shadow-xl backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <button
           onClick={() => void undo()}
+          disabled={!canUndo}
           aria-label="Ongedaan maken"
-          className="flex h-11 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
+          title="Ongedaan maken (Ctrl+Z)"
+          className="flex h-11 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900 disabled:pointer-events-none disabled:opacity-30"
         >
           <Undo2 size={17} />
           <span>Undo</span>
         </button>
         <button
           onClick={() => void redo()}
+          disabled={!canRedo}
           aria-label="Opnieuw"
-          className="flex h-11 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
+          title="Opnieuw (Ctrl+Shift+Z)"
+          className="flex h-11 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900 disabled:pointer-events-none disabled:opacity-30"
         >
           <Redo2 size={17} />
           <span>Redo</span>
