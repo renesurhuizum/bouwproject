@@ -452,7 +452,7 @@ export const COLUMN_SHAPE_LABEL: Record<ColumnShape, string> = {
 export const COLUMN_DEFAULT_SIZE = 0.3; // m
 
 // Stalen profielen: hoogte × flensbreedte (m), afgerond op standaard HEA/HEB.
-export const BEAM_PROFILE_LABEL: Record<BeamProfile, string> = {
+export const BEAM_PROFILE_LABEL: Record<string, string> = {
   HEA100: "HEA 100",
   HEA140: "HEA 140",
   HEA160: "HEA 160",
@@ -460,7 +460,7 @@ export const BEAM_PROFILE_LABEL: Record<BeamProfile, string> = {
   custom: "Aangepast",
 };
 
-export const BEAM_PROFILE_DIMS: Record<BeamProfile, { h: number; w: number }> = {
+export const BEAM_PROFILE_DIMS: Record<string, { h: number; w: number }> = {
   HEA100: { h: 0.096, w: 0.1 },
   HEA140: { h: 0.133, w: 0.14 },
   HEA160: { h: 0.152, w: 0.16 },

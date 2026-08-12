@@ -51,6 +51,7 @@ import {
   ROOF_TYPE_LABEL,
 } from "@/lib/domain/constants";
 import { FURNITURE_CATEGORIES, FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
+import { findSection } from "@/lib/structural/sections";
 
 const PLACE_TYPES: ElectricalType[] = [
   "socket",
@@ -99,7 +100,9 @@ const LAYERS: { key: EditorLayer; label: string }[] = [
 
 const STAIRCASE_KINDS: StaircaseKind[] = ["straight", "l-shape", "spiral"];
 const COLUMN_SHAPES: ColumnShape[] = ["square", "round"];
-const BEAM_PROFILES: BeamProfile[] = ["HEA100", "HEA140", "HEA160", "HEB200", "custom"];
+// Een compacte greep uit de doorsnedetabel; de rest kies je in het paneel
+// nadat de balk getekend is (mét profieladvies).
+const BEAM_PROFILES: BeamProfile[] = ["IPE160", "HEA140", "HEA160", "HEB200", "HOUT75x225"];
 const ROOF_TYPES: RoofType[] = ["gable", "hip", "shed", "flat", "mansard"];
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
@@ -438,7 +441,7 @@ export function Toolbar() {
                       : "bg-paper-sunken text-ink-700"
                   }`}
                 >
-                  {BEAM_PROFILE_LABEL[pr]}
+                  {findSection(pr)?.label ?? BEAM_PROFILE_LABEL[pr] ?? pr}
                 </button>
               ))}
             </div>

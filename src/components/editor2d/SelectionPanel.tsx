@@ -48,6 +48,8 @@ import type {
 } from "@/lib/domain/types";
 import { polygonArea as polyArea } from "@/lib/geometry";
 import { nvoArea } from "@/lib/validation";
+import { BalkAdvies } from "./BalkAdvies";
+import { SECTION_PROFILES, findSection, LINTEL_BEARING_M } from "@/lib/structural/sections";
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
 const MATERIALS = Object.keys(WALL_MATERIAL_LABEL) as WallMaterial[];
@@ -525,6 +527,41 @@ export function SelectionPanel() {
                 onChange={(v) => mUpdate("openings", opening.id, { sillHeight: v / 100 })}
               />
             </Row>
+            {(() => {
+              // Een opening in een dragende muur vraagt om een latei: het
+              // metselwerk erboven moet ergens op rusten.
+              const host = walls.find((w) => w.id === opening.wallId);
+              if (!host?.loadBearing) return null;
+              const bearing = LINTEL_BEARING_M;
+              const lintelLength = opening.width + 2 * bearing;
+              return (
+                <div className="space-y-2">
+                  <Row label="Latei">
+                    <span className="tabular text-xs text-ink-900">
+                      {formatLength(lintelLength)}
+                      <span className="ml-1 text-[10px] text-ink-400">
+                        incl. {Math.round(bearing * 100)} cm oplegging p/z
+                      </span>
+                    </span>
+                  </Row>
+                  {opening.lintelProfile && (
+                    <Row label="Gekozen">
+                      <span className="text-xs font-medium text-ink-900">
+                        {findSection(opening.lintelProfile)?.label ?? opening.lintelProfile}
+                      </span>
+                    </Row>
+                  )}
+                  <BalkAdvies
+                    spanM={lintelLength}
+                    wallMaterial={host.material}
+                    wallThicknessM={host.thickness}
+                    wallHeightM={Math.max(0, host.height - opening.height - opening.sillHeight)}
+                    currentProfileKey={opening.lintelProfile}
+                    onPick={(key) => mUpdate("openings", opening.id, { lintelProfile: key })}
+                  />
+                </div>
+              );
+            })()}
             <DeleteButton onClick={() => removeAnd("openings", opening.id, () => select(null))} />
           </div>
         )}
@@ -763,25 +800,39 @@ export function SelectionPanel() {
           </div>
         )}
 
-        {beam && (
-          <div className="space-y-2.5">
-            <Row label="Profiel">
-              <select
-                value={beam.profile}
-                onChange={(e) => mUpdate("beams", beam.id, { profile: e.target.value as BeamProfile })}
-                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
-              >
-                {(["HEA100", "HEA140", "HEA160", "HEB200", "custom"] as BeamProfile[]).map((p) => (
-                  <option key={p} value={p}>{BEAM_PROFILE_LABEL[p]}</option>
-                ))}
-              </select>
-            </Row>
-            <Row label="Hoogte in gevel">
-              <NumberField value={Math.round(beam.height * 100)} unit="cm" onChange={(v) => mUpdate("beams", beam.id, { height: v / 100 })} />
-            </Row>
-            <DeleteButton onClick={() => removeAnd("beams", beam.id, () => select(null))} />
-          </div>
-        )}
+        {beam && (() => {
+          const spanM = dist(beam.start, beam.end);
+          return (
+            <div className="space-y-2.5">
+              <Row label="Overspanning">
+                <span className="tabular text-xs font-semibold text-ink-900">
+                  {formatLength(spanM)}
+                </span>
+              </Row>
+              <Row label="Profiel">
+                <select
+                  value={beam.profile}
+                  onChange={(e) => mUpdate("beams", beam.id, { profile: e.target.value as BeamProfile })}
+                  className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+                >
+                  {SECTION_PROFILES.map((p) => (
+                    <option key={p.key} value={p.key}>{p.label}</option>
+                  ))}
+                  <option value="custom">{BEAM_PROFILE_LABEL.custom ?? "Aangepast"}</option>
+                </select>
+              </Row>
+              <Row label="Hoogte in gevel">
+                <NumberField value={Math.round(beam.height * 100)} unit="cm" onChange={(v) => mUpdate("beams", beam.id, { height: v / 100 })} />
+              </Row>
+              <BalkAdvies
+                spanM={spanM}
+                currentProfileKey={beam.profile}
+                onPick={(key) => mUpdate("beams", beam.id, { profile: key })}
+              />
+              <DeleteButton onClick={() => removeAnd("beams", beam.id, () => select(null))} />
+            </div>
+          );
+        })()}
 
         {roof && (
           <div className="space-y-2.5">

@@ -2,8 +2,8 @@
 // getallen rekent in plaats van alleen een vlag te controleren.
 
 import { describe, expect, it } from "vitest";
-import { validatePipeFall, validateWalls } from "./validation";
-import type { PlumbingItem, Wall } from "./domain/types";
+import { validateLintels, validatePipeFall, validateWalls } from "./validation";
+import type { Opening, PlumbingItem, Wall } from "./domain/types";
 
 // Afvoer van 10 m; verval in meters over die lengte.
 function drain(startZ: number, endZ: number, over: Partial<PlumbingItem> = {}): PlumbingItem {
@@ -101,5 +101,43 @@ describe("validateWalls", () => {
 
   it("laat een dragende muur die blijft staan met rust", () => {
     expect(validateWalls([wall({ loadBearing: true, status: "existing" })])).toEqual([]);
+  });
+});
+
+describe("validateLintels", () => {
+  const wall = (over: Partial<Wall>): Wall => ({
+    id: "w1", updatedAt: 0, levelId: "lvl",
+    start: { x: 0, y: 0 }, end: { x: 5, y: 0 },
+    thickness: 0.1, height: 2.6, material: "brick",
+    loadBearing: true, status: "existing", ...over,
+  });
+  const opening = (over: Partial<Opening> = {}): Opening => ({
+    id: "o1", updatedAt: 0, wallId: "w1", type: "door",
+    width: 0.9, height: 2.1, sillHeight: 0, offset: 1, ...over,
+  });
+
+  it("waarschuwt bij een opening in een dragende muur zonder latei", () => {
+    const issues = validateLintels([wall({})], [opening()]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe("warn");
+    expect(issues[0].entityId).toBe("o1");
+    expect(issues[0].message).toContain("Deur");
+  });
+
+  it("zwijgt zodra er een latei gekozen is", () => {
+    expect(validateLintels([wall({})], [opening({ lintelProfile: "HEA100" })])).toEqual([]);
+  });
+
+  it("zwijgt bij een niet-dragende muur", () => {
+    expect(validateLintels([wall({ loadBearing: false })], [opening()])).toEqual([]);
+  });
+
+  it("noemt het juiste soort opening", () => {
+    const issues = validateLintels([wall({})], [opening({ type: "window" })]);
+    expect(issues[0].message).toContain("Raam");
+  });
+
+  it("negeert een opening waarvan de muur ontbreekt", () => {
+    expect(validateLintels([], [opening()])).toEqual([]);
   });
 });

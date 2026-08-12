@@ -72,6 +72,11 @@ export interface Opening extends Entity {
   height: number; // m
   sillHeight: number; // borsthoogte in m (0 bij deur/doorgang)
   offset: number; // m vanaf wall.start langs de muur
+  /**
+   * Gekozen latei-profiel (sleutel in de doorsnedetabel). Alleen zinvol bij een
+   * opening in een dragende muur: het metselwerk erboven moet ergens op rusten.
+   */
+  lintelProfile?: string;
 }
 
 export type FloorMaterial = "tile" | "wood" | "carpet" | "stone" | "concrete";
@@ -233,7 +238,11 @@ export interface Column extends Entity {
   loadBearing: boolean;
 }
 
-export type BeamProfile = "HEA100" | "HEA140" | "HEA160" | "HEB200" | "custom";
+// Sleutel in de doorsnedetabel (lib/structural/sections.ts). Vroeger een vaste
+// lijst van vier profielen; nu de volledige HEA/HEB/IPE/hout-tabel, zodat de
+// profielkeuze uit de constructieberekening ook opgeslagen kan worden.
+// "custom" blijft geldig voor handmatig ingevoerde maten.
+export type BeamProfile = string;
 
 export interface Beam extends Entity {
   levelId: string;

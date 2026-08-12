@@ -21,6 +21,7 @@ import {
   useTasks,
   useCircuits,
   useAllElectrical,
+  useBeams,
 } from "@/lib/hooks";
 import { useEditor } from "@/lib/store/editor";
 import { update } from "@/lib/db/repo";
@@ -33,6 +34,8 @@ import { polygonArea } from "@/lib/geometry";
 import { buildOpeningSchedule } from "@/lib/openingSchedule";
 import { computeCircuitRoutes } from "@/lib/routing/cableRouting";
 import { BREAKER_SPECS, CABLE_DRUM_M } from "@/lib/domain/constants";
+import { findSection, LINTEL_BEARING_M } from "@/lib/structural/sections";
+import { dist } from "@/lib/geometry";
 import { formatLength } from "@/lib/format";
 import { svgToPngBlob, downloadBlob } from "@/lib/exportImage";
 import { formatArea, formatHeight } from "@/lib/format";
@@ -76,6 +79,7 @@ export default function WerkbladPage() {
   const plumbing = usePlumbing(level?.id) ?? [];
   const furniture = useFurniture(level?.id ?? null) ?? [];
   const hvac = useHvac(level?.id) ?? [];
+  const beams = useBeams(level?.id) ?? [];
   const phases = usePhases(project?.id) ?? [];
   const tasks = useTasks(project?.id) ?? [];
 
@@ -111,6 +115,27 @@ export default function WerkbladPage() {
       }))
       .sort((a, b) => a.cableSpec.localeCompare(b.cableSpec));
   }, [circuits, routeById]);
+
+  // Constructiestaat: balken en lateien per profiel, met lengte en gewicht.
+  const structuralItems = useMemo(() => {
+    const rows = new Map<string, { label: string; count: number; meters: number; kg: number }>();
+    const add = (key: string, lengthM: number) => {
+      const section = findSection(key);
+      if (!section) return;
+      const cur = rows.get(key) ?? { label: section.label, count: 0, meters: 0, kg: 0 };
+      cur.count += 1;
+      cur.meters += lengthM;
+      cur.kg += lengthM * section.weightKgPerM;
+      rows.set(key, cur);
+    };
+    for (const b of beams) add(b.profile, dist(b.start, b.end));
+    for (const o of openings) {
+      if (o.lintelProfile) add(o.lintelProfile, o.width + 2 * LINTEL_BEARING_M);
+    }
+    return [...rows.values()]
+      .map((r) => ({ ...r, meters: Math.round(r.meters * 100) / 100, kg: Math.round(r.kg) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [beams, openings]);
 
   const [tab, setTab] = useState<Tab>("plan");
 
@@ -442,6 +467,36 @@ export default function WerkbladPage() {
         {/* ── SPECIFICATIES ────────────────────────────────────── */}
         {tab === "specs" && (
           <div className="space-y-6">
+            {structuralItems.length > 0 && (
+              <Section title="Constructiestaat (indicatief)">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-500">
+                      <th className="py-1.5">Profiel</th>
+                      <th className="py-1.5 text-right">Aantal</th>
+                      <th className="py-1.5 text-right">Totale lengte</th>
+                      <th className="py-1.5 text-right">Gewicht</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {structuralItems.map((r) => (
+                      <tr key={r.label} className="border-b border-line/60">
+                        <td className="py-1.5 font-medium text-ink-900">{r.label}</td>
+                        <td className="tabular py-1.5 text-right text-ink-700">{r.count}</td>
+                        <td className="tabular py-1.5 text-right text-ink-700">
+                          {r.meters.toFixed(2)} m
+                        </td>
+                        <td className="tabular py-1.5 text-right text-ink-900">{r.kg} kg</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-[11px] leading-snug text-amber-800">
+                  Indicatief — geen constructieberekening. Laat de maatvoering
+                  toetsen door een constructeur voordat je bestelt of bouwt.
+                </p>
+              </Section>
+            )}
             {rooms.length > 0 && (
               <Section title="Ruimtes">
                 <table className="w-full text-sm">

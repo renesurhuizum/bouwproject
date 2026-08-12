@@ -6,6 +6,7 @@
 import { Layer, Line } from "react-konva";
 import type { Beam } from "@/lib/domain/types";
 import { BEAM_PROFILE_DIMS } from "@/lib/domain/constants";
+import { findSection } from "@/lib/structural/sections";
 import { dist } from "@/lib/geometry";
 import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
@@ -27,7 +28,7 @@ export function BeamsLayer({ view, beams, selectedId, onSelect }: Props) {
         const c = metersToScreen(b.end, view);
         const len = dist(b.start, b.end);
         if (len < 0.001) return null;
-        const dims = BEAM_PROFILE_DIMS[b.profile];
+        const dims = findSection(b.profile) ?? BEAM_PROFILE_DIMS[b.profile] ?? { h: 0.1, w: 0.1 };
         const flange = metersToPx(b.width ?? dims.w, view);
         // loodrechte eenheidsvector
         const dx = (c.x - a.x) / Math.hypot(c.x - a.x, c.y - a.y);

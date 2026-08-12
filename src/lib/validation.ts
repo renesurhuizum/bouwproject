@@ -3,6 +3,7 @@
 
 import type {
   ElectricalItem,
+  Opening,
   HvacItem,
   PlumbingItem,
   Room,
@@ -79,6 +80,34 @@ export function validateWalls(walls: Wall[]): ValidationIssue[] {
 
   return issues;
 }
+
+// ── Lateien boven openingen in dragende muren ────────────────────────────────
+
+// Boven elke opening in een dragende muur moet het metselwerk ergens op rusten.
+// Zonder latei zakt de muur en scheurt het werk erboven.
+export function validateLintels(walls: Wall[], openings: Opening[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const wallById = new Map(walls.map((w) => [w.id, w]));
+
+  for (const op of openings) {
+    const wall = wallById.get(op.wallId);
+    if (!wall?.loadBearing) continue;
+    if (op.lintelProfile) continue;
+    issues.push({
+      severity: "warn",
+      message: `${OPENING_NOUN[op.type]} van ${op.width.toFixed(2)} m in een dragende muur heeft nog geen latei — kies er een (indicatief) en laat die toetsen`,
+      entityId: op.id,
+    });
+  }
+
+  return issues;
+}
+
+const OPENING_NOUN: Record<Opening["type"], string> = {
+  door: "Deur",
+  window: "Raam",
+  passage: "Doorgang",
+};
 
 // ── Afschot van afvoerleidingen ──────────────────────────────────────────────
 
