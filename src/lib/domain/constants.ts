@@ -5,6 +5,7 @@ import type {
   FixtureKind,
   HvacType,
   OpeningType,
+  PlumbingPipeType,
   WallMaterial,
   WallStatus,
   PhaseStatus,
@@ -333,6 +334,48 @@ export const FIXTURE_DEFAULT_HEIGHT: Record<FixtureKind, number> = {
 };
 
 export const PLUMBING_COLOR = "#0891b2"; // teal
+
+// Leidingspecificaties per type: welke diameters gangbaar zijn (mm), welke
+// standaard is, en het minimale afschot voor afvoeren (mm per meter).
+// De diameter werd voorheen hardcoded op 22 of 50 mm gezet en was nergens
+// aanpasbaar, terwijl een standleiding 110 mm moet zijn.
+export interface PipeSpec {
+  label: string;
+  diameters: number[];
+  defaultDiameter: number;
+  /** Minimaal afschot in mm/m. Alleen zinvol voor afvoeren. */
+  minFallMmPerM?: number;
+  /** Standaardhoogte boven de vloer (m) bij het tekenen. */
+  defaultHeightZ: number;
+}
+
+export const PIPE_SPECS: Record<PlumbingPipeType, PipeSpec> = {
+  "supply-cold": {
+    label: "Koud water",
+    diameters: [12, 15, 18, 22, 28],
+    defaultDiameter: 15,
+    defaultHeightZ: 1.0,
+  },
+  "supply-hot": {
+    label: "Warm water",
+    diameters: [12, 15, 18, 22, 28],
+    defaultDiameter: 15,
+    defaultHeightZ: 1.0,
+  },
+  drain: {
+    label: "Afvoer",
+    diameters: [32, 40, 50, 75, 110, 125],
+    defaultDiameter: 50,
+    minFallMmPerM: 5, // ≈ 1:200; onder dit afschot loopt een afvoer niet goed leeg
+    defaultHeightZ: 0.05,
+  },
+  "cv-pipe": {
+    label: "CV-leiding",
+    diameters: [15, 16, 18, 22],
+    defaultDiameter: 15,
+    defaultHeightZ: 0.05,
+  },
+};
 
 // Werkelijke voetafdruk (m) per sanitair-soort — één bron voor 2D-editor,
 // werkblad en 3D zodat symbolen overal dezelfde fysieke maat houden.

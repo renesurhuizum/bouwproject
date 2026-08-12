@@ -120,6 +120,9 @@ export type PlumbingType =
   | "cv-pipe" // cv-leiding (leiding)
   | "fixture"; // tappunt/sanitair
 
+// De leidingtypes (alles behalve "fixture"): deze hebben een pad en een diameter.
+export type PlumbingPipeType = Exclude<PlumbingType, "fixture">;
+
 export type FixtureKind =
   | "toilet"
   | "sink" // wastafel
@@ -137,7 +140,11 @@ export interface PlumbingItem extends Entity {
   position?: Point; // bij tappunt/sanitair
   diameter?: number; // mm
   fixture?: FixtureKind;
-  heightZ?: number; // m
+  heightZ?: number; // m — bij tappunten; bij leidingen de terugval voor start/eind
+  // Begin- en eindhoogte van een leiding (m). Twee waarden i.p.v. één, zodat
+  // afschot van een afvoer uitgerekend en gecontroleerd kan worden.
+  startZ?: number;
+  endZ?: number;
   note?: string;
 }
 

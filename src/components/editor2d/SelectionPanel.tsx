@@ -10,7 +10,7 @@ import { useEditor, type Selection } from "@/lib/store/editor";
 import { useProject, useFurniture } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import type { Photo, WallStatus as WallStatusType } from "@/lib/domain/types";
-import { dist, polygonArea } from "@/lib/geometry";
+import { dist, pathLength, polygonArea } from "@/lib/geometry";
 import { copySelection, TABLE_FOR_KIND, type ClipboardData } from "@/lib/clipboard";
 import { mirrorPatch, selectionBounds, type AnyEntity } from "@/lib/selectionOps";
 import { formatLength, formatArea } from "@/lib/format";
@@ -30,6 +30,7 @@ import {
   ROOF_TYPE_LABEL,
   DORMER_TYPE_LABEL,
   DORMER_DEFAULTS,
+  PIPE_SPECS,
 } from "@/lib/domain/constants";
 import { bounds } from "@/lib/geometry";
 import type {
@@ -980,30 +981,80 @@ export function SelectionPanel() {
           </div>
         )}
 
-        {plumb && !plumb.fixture && plumb.path && (
-          <div className="space-y-2.5">
-            <Row label="Type">
-              <span className="text-xs font-medium text-ink-900">
-                {plumb.type === "supply-cold" ? "Koud water"
-                  : plumb.type === "supply-hot" ? "Warm water"
-                  : plumb.type === "drain" ? "Afvoer"
-                  : plumb.type === "cv-pipe" ? "CV-leiding"
-                  : plumb.type}
-              </span>
-            </Row>
-            <Row label="Punten">
-              <span className="text-xs text-ink-900">{plumb.path.length}</span>
-            </Row>
-            <Row label="Hoogte">
-              <NumberField
-                value={Math.round((plumb.heightZ ?? 0) * 100)}
-                unit="cm"
-                onChange={(v) => mUpdate("plumbing", plumb.id, { heightZ: v / 100 })}
-              />
-            </Row>
-            <DeleteButton onClick={() => removeAnd("plumbing", plumb.id, () => select(null))} />
-          </div>
-        )}
+        {plumb && !plumb.fixture && plumb.path && (() => {
+          const spec = plumb.type !== "fixture" ? PIPE_SPECS[plumb.type] : null;
+          const lengthM = pathLength(plumb.path);
+          // Afschot volgt uit het hoogteverschil over de looplengte (mm/m).
+          const startZ = plumb.startZ ?? plumb.heightZ ?? 0;
+          const endZ = plumb.endZ ?? plumb.heightZ ?? 0;
+          const fall = lengthM > 0 ? ((startZ - endZ) * 1000) / lengthM : 0;
+          const minFall = spec?.minFallMmPerM;
+          const fallTooLow = minFall != null && fall < minFall;
+          return (
+            <div className="space-y-2.5">
+              <Row label="Type">
+                <span className="text-xs font-medium text-ink-900">
+                  {spec?.label ?? plumb.type}
+                </span>
+              </Row>
+              <Row label="Lengte">
+                <span className="tabular text-xs font-semibold text-ink-900">
+                  {formatLength(lengthM)}
+                </span>
+              </Row>
+              {spec && (
+                <Row label="Diameter">
+                  <select
+                    value={plumb.diameter ?? spec.defaultDiameter}
+                    onChange={(e) =>
+                      mUpdate("plumbing", plumb.id, { diameter: Number(e.target.value) })
+                    }
+                    className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+                  >
+                    {spec.diameters.map((d) => (
+                      <option key={d} value={d}>{d} mm</option>
+                    ))}
+                  </select>
+                </Row>
+              )}
+              <Row label="Hoogte begin">
+                <NumberField
+                  value={Math.round(startZ * 100)}
+                  unit="cm"
+                  onChange={(v) => mUpdate("plumbing", plumb.id, { startZ: v / 100 })}
+                />
+              </Row>
+              <Row label="Hoogte eind">
+                <NumberField
+                  value={Math.round(endZ * 100)}
+                  unit="cm"
+                  onChange={(v) => mUpdate("plumbing", plumb.id, { endZ: v / 100 })}
+                />
+              </Row>
+              {minFall != null && (
+                <Row label="Afschot">
+                  <span
+                    className={`tabular text-xs font-semibold ${fallTooLow ? "text-danger" : "text-ok"}`}
+                    title={`Minimaal ${minFall} mm/m voor een afvoer`}
+                  >
+                    {fall.toFixed(1)} mm/m
+                  </span>
+                </Row>
+              )}
+              {fallTooLow && (
+                <p className="rounded-lg bg-danger/10 px-2 py-1.5 text-[11px] leading-snug text-danger">
+                  Te weinig afschot: een afvoer heeft minimaal {minFall} mm per meter
+                  nodig. Zet de begin-hoogte hoger of de eind-hoogte lager.
+                </p>
+              )}
+              <p className="text-[11px] leading-snug text-ink-400">
+                Sleep de punten op de tekening om de leiding te verleggen; dubbelklik
+                op een punt om het te verwijderen.
+              </p>
+              <DeleteButton onClick={() => removeAnd("plumbing", plumb.id, () => select(null))} />
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

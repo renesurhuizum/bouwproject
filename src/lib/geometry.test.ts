@@ -9,6 +9,7 @@ import {
   distToSegment,
   mirrorPoints,
   pointInPolygon,
+  pathLength,
   pointInRect,
   polygonArea,
   projectOnSegment,
@@ -45,6 +46,23 @@ describe("snapToPoints", () => {
 
   it("geeft null buiten de straal", () => {
     expect(snapToPoints({ x: 2.5, y: 2.5 }, pts, 0.2)).toBeNull();
+  });
+});
+
+describe("pathLength", () => {
+  it("telt de segmenten van een polylijn op", () => {
+    expect(
+      pathLength([
+        { x: 0, y: 0 },
+        { x: 3, y: 4 }, // 5
+        { x: 3, y: 6 }, // 2
+      ]),
+    ).toBeCloseTo(7, 6);
+  });
+
+  it("geeft 0 bij minder dan twee punten", () => {
+    expect(pathLength([])).toBe(0);
+    expect(pathLength([{ x: 1, y: 1 }])).toBe(0);
   });
 });
 

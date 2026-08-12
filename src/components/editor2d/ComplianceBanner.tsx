@@ -20,6 +20,7 @@ import {
   validateRooms,
   validateRoomServices,
   validateWalls,
+  validatePipeFall,
   type ValidationIssue,
 } from "@/lib/validation";
 
@@ -51,6 +52,7 @@ export function ComplianceBanner() {
       ...validateElectrical(dElectrical),
       ...validateRooms(dRooms, [level]),
       ...validateRoomServices(dRooms, dPlumbing, dElectrical, dHvac),
+      ...validatePipeFall(dPlumbing),
     ];
   }, [dWalls, dElectrical, dRooms, dPlumbing, dHvac, level]);
 

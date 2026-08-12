@@ -40,8 +40,9 @@ import {
   STAIRCASE_DEFAULTS,
   COLUMN_DEFAULT_SIZE,
   ROOF_DEFAULTS,
+  PIPE_SPECS,
 } from "@/lib/domain/constants";
-import { dist, snapToGrid, snapToPoints, projectOnSegment, constrainToAngle, bounds, pointInRect } from "@/lib/geometry";
+import { dist, pathLength, polygonArea, snapToGrid, snapToPoints, projectOnSegment, constrainToAngle, bounds, pointInRect } from "@/lib/geometry";
 import { copySelection, pasteClipboard, type ClipboardData } from "@/lib/clipboard";
 import {
   LAYER_FOR,
@@ -78,6 +79,7 @@ import { SectionLayer } from "./SectionLayer";
 import { RoomDivider } from "./RoomDivider";
 import { ElectricalLegend } from "./ElectricalLegend";
 import { Minimap } from "./Minimap";
+import { PathVertexHandles } from "./PathVertexHandles";
 import type { LayoutRect } from "@/lib/roomDivider";
 
 export function PlanEditor() {
@@ -143,6 +145,18 @@ export function PlanEditor() {
   // Lasso (rubber-band) multi-selectie — alleen muis in select-tool op leeg canvas.
   const [lassoBox, setLassoBox] = useState<{ start: Point; current: Point } | null>(null);
   const lassoRef = useRef<{ id: number; start: Point } | null>(null);
+
+  // Lang indrukken = contextmenu. Op touch is er geen rechtermuisknop, dus
+  // zonder dit is het menu daar onbereikbaar.
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+
+  function cancelLongPress() {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  }
 
   // Spiegel altijd de meest actuele entiteiten naar een ref, zodat
   // sneltoets-handlers (lasso/copy/nudge/mirror) niet op stale closures leunen.
@@ -617,12 +631,19 @@ export function PlanEditor() {
     const pts = pipePointsRef.current;
     const st = useEditor.getState();
     if (pts.length < 2 || !st.activeLevelId) return;
-    const item = await mCreate<PlumbingItem>("plumbing", {
+    const spec = PIPE_SPECS[st.pipeType];
+    // Een afvoer krijgt meteen het minimale afschot over zijn lengte mee, zodat
+    // hij niet als "vlak" (en dus afgekeurd) begint.
+    const len = pathLength(pts);
+    const fall = spec.minFallMmPerM ? (spec.minFallMmPerM * len) / 1000 : 0;
+    await mCreate<PlumbingItem>("plumbing", {
       levelId: st.activeLevelId,
       type: st.pipeType as PlumbingType,
       path: pts,
-      diameter: st.pipeType === "drain" ? 50 : 22,
-      heightZ: st.pipeType === "drain" ? 0.05 : 1.0,
+      diameter: spec.defaultDiameter,
+      heightZ: spec.defaultHeightZ,
+      startZ: spec.defaultHeightZ + fall,
+      endZ: spec.defaultHeightZ,
     });
     setPipePoints([]);
   }
@@ -815,7 +836,22 @@ export function PlanEditor() {
         divideStartRef.current = screenToMeters(pos, view);
         setCursor(screenToMeters(pos, view));
       }
+
+      // Lang indrukken op een entiteit opent het contextmenu (touch-equivalent
+      // van de rechtermuisknop).
+      longPressFiredRef.current = false;
+      const found = entityNodeFor(e.target);
+      if (tool === "select" && found && !lockedLayers[LAYER_FOR[found.kind]]) {
+        longPressRef.current = setTimeout(() => {
+          longPressFiredRef.current = true;
+          longPressRef.current = null;
+          select({ kind: found.kind, id: found.id });
+          setMenu({ x: pos.x, y: pos.y, kind: found.kind, id: found.id });
+          navigator.vibrate?.(10);
+        }, 500);
+      }
     } else {
+      cancelLongPress();
       // tweede vinger: geen tap, geen 1-vinger-pan
       tapRef.current = null;
       panPointer.current = null;
@@ -829,7 +865,7 @@ export function PlanEditor() {
     const evt = e.evt;
     if (!pointers.current.has(evt.pointerId)) {
       // cursor voor rubber-band tonen ook zonder ingedrukt
-      if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction" || tool === "section") {
+      if (isDrawTool) {
         setCursor(snapPoint(screenToMeters(posFromEvent(evt, stage), view)));
       }
       return;
@@ -862,7 +898,10 @@ export function PlanEditor() {
     }
 
     if (tapRef.current && evt.pointerId === tapRef.current.id) {
-      if (dist(pos, tapRef.current.start) > 8) tapRef.current.moved = true;
+      if (dist(pos, tapRef.current.start) > 8) {
+        tapRef.current.moved = true;
+        cancelLongPress(); // bewegen = slepen, geen contextmenu
+      }
     }
     // Lasso slepen: rechthoek bijwerken, niet pannen.
     if (lassoRef.current && evt.pointerId === lassoRef.current.id) {
@@ -870,7 +909,7 @@ export function PlanEditor() {
       if (tapRef.current) tapRef.current.moved = true;
       return;
     }
-    if (tool === "wall" || tool === "place" || tool === "room" || tool === "place-furniture" || tool === "construction" || tool === "section") {
+    if (isDrawTool) {
       setCursor(snapPoint(screenToMeters(pos, view)));
     }
     if (tool === "divide") {
@@ -890,6 +929,17 @@ export function PlanEditor() {
     if (!stage) return;
     const evt = e.evt;
     const pos = posFromEvent(evt, stage);
+    cancelLongPress();
+
+    // Het contextmenu is net via lang indrukken geopend: die pointerup is geen
+    // tik, anders sluit het menu meteen weer.
+    if (longPressFiredRef.current) {
+      longPressFiredRef.current = false;
+      pointers.current.delete(evt.pointerId);
+      panPointer.current = null;
+      tapRef.current = null;
+      return;
+    }
 
     // Lasso afronden: selecteer entiteiten binnen de rechthoek.
     if (lassoRef.current && evt.pointerId === lassoRef.current.id) {
@@ -1002,6 +1052,54 @@ export function PlanEditor() {
 
   // Draft (rubber-band) lengte.
   const draftLen = draftStart && cursor ? dist(draftStart, cursor) : 0;
+
+  // Tekenen zonder maten is gokken: elk gereedschap toont tijdens het tekenen
+  // de maat die er op dat moment toe doet — lengte, oppervlak of totaalloop.
+  const measureText: string | null = (() => {
+    if (!cursor) return null;
+    if (draftStart && (tool === "wall" || tool === "section" ||
+        (tool === "construction" && constructionKind?.domain === "beam"))) {
+      return formatLength(draftLen);
+    }
+    if (tool === "room" && roomDraft.length > 0) {
+      const seg = formatLength(dist(roomDraft[roomDraft.length - 1], cursor));
+      const poly = [...roomDraft, cursor];
+      if (poly.length < 3) return seg;
+      const area = polygonArea(poly);
+      return `${seg} · ${area.toFixed(2)} m²`;
+    }
+    if (tool === "draw-pipe" && pipePoints.length > 0) {
+      const seg = dist(pipePoints[pipePoints.length - 1], cursor);
+      let total = seg;
+      for (let i = 1; i < pipePoints.length; i++) total += dist(pipePoints[i - 1], pipePoints[i]);
+      return `${formatLength(seg)} · totaal ${formatLength(total)}`;
+    }
+    return null;
+  })();
+
+  // Geselecteerde leiding met een getekend pad → puntbewerking tonen.
+  const selectedPath = (() => {
+    if (!selection) return null;
+    if (selection.kind === "plumbing") {
+      const it = plumbing.find((p) => p.id === selection.id);
+      if (it?.path && it.path.length >= 2) {
+        return { table: "plumbing" as const, id: it.id, path: it.path };
+      }
+    }
+    if (selection.kind === "hvac") {
+      const it = hvac.find((h) => h.id === selection.id);
+      if (it?.path && it.path.length >= 2) {
+        return { table: "hvac" as const, id: it.id, path: it.path };
+      }
+    }
+    return null;
+  })();
+
+  // Gereedschappen die op een punt in de plattegrond mikken: die verdienen
+  // allemaal een cursor- en snap-indicator, niet alleen muur/plaatsen/ruimte.
+  const isDrawTool =
+    tool === "wall" || tool === "place" || tool === "room" || tool === "draw-pipe" ||
+    tool === "place-furniture" || tool === "construction" || tool === "section";
 
   return (
     <div
@@ -1147,35 +1245,47 @@ export function PlanEditor() {
             />
           )}
 
+          {/* Puntbewerking van de geselecteerde leiding */}
+          {tool === "select" && selectedPath && (
+            <PathVertexHandles
+              table={selectedPath.table}
+              id={selectedPath.id}
+              path={selectedPath.path}
+              view={view}
+            />
+          )}
+
           {/* Draft / cursor */}
           <Layer listening={false}>
             {tool === "wall" && draftStart && cursor && (
-              <>
-                <Line
-                  points={[
-                    ...Object.values(metersToScreen(draftStart, view)),
-                    ...Object.values(metersToScreen(cursor, view)),
-                  ]}
-                  stroke="#ea580c"
-                  strokeWidth={2}
-                  dash={[8, 6]}
-                />
-                <Label
-                  x={metersToScreen(cursor, view).x + 10}
-                  y={metersToScreen(cursor, view).y - 22}
-                >
-                  <Tag fill="#1c1917" cornerRadius={4} />
-                  <Text
-                    text={formatLength(draftLen)}
-                    fontSize={12}
-                    fontFamily="monospace"
-                    fill="#fff"
-                    padding={4}
-                  />
-                </Label>
-              </>
+              <Line
+                points={[
+                  ...Object.values(metersToScreen(draftStart, view)),
+                  ...Object.values(metersToScreen(cursor, view)),
+                ]}
+                stroke="#ea580c"
+                strokeWidth={2}
+                dash={[8, 6]}
+              />
             )}
-            {(tool === "wall" || tool === "place" || tool === "room") && cursor && (
+
+            {/* Maatlabel bij de cursor — voor elk tekengereedschap */}
+            {measureText && cursor && (
+              <Label
+                x={metersToScreen(cursor, view).x + 10}
+                y={metersToScreen(cursor, view).y - 22}
+              >
+                <Tag fill="#1c1917" cornerRadius={4} />
+                <Text
+                  text={measureText}
+                  fontSize={12}
+                  fontFamily="monospace"
+                  fill="#fff"
+                  padding={4}
+                />
+              </Label>
+            )}
+            {isDrawTool && cursor && (
               <Circle
                 x={metersToScreen(cursor, view).x}
                 y={metersToScreen(cursor, view).y}
@@ -1186,7 +1296,7 @@ export function PlanEditor() {
               />
             )}
             {/* Snap-indicator: groene ring als cursor snapt aan bestaand punt */}
-            {(tool === "wall" || tool === "place" || tool === "room") && snapTarget && (
+            {isDrawTool && snapTarget && (
               <Circle
                 x={metersToScreen(snapTarget, view).x}
                 y={metersToScreen(snapTarget, view).y}
@@ -1526,7 +1636,14 @@ export function PlanEditor() {
             </div>
           )}
           <button
-            onClick={() => setMenu(null)}
+            onClick={() => {
+              // Naar het selectiegereedschap zodat het eigenschappen-paneel
+              // verschijnt; setTool wist de selectie, dus daarna opnieuw zetten.
+              const { kind, id } = menu;
+              setMenu(null);
+              setTool("select");
+              select({ kind, id });
+            }}
             className="block w-full px-3 py-2 text-left text-sm text-ink-700 hover:bg-paper-sunken"
           >
             Bewerken

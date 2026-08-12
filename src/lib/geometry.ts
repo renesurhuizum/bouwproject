@@ -27,6 +27,14 @@ export function snapToPoints(p: Point, points: Point[], radius: number): Point |
   return best;
 }
 
+// Totale lengte van een polylijn (open pad), in meters. Basis voor het aantal
+// meters leiding en kabel dat ingekocht moet worden.
+export function pathLength(points: Point[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += dist(points[i - 1], points[i]);
+  return total;
+}
+
 // Oppervlak van een (gesloten) polygoon via de schoenveterformule. m².
 export function polygonArea(poly: Point[]): number {
   if (poly.length < 3) return 0;

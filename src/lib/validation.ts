@@ -9,7 +9,8 @@ import type {
   Wall,
   Level,
 } from "./domain/types";
-import { bounds, pointInPolygon, polygonArea, projectOnSegment } from "./geometry";
+import { bounds, pathLength, pointInPolygon, polygonArea, projectOnSegment } from "./geometry";
+import { PIPE_SPECS } from "./domain/constants";
 import { roomWalls } from "./roomWalls";
 
 export interface ValidationIssue {
@@ -72,6 +73,43 @@ export function validateWalls(walls: Wall[]): ValidationIssue[] {
         message:
           "Dragende muur staat gepland voor sloop — laat eerst een constructeur rekenen (staalbalk/portaal) en check vergunningsplicht bij het Omgevingsloket",
         entityId: wall.id,
+      });
+    }
+  }
+
+  return issues;
+}
+
+// ── Afschot van afvoerleidingen ──────────────────────────────────────────────
+
+// Een afvoer zonder voldoende afschot loopt niet leeg en gaat stinken of
+// verstoppen. Het afschot volgt uit het hoogteverschil over de looplengte.
+export function validatePipeFall(items: PlumbingItem[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  for (const item of items) {
+    if (item.type === "fixture" || !item.path || item.path.length < 2) continue;
+    const spec = PIPE_SPECS[item.type];
+    const minFall = spec?.minFallMmPerM;
+    if (minFall == null) continue;
+
+    const length = pathLength(item.path);
+    if (length <= 0) continue;
+    const startZ = item.startZ ?? item.heightZ ?? 0;
+    const endZ = item.endZ ?? item.heightZ ?? 0;
+    const fall = ((startZ - endZ) * 1000) / length;
+
+    if (fall < 0) {
+      issues.push({
+        severity: "error",
+        message: `Afvoer loopt omhoog (${(-fall).toFixed(1)} mm/m tegendraads) — water stroomt de verkeerde kant op`,
+        entityId: item.id,
+      });
+    } else if (fall < minFall) {
+      issues.push({
+        severity: "warn",
+        message: `Afvoer heeft te weinig afschot: ${fall.toFixed(1)} mm/m, minimaal ${minFall} mm/m nodig`,
+        entityId: item.id,
       });
     }
   }
