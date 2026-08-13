@@ -3,9 +3,9 @@
 // Doorsnedelijnen (NEN-stijl): dikke stippellijn met kijkrichting-pijlen en
 // label (A-A) aan beide uiteinden. Klikbaar/selecteerbaar.
 
-import { Fragment } from "react";
 import { Layer, Line, Circle, Text } from "react-konva";
 import type { SectionLine } from "@/lib/domain/types";
+import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, type ViewState } from "./viewport";
 
 interface Props {
@@ -73,21 +73,24 @@ export function SectionLayer({ view, sections, selectedId, onSelect }: Props) {
         );
 
         return (
-          <Fragment key={s.id}>
+          <DraggableEntity
+            key={s.id}
+            kind="section"
+            entity={s}
+            anchor={s.start}
+            view={view}
+            onSelect={onSelect}
+          >
             <Line
-              id={s.id}
-              name="section"
               points={[a.x, a.y, e.x, e.y]}
               stroke={stroke}
               strokeWidth={selected ? 3 : 2}
               dash={[12, 4, 3, 4]}
               hitStrokeWidth={14}
-              onClick={() => onSelect(s.id)}
-              onTap={() => onSelect(s.id)}
             />
             {endMark(a, 1)}
             {endMark(e, 1)}
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>

@@ -12,16 +12,17 @@ import { OrbitControls, Grid, Sky, TransformControls } from "@react-three/drei";
 import { sunDirection } from "@/lib/sunPosition";
 import { makeTileTexture, makeWoodTexture, makeConcreteTexture, makeBrickTexture } from "@/lib/textures";
 import { downloadBlob } from "@/lib/exportImage";
-import { update as dbUpdate } from "@/lib/db/repo";
+import { mUpdate as dbUpdate } from "@/lib/db/mutate";
 import { useLiveQuery } from "dexie-react-hooks";
 import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer } from "@/lib/domain/types";
 import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { ELECTRICAL_LABEL, BEAM_PROFILE_DIMS } from "@/lib/domain/constants";
+import { findSection } from "@/lib/structural/sections";
 import { buildRoof } from "@/lib/roofGeometry";
 import { bounds } from "@/lib/geometry";
 import { getDB } from "@/lib/db/db";
-import { create as dbCreate } from "@/lib/db/repo";
+import { mCreate as dbCreate } from "@/lib/db/mutate";
 import { useEditor } from "@/lib/store/editor";
 import { use3DEdit } from "./use3DEdit";
 import { WalkthroughMode } from "./WalkthroughMode";
@@ -1122,7 +1123,7 @@ function ColumnModel3D({ col, levelHeight }: { col: Column; levelHeight: number 
 function BeamModel3D({ beam }: { beam: Beam }) {
   const len = dist(beam.start, beam.end);
   if (len < 0.01) return null;
-  const dims = BEAM_PROFILE_DIMS[beam.profile];
+  const dims = findSection(beam.profile) ?? BEAM_PROFILE_DIMS[beam.profile] ?? { h: 0.1, w: 0.1 };
   const fw = beam.width ?? dims.w;
   const fh = dims.h;
   const flT = fh * 0.15;

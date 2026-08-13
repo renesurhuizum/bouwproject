@@ -13,6 +13,7 @@ export type TableName =
   | "openings"
   | "rooms"
   | "electrical"
+  | "circuits"
   | "plumbing"
   | "hvac"
   | "phases"

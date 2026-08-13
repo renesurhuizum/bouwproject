@@ -2,11 +2,11 @@
 
 // Elektra-laag. Markers met constante schermgrootte, korte code + hoogtelabel.
 
-import { Fragment } from "react";
 import { Layer, Circle, Rect, Label, Tag, Text, Line } from "react-konva";
 import type { ElectricalItem } from "@/lib/domain/types";
 import { ELECTRICAL_CODE } from "@/lib/domain/constants";
 import { formatHeight } from "@/lib/format";
+import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, type ViewState } from "./viewport";
 
 const CODE = ELECTRICAL_CODE;
@@ -16,9 +16,13 @@ interface Props {
   items: ElectricalItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Kleur per eindgroep, zodat je ziet welk punt bij welke groep hoort. */
+  circuitColors?: Map<string, string>;
+  /** Nummer per eindgroep, als klein label bij het punt. */
+  circuitNumbers?: Map<string, string>;
 }
 
-export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
+export function ElectricalLayer({ view, items, selectedId, onSelect, circuitColors, circuitNumbers }: Props) {
   const byId = new Map(items.map((it) => [it.id, it]));
 
   // Schakelaar → lichtpunt verbindingen (stippellijn), op basis van linkedIds.
@@ -51,35 +55,46 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
         const p = metersToScreen(it.position, view);
         const selected = it.id === selectedId;
         const r = 11;
+        // Punten zonder groep blijven standaardblauw; dat maakt meteen zichtbaar
+        // welke punten nog nergens bij horen (en dus niet meetellen in de meters).
+        const color = (it.circuitId && circuitColors?.get(it.circuitId)) || "#1d4ed8";
+        const groupNo = it.circuitId ? circuitNumbers?.get(it.circuitId) : undefined;
         return (
-          <Fragment key={it.id}>
+          <DraggableEntity
+            key={it.id}
+            kind="electrical"
+            entity={it}
+            anchor={it.position}
+            view={view}
+            onSelect={onSelect}
+          >
             {selected && (
               <Circle x={p.x} y={p.y} radius={r + 5} fill="#fb923c" opacity={0.5} listening={false} />
             )}
             {it.type === "switch" || it.type === "panel" ? (
               <Rect
-                id={it.id}
-                name="electrical"
                 x={p.x - r}
                 y={p.y - r}
                 width={r * 2}
                 height={r * 2}
                 cornerRadius={4}
-                fill="#1d4ed8"
-                onClick={() => onSelect(it.id)}
-                onTap={() => onSelect(it.id)}
+                fill={color}
               />
             ) : (
-              <Circle
-                id={it.id}
-                name="electrical"
-                x={p.x}
-                y={p.y}
-                radius={r}
-                fill="#1d4ed8"
-                onClick={() => onSelect(it.id)}
-                onTap={() => onSelect(it.id)}
-              />
+              <Circle x={p.x} y={p.y} radius={r} fill={color} />
+            )}
+            {groupNo && (
+              <Label x={p.x + r - 2} y={p.y - r - 8} listening={false}>
+                <Tag fill={color} cornerRadius={2} />
+                <Text
+                  text={groupNo}
+                  fontSize={8}
+                  fontStyle="bold"
+                  fontFamily="monospace"
+                  fill="#fff"
+                  padding={2}
+                />
+              </Label>
             )}
             <Text
               text={CODE[it.type]}
@@ -99,11 +114,11 @@ export function ElectricalLayer({ view, items, selectedId, onSelect }: Props) {
                 text={formatHeight(it.heightZ)}
                 fontSize={9}
                 fontFamily="monospace"
-                fill="#1d4ed8"
+                fill={color}
                 padding={2}
               />
             </Label>
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>

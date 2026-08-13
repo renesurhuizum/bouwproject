@@ -4,7 +4,8 @@ import { useRef, useState } from "react";
 import { Image, Plus, Trash2 } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { getDB } from "@/lib/db/db";
-import { create, update } from "@/lib/db/repo";
+import { update } from "@/lib/db/repo";
+import { mBatch, mCreate, mUpdate } from "@/lib/db/mutate";
 import { useEditor } from "@/lib/store/editor";
 import { useProject } from "@/lib/hooks";
 import type { Level, Wall, Room } from "@/lib/domain/types";
@@ -28,7 +29,7 @@ export function LevelSwitcher() {
   async function commitRename() {
     if (!renamingId) return;
     const trimmed = renameValue.trim();
-    if (trimmed) await update("levels", renamingId, { name: trimmed });
+    if (trimmed) await mUpdate("levels", renamingId, { name: trimmed });
     setRenamingId(null);
   }
 
@@ -73,7 +74,7 @@ export function LevelSwitcher() {
       const elevation = levels[levels.length - 1]
         ? levels[levels.length - 1].elevation + levels[levels.length - 1].height + 0.3
         : 2.8;
-      const newLevel = await create<Level>("levels", {
+      const newLevel = await mCreate<Level>("levels", {
         projectId: project.id,
         name,
         elevation,
@@ -93,30 +94,33 @@ export function LevelSwitcher() {
     const sourceWalls = (await db.walls.where("levelId").equals(groundLevel.id).toArray()).filter(
       (w) => !w.deleted,
     );
-    for (const w of sourceWalls) {
-      await create<Wall>("walls", {
-        levelId: targetLevelId,
-        start: w.start,
-        end: w.end,
-        thickness: w.thickness,
-        height: w.height,
-        material: w.material,
-        loadBearing: w.loadBearing,
-        status: w.status,
-      });
-    }
     const sourceRooms = (await db.rooms.where("levelId").equals(groundLevel.id).toArray()).filter(
       (r) => !r.deleted,
     );
-    for (const r of sourceRooms) {
-      await create<Room>("rooms", {
-        levelId: targetLevelId,
-        name: r.name,
-        func: r.func,
-        polygon: r.polygon,
-        color: r.color,
-      });
-    }
+    // Alle gekopieerde muren en ruimtes samen als één undo-stap.
+    await mBatch(async () => {
+      for (const w of sourceWalls) {
+        await mCreate<Wall>("walls", {
+          levelId: targetLevelId,
+          start: w.start,
+          end: w.end,
+          thickness: w.thickness,
+          height: w.height,
+          material: w.material,
+          loadBearing: w.loadBearing,
+          status: w.status,
+        });
+      }
+      for (const r of sourceRooms) {
+        await mCreate<Room>("rooms", {
+          levelId: targetLevelId,
+          name: r.name,
+          func: r.func,
+          polygon: r.polygon,
+          color: r.color,
+        });
+      }
+    });
   }
 
   const activeIsNew =

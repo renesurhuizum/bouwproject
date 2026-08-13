@@ -10,10 +10,14 @@ import { update } from "@/lib/db/repo";
 import { getDB, type BouwDB } from "@/lib/db/db";
 
 // Tabellen die in de backup mee gaan (volgorde = importvolgorde).
+// LET OP: elke nieuwe tabel moet hier bij, anders verdwijnt hij stilzwijgend
+// bij herstellen. Trappen, kolommen, balken, daken, dakkapellen en doorsneden
+// ontbraken hier sinds ze zijn toegevoegd.
 const TABLES = [
   "projects", "levels", "walls", "openings", "rooms",
   "electrical", "plumbing", "hvac", "phases", "tasks",
   "budget", "expenses", "materials", "photos", "furniture",
+  "stairs", "columns", "beams", "roofs", "dormers", "sections",
 ] as const;
 
 type BackupTable = (typeof TABLES)[number];

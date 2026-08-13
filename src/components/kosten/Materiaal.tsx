@@ -1,13 +1,17 @@
 "use client";
 
-// Materiaallijst (BOM): nodig → besteld → geleverd, met automatische schatting
-// uit de plattegrond (muur- en vloeroppervlak).
+// Materiaallijst (BOM): nodig → besteld → geleverd.
+//
+// De schatting zat hier vroeger als tweede, afwijkende berekening naast
+// quantityTakeoff — zelfde muren, andere getallen. Die is vervangen door de
+// gedeelde engine in lib/takeoff; hier synchroniseer je hem vanaf het tabblad
+// Hoeveelheden. Automatisch afgeleide regels dragen een "auto"-badge en worden
+// bij een volgende sync bijgewerkt, tenzij je het aantal zelf aanpast.
 
 import { useMemo, useState } from "react";
-import { Plus, Trash2, Wand2 } from "lucide-react";
+import { Plus, Trash2, Sparkles } from "lucide-react";
 import { useProject, useMaterials } from "@/lib/hooks";
 import { create, update, remove } from "@/lib/db/repo";
-import { getDB } from "@/lib/db/db";
 import type { MaterialItem, MaterialStatus } from "@/lib/domain/types";
 import {
   MATERIAL_UNITS,
@@ -15,10 +19,8 @@ import {
   MATERIAL_STATUS_COLOR,
 } from "@/lib/domain/constants";
 import { formatEuro } from "@/lib/format";
-import { dist, polygonArea } from "@/lib/geometry";
 
 const STATUSES: MaterialStatus[] = ["needed", "ordered", "delivered"];
-const GIPS_AREA = 1.2 * 2.6; // m² per plaat
 
 export function Materiaal() {
   const project = useProject();
@@ -29,44 +31,6 @@ export function Materiaal() {
     () => materials.reduce((s, m) => s + (m.unitPrice ?? 0) * m.quantity, 0),
     [materials],
   );
-
-  async function estimateFromPlan() {
-    if (!project) return;
-    const db = getDB();
-    const levels = (await db.levels.where("projectId").equals(project.id).toArray()).filter(
-      (l) => !l.deleted,
-    );
-    const levelIds = new Set(levels.map((l) => l.id));
-    const walls = (await db.walls.toArray()).filter((w) => !w.deleted && levelIds.has(w.levelId));
-    const rooms = (await db.rooms.toArray()).filter((r) => !r.deleted && levelIds.has(r.levelId));
-    const newWalls = walls.filter((w) => w.status === "new");
-
-    const wallArea = newWalls.reduce((s, w) => s + dist(w.start, w.end) * w.height, 0);
-    const wallLen = newWalls.reduce((s, w) => s + dist(w.start, w.end), 0);
-    const floorArea = rooms.reduce((s, r) => s + polygonArea(r.polygon), 0);
-
-    const have = new Set(materials.map((m) => m.name.toLowerCase()));
-    const add: { name: string; quantity: number; unit: string }[] = [];
-    if (wallArea > 0) {
-      add.push({ name: "Gipsplaat 120×260", quantity: Math.ceil((wallArea * 2) / GIPS_AREA), unit: "st" });
-      add.push({ name: "Isolatie (wand)", quantity: Math.ceil(wallArea), unit: "m²" });
-      add.push({ name: "Metalstud profiel", quantity: Math.ceil(wallLen * 2.5), unit: "m" });
-      add.push({ name: "Montageschroeven (doos)", quantity: Math.max(1, Math.ceil(wallArea / 25)), unit: "st" });
-    }
-    if (floorArea > 0) {
-      add.push({ name: "Dekvloer", quantity: Math.ceil(floorArea), unit: "m²" });
-    }
-    for (const s of add) {
-      if (have.has(s.name.toLowerCase())) continue;
-      await create<MaterialItem>("materials", {
-        projectId: project.id,
-        name: s.name,
-        quantity: s.quantity,
-        unit: s.unit,
-        status: "needed",
-      });
-    }
-  }
 
   function nextStatus(s: MaterialStatus): MaterialStatus {
     return s === "needed" ? "ordered" : s === "ordered" ? "delivered" : "needed";
@@ -80,12 +44,6 @@ export function Materiaal() {
           className="flex flex-1 items-center justify-center gap-2 rounded-card bg-ink-900 py-3 text-sm font-medium text-paper-raised"
         >
           <Plus size={18} /> Materiaal toevoegen
-        </button>
-        <button
-          onClick={estimateFromPlan}
-          className="flex items-center justify-center gap-2 rounded-card border border-accent/40 bg-accent-soft px-3 py-3 text-sm font-medium text-accent"
-        >
-          <Wand2 size={18} /> Schat uit plattegrond
         </button>
       </div>
 
@@ -101,7 +59,8 @@ export function Materiaal() {
       <section className="rounded-card border border-line bg-paper-raised">
         {materials.length === 0 ? (
           <p className="p-6 text-center text-sm text-ink-300">
-            Nog geen materiaal. Voeg toe of laat het schatten uit je plattegrond.
+            Nog geen materiaal. Voeg het handmatig toe, of laat het berekenen via
+            het tabblad Hoeveelheden.
           </p>
         ) : (
           <ul className="divide-y divide-line">
@@ -115,10 +74,21 @@ export function Materiaal() {
                   {MATERIAL_STATUS_LABEL[m.status]}
                 </button>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-ink-900">{m.name}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-medium text-ink-900">{m.name}</span>
+                    {m.sourceId && !m.quantityOverridden && (
+                      <span
+                        className="flex shrink-0 items-center gap-0.5 rounded bg-accent-soft px-1 py-0.5 text-[9px] font-semibold text-accent"
+                        title="Automatisch berekend uit de plattegrond; wordt bijgewerkt bij een volgende sync"
+                      >
+                        <Sparkles size={9} /> auto
+                      </span>
+                    )}
+                  </div>
                   <div className="tabular text-[11px] text-ink-500">
                     {m.quantity} {m.unit}
-                    {m.unitPrice ? ` · ${formatEuro(m.unitPrice, true)}/st` : ""}
+                    {m.packName ? ` (${m.packName})` : ""}
+                    {m.unitPrice ? ` · ${formatEuro(m.unitPrice, true)}/${m.unit}` : ""}
                   </div>
                 </div>
                 {m.unitPrice ? (

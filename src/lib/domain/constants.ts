@@ -5,6 +5,8 @@ import type {
   FixtureKind,
   HvacType,
   OpeningType,
+  BreakerKind,
+  PlumbingPipeType,
   WallMaterial,
   WallStatus,
   PhaseStatus,
@@ -332,7 +334,84 @@ export const FIXTURE_DEFAULT_HEIGHT: Record<FixtureKind, number> = {
   "outdoor-tap": 0.5,
 };
 
+// ── Elektra: eindgroepen en kabels ───────────────────────────────────────────
+
+// Kleuren waarmee groepen op de plattegrond uit elkaar te houden zijn.
+export const CIRCUIT_PALETTE = [
+  "#1d4ed8", "#dc2626", "#16a34a", "#d97706", "#7c3aed",
+  "#0891b2", "#db2777", "#65a30d", "#c2410c", "#4f46e5",
+];
+
+// Per zekering: de gangbare NL-kabel en het maximale aantal punten dat je er
+// volgens de NEN 1010-praktijkregel op hangt.
+export interface BreakerSpec {
+  label: string;
+  cableSpec: string;
+  /** Aantal aders inclusief aarde — nodig om kabelmeters naar draad om te rekenen. */
+  cores: number;
+  /** Aderdoorsnede in mm². */
+  crossSection: number;
+  maxPoints: number;
+}
+
+export const BREAKER_SPECS: Record<BreakerKind, BreakerSpec> = {
+  B10: { label: "B10 – lichtgroep", cableSpec: "3×1,5 mm²", cores: 3, crossSection: 1.5, maxPoints: 12 },
+  B16: { label: "B16 – standaard", cableSpec: "3×2,5 mm²", cores: 3, crossSection: 2.5, maxPoints: 12 },
+  C16: { label: "C16 – aanloopstroom", cableSpec: "3×2,5 mm²", cores: 3, crossSection: 2.5, maxPoints: 12 },
+  B20: { label: "B20 – zware groep", cableSpec: "3×4 mm²", cores: 3, crossSection: 4, maxPoints: 8 },
+  perilex: { label: "Perilex – kookgroep", cableSpec: "5×2,5 mm²", cores: 5, crossSection: 2.5, maxPoints: 1 },
+};
+
+// Toeslagen op de gemeten routelengte, zodat de inkooplengte klopt met de
+// praktijk: je knipt nooit exact op maat.
+export const CABLE_SLACK_PER_POINT_M = 0.3; // speling per aansluitpunt
+export const CABLE_PANEL_TAIL_M = 2.0; // staart in de meterkast per groep
+export const CABLE_WASTE_FACTOR = 1.1; // 10% snij-/trekverlies
+export const CABLE_DRUM_M = 100; // installatiedraad komt per rol van 100 m
+
 export const PLUMBING_COLOR = "#0891b2"; // teal
+
+// Leidingspecificaties per type: welke diameters gangbaar zijn (mm), welke
+// standaard is, en het minimale afschot voor afvoeren (mm per meter).
+// De diameter werd voorheen hardcoded op 22 of 50 mm gezet en was nergens
+// aanpasbaar, terwijl een standleiding 110 mm moet zijn.
+export interface PipeSpec {
+  label: string;
+  diameters: number[];
+  defaultDiameter: number;
+  /** Minimaal afschot in mm/m. Alleen zinvol voor afvoeren. */
+  minFallMmPerM?: number;
+  /** Standaardhoogte boven de vloer (m) bij het tekenen. */
+  defaultHeightZ: number;
+}
+
+export const PIPE_SPECS: Record<PlumbingPipeType, PipeSpec> = {
+  "supply-cold": {
+    label: "Koud water",
+    diameters: [12, 15, 18, 22, 28],
+    defaultDiameter: 15,
+    defaultHeightZ: 1.0,
+  },
+  "supply-hot": {
+    label: "Warm water",
+    diameters: [12, 15, 18, 22, 28],
+    defaultDiameter: 15,
+    defaultHeightZ: 1.0,
+  },
+  drain: {
+    label: "Afvoer",
+    diameters: [32, 40, 50, 75, 110, 125],
+    defaultDiameter: 50,
+    minFallMmPerM: 5, // ≈ 1:200; onder dit afschot loopt een afvoer niet goed leeg
+    defaultHeightZ: 0.05,
+  },
+  "cv-pipe": {
+    label: "CV-leiding",
+    diameters: [15, 16, 18, 22],
+    defaultDiameter: 15,
+    defaultHeightZ: 0.05,
+  },
+};
 
 // Werkelijke voetafdruk (m) per sanitair-soort — één bron voor 2D-editor,
 // werkblad en 3D zodat symbolen overal dezelfde fysieke maat houden.
@@ -373,7 +452,7 @@ export const COLUMN_SHAPE_LABEL: Record<ColumnShape, string> = {
 export const COLUMN_DEFAULT_SIZE = 0.3; // m
 
 // Stalen profielen: hoogte × flensbreedte (m), afgerond op standaard HEA/HEB.
-export const BEAM_PROFILE_LABEL: Record<BeamProfile, string> = {
+export const BEAM_PROFILE_LABEL: Record<string, string> = {
   HEA100: "HEA 100",
   HEA140: "HEA 140",
   HEA160: "HEA 160",
@@ -381,7 +460,7 @@ export const BEAM_PROFILE_LABEL: Record<BeamProfile, string> = {
   custom: "Aangepast",
 };
 
-export const BEAM_PROFILE_DIMS: Record<BeamProfile, { h: number; w: number }> = {
+export const BEAM_PROFILE_DIMS: Record<string, { h: number; w: number }> = {
   HEA100: { h: 0.096, w: 0.1 },
   HEA140: { h: 0.133, w: 0.14 },
   HEA160: { h: 0.152, w: 0.16 },
