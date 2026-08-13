@@ -32,7 +32,6 @@ import {
   DORMER_DEFAULTS,
   PIPE_SPECS,
 } from "@/lib/domain/constants";
-import { bounds } from "@/lib/geometry";
 import type {
   Wall,
   WallMaterial,
@@ -45,9 +44,12 @@ import type {
   RoofType,
   DormerType,
   Dormer,
+  Room,
 } from "@/lib/domain/types";
 import { polygonArea as polyArea } from "@/lib/geometry";
 import { nvoArea } from "@/lib/validation";
+import { atticAreasFor, type AtticContext } from "@/lib/attic";
+import { fromRoofLocal, roofFootprint } from "@/lib/roofGeometry";
 import { BalkAdvies } from "./BalkAdvies";
 import { SECTION_PROFILES, findSection, LINTEL_BEARING_M } from "@/lib/structural/sections";
 
@@ -161,6 +163,27 @@ export function SelectionPanel() {
     [selection?.kind, selection?.id],
   );
 
+  // De kap boven deze verdieping, plus de muurhoogte waar hij op staat. Nodig
+  // om bij een zolderruimte te laten zien hoeveel er echt bruikbaar is.
+  const attic = useLiveQuery(
+    async () => {
+      if (!activeLevelId) return null;
+      const db = getDB();
+      const roofs = (await db.roofs.where("levelId").equals(activeLevelId).toArray()).filter(
+        (r) => !r.deleted,
+      );
+      const levelRoof = roofs[0] ?? null;
+      if (!levelRoof) return null;
+      const dms = (await db.dormers.where("roofId").equals(levelRoof.id).toArray()).filter(
+        (d) => !d.deleted,
+      );
+      const level = await db.levels.get(activeLevelId);
+      return { roof: levelRoof, dormers: dms, baseHeightM: level?.height ?? 0 };
+    },
+    [activeLevelId],
+    null,
+  );
+
   const tool = useEditor((s) => s.tool);
   const isPlacementMode = tool === "place" || tool === "draw-pipe";
   const multiActive = multi.length > 1;
@@ -224,13 +247,17 @@ export function SelectionPanel() {
   }
 
   async function addDormer(roofId: string, type: DormerType) {
-    const bb = bounds((walls ?? []).flatMap((w) => [w.start, w.end]));
-    const center = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2 };
     const def = DORMER_DEFAULTS[type];
+    const host = roof ?? attic?.roof ?? null;
+    const fp = host ? roofFootprint(host, walls ?? []) : null;
+    // Op het dakschild, niet op de nok: op de nok is er geen dakvlak om een
+    // kapel in te zetten. Op ~70% van de weg naar de dakvoet zit hij waar je
+    // hem in het echt ook zet — laag genoeg om stahoogte te winnen.
+    const at = fp ? fromRoofLocal({ x: 0, y: fp.D * 0.35 }, host!, fp) : { x: 0, y: 0 };
     const dm = await mCreate<Dormer>("dormers", {
       roofId,
       type,
-      position: center,
+      position: at,
       width: def.width,
       height: def.height,
     });
@@ -574,8 +601,9 @@ export function SelectionPanel() {
             </div>
             <div className="flex items-center justify-between text-xs text-ink-500">
               <span>NVO (NEN 2580)</span>
-              <span className="tabular text-ink-900">{formatArea(nvoArea(room, walls ?? []))}</span>
+              <span className="tabular text-ink-900">{formatArea(nvoArea(room, walls ?? [], attic))}</span>
             </div>
+            <AtticSummary room={room} walls={walls ?? []} attic={attic} />
             <Row label="Naam">
               <input
                 type="text"
@@ -1118,6 +1146,53 @@ async function removeAnd(
 ) {
   await mRemove(table, id);
   after();
+}
+
+/**
+ * Wat levert de zolder écht op? Onder een kap is de footprint misleidend: pas
+ * vanaf 1,50 m telt de vloer mee, en pas vanaf 2,30 m mag er een slaapkamer in.
+ */
+function AtticSummary({
+  room,
+  walls,
+  attic,
+}: {
+  room: Room;
+  walls: Wall[];
+  attic: AtticContext | null | undefined;
+}) {
+  const areas = useMemo(() => atticAreasFor(room, walls, attic), [room, walls, attic]);
+  if (!areas) return null;
+
+  const pct = areas.grossM2 > 0 ? Math.round((areas.usableM2 / areas.grossM2) * 100) : 0;
+  return (
+    <div className="rounded-md border border-line bg-paper/60 p-2.5 space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-medium text-ink-700">Onder de kap</span>
+        <span className="text-[10px] text-ink-400">{pct}% bruikbaar</span>
+      </div>
+      {/* Balkje: het bruikbare deel binnen het bruto oppervlak. */}
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-100">
+        <div className="h-full rounded-full bg-cyan-600" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="flex items-center justify-between text-xs text-ink-500">
+        <span>Bruikbaar (≥ 1,50 m)</span>
+        <span className="tabular text-cyan-700">{formatArea(areas.usableM2)}</span>
+      </div>
+      <div className="flex items-center justify-between text-xs text-ink-500">
+        <span>Verblijfsruimte (≥ 2,30 m)</span>
+        <span className="tabular text-green-700">{formatArea(areas.livingM2)}</span>
+      </div>
+      <div className="flex items-center justify-between text-xs text-ink-500">
+        <span>Hoogste punt</span>
+        <span className="tabular text-ink-900">{formatLength(areas.maxHeadroomM)}</span>
+      </div>
+      <p className="text-[10px] leading-snug text-ink-400">
+        Een kniewand zet je op de 1,50 m-lijn; de ruimte erachter is bergruimte.
+        Een dakkapel verschuift beide lijnen naar buiten.
+      </p>
+    </div>
+  );
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

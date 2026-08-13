@@ -13,6 +13,7 @@ import type {
 import { bounds, pathLength, pointInPolygon, polygonArea, projectOnSegment } from "./geometry";
 import { PIPE_SPECS } from "./domain/constants";
 import { roomWalls } from "./roomWalls";
+import { atticAreasFor, type AtticContext } from "./attic";
 
 export interface ValidationIssue {
   severity: "error" | "warn" | "info";
@@ -339,7 +340,16 @@ export function validateRoomServices(
 // Benadering: bruto polygoon-oppervlak min de halve dikte van de werkelijk
 // aangrenzende muren langs de omtrek (polygon ligt op de muur-hartlijnen).
 
-export function nvoArea(room: Room, walls: Wall[]): number {
+export function nvoArea(
+  room: Room,
+  walls: Wall[],
+  /**
+   * De kap boven deze verdieping, als die er is. NEN 2580 telt vloer pas mee
+   * vanaf 1,50 m stahoogte, dus onder een schuin dak is de NVO nooit groter
+   * dan het bruikbare deel.
+   */
+  attic?: AtticContext | null,
+): number {
   const bruto = polygonArea(room.polygon);
   if (room.polygon.length < 3) return bruto;
 
@@ -361,5 +371,10 @@ export function nvoArea(room: Room, walls: Wall[]): number {
     }
     inset += edgeLen * (thickness / 2);
   }
-  return Math.max(0, bruto - inset);
+  const netto = Math.max(0, bruto - inset);
+
+  // Beide aftrekposten (muurdikte en stahoogte) overlappen deels langs de rand;
+  // de kleinste van de twee is de eerlijke bovengrens, niet de som.
+  const a = atticAreasFor(room, walls, attic);
+  return a ? Math.min(netto, a.usableM2) : netto;
 }

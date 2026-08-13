@@ -1,14 +1,15 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Image, Plus, Trash2 } from "lucide-react";
+import { Image, Plus, Trash2, Triangle } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { getDB } from "@/lib/db/db";
 import { update } from "@/lib/db/repo";
 import { mBatch, mCreate, mUpdate } from "@/lib/db/mutate";
 import { useEditor } from "@/lib/store/editor";
 import { useProject } from "@/lib/hooks";
-import type { Level, Wall, Room } from "@/lib/domain/types";
+import type { Level, Wall, Room, Roof } from "@/lib/domain/types";
+import { ROOF_DEFAULTS } from "@/lib/domain/constants";
 
 export function LevelSwitcher() {
   const project = useProject();
@@ -65,29 +66,53 @@ export function LevelSwitcher() {
 
   if (!levels || levels.length === 0) return null;
 
-  async function addLevel() {
+  /**
+   * Een zolder is geen gewone verdieping: de muren zijn kniewanden en de
+   * bruikbare ruimte zit in de kap. Daarom krijgt hij een lage verdiepings-
+   * hoogte én meteen een zadeldak, zodat de hoogtelijnen direct kloppen.
+   */
+  const ATTIC_KNEE_WALL_M = 1.2;
+
+  async function addLevel(kind: "floor" | "attic" = "floor") {
     if (!project?.id || adding) return;
     setAdding(true);
     try {
       const maxOrder = levels.reduce((m, l) => Math.max(m, l.order), 0);
-      const name = `Verdieping ${maxOrder}`;
+      const attic = kind === "attic";
+      const name = attic ? "Zolder" : `Verdieping ${maxOrder}`;
+      const height = attic ? ATTIC_KNEE_WALL_M : 2.5;
       const elevation = levels[levels.length - 1]
         ? levels[levels.length - 1].elevation + levels[levels.length - 1].height + 0.3
         : 2.8;
-      const newLevel = await mCreate<Level>("levels", {
-        projectId: project.id,
-        name,
-        elevation,
-        height: 2.5,
-        order: maxOrder + 1,
+      // Verdieping + kap in één undo-stap: half een zolder is geen zolder.
+      const newLevel = await mBatch(async () => {
+        const lvl = await mCreate<Level>("levels", {
+          projectId: project!.id,
+          name,
+          elevation,
+          height,
+          order: maxOrder + 1,
+        });
+        if (attic) {
+          const def = ROOF_DEFAULTS.gable;
+          await mCreate<Roof>("roofs", {
+            levelId: lvl.id,
+            type: "gable",
+            pitch: def.pitch,
+            ridgeDirection: 0,
+            overhang: def.overhang,
+          });
+        }
+        return lvl;
       });
       setActiveLevel(newLevel.id);
+      if (attic) await copyWallsFromGround(newLevel.id, ATTIC_KNEE_WALL_M);
     } finally {
       setAdding(false);
     }
   }
 
-  async function copyWallsFromGround(targetLevelId: string) {
+  async function copyWallsFromGround(targetLevelId: string, wallHeightM?: number) {
     const groundLevel = levels.find((l) => l.order === 1);
     if (!groundLevel) return;
     const db = getDB();
@@ -105,7 +130,8 @@ export function LevelSwitcher() {
           start: w.start,
           end: w.end,
           thickness: w.thickness,
-          height: w.height,
+          // Op een zolder worden de overgenomen gevels kniewanden.
+          height: wallHeightM ?? w.height,
           material: w.material,
           loadBearing: w.loadBearing,
           status: w.status,
@@ -173,6 +199,14 @@ export function LevelSwitcher() {
           className="rounded-lg p-1.5 text-ink-400 transition-colors hover:bg-paper-sunken hover:text-ink-700 disabled:opacity-40"
         >
           <Plus size={14} />
+        </button>
+        <button
+          onClick={() => void addLevel("attic")}
+          disabled={adding}
+          title="Zolder toevoegen — kniewand 1,20 m met zadeldak"
+          className="rounded-lg p-1.5 text-ink-400 transition-colors hover:bg-paper-sunken hover:text-ink-700 disabled:opacity-40"
+        >
+          <Triangle size={14} />
         </button>
       </div>
 

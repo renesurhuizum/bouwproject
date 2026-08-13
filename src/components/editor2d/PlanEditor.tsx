@@ -1168,6 +1168,9 @@ export function PlanEditor() {
               walls={walls}
               levels={activeLevel ? [activeLevel] : []}
               phaseStatusByRoom={phaseOverlay ? (phaseStatusByRoom ?? new Map()) : null}
+              roof={roofs[0] ?? null}
+              dormers={dormers}
+              baseHeightM={activeLevel?.height ?? 0}
             />
           )}
 
@@ -1263,6 +1266,7 @@ export function PlanEditor() {
               selectedDormerId={selection?.kind === "dormer" ? selection.id : null}
               onSelectRoof={(id) => onSelectEntity("roof", id)}
               onSelectDormer={(id) => onSelectEntity("dormer", id)}
+              baseHeightM={activeLevel?.height ?? 0}
             />
           )}
 

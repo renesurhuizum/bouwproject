@@ -127,6 +127,12 @@ export class BouwDB extends Dexie {
           }
         }
       });
+    // v7: foto's zijn altijd al aan een ruimte gehangen, maar `roomId` stond
+    // niet in de index — het selecteren van een ruimte liep daardoor stuk op
+    // "KeyPath roomId on object store photos is not indexed".
+    this.version(7).stores({
+      photos: "id, projectId, roomId, updatedAt, deleted",
+    });
   }
 }
 

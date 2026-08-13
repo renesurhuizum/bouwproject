@@ -10,7 +10,14 @@ import { Canvas } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, Grid, Sky, TransformControls } from "@react-three/drei";
 import { sunDirection } from "@/lib/sunPosition";
-import { makeTileTexture, makeWoodTexture, makeConcreteTexture, makeBrickTexture } from "@/lib/textures";
+import {
+  makeSurface,
+  makeSurfaceMeterUv,
+  surfaceForWallMaterial,
+  surfaceForFloorMaterial,
+  defaultColorFor,
+  mixHex,
+} from "@/lib/textures";
 import { downloadBlob } from "@/lib/exportImage";
 import { mUpdate as dbUpdate } from "@/lib/db/mutate";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -19,7 +26,16 @@ import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { ELECTRICAL_LABEL, BEAM_PROFILE_DIMS } from "@/lib/domain/constants";
 import { findSection } from "@/lib/structural/sections";
-import { buildRoof } from "@/lib/roofGeometry";
+import {
+  buildRoof,
+  cutRoofHoles,
+  dormerHoles,
+  roofFootprint,
+  roofHeightAt,
+  toRoofLocal,
+  DORMER_DEPTH_M,
+  type RoofFootprint,
+} from "@/lib/roofGeometry";
 import { bounds } from "@/lib/geometry";
 import { getDB } from "@/lib/db/db";
 import { mCreate as dbCreate } from "@/lib/db/mutate";
@@ -28,6 +44,9 @@ import { use3DEdit } from "./use3DEdit";
 import { WalkthroughMode } from "./WalkthroughMode";
 import { dist, angle, polygonCentroid, projectOnSegment } from "@/lib/geometry";
 import type { Point } from "@/lib/domain/types";
+
+/** Hoeveel statuskleur er door het materiaal heen mag schemeren. */
+const STATUS_TINT = 0.22;
 
 const STATUS_3D: Record<Wall["status"], { color: string; opacity: number }> = {
   existing: { color: "#b8b0a2", opacity: 1 },
@@ -75,13 +94,24 @@ function wallBoxes(length: number, height: number, openings: Opening[]): Box[] {
 function WallMesh({ wall, openings, wallColor }: { wall: Wall; openings: Opening[]; wallColor?: string }) {
   const length = dist(wall.start, wall.end);
   const style = STATUS_3D[wall.status];
-  const finalColor = wallColor && wall.status === "existing" ? wallColor : style.color;
 
-  // Bakstenen muur krijgt een procedurele metselwerk-textuur.
-  const brickTex = useMemo(
-    () => (wall.material === "brick" && style.opacity >= 1 ? makeBrickTexture(finalColor) : null),
-    [wall.material, finalColor, style.opacity],
+  // Elk muurmateriaal krijgt zijn eigen oppervlak, geschaald op de werkelijke
+  // muurmaat — zo is een steen op een lange muur even groot als op een korte.
+  //
+  // De kleur zit ín de textuur, niet op het materiaal: zou je de statuskleur
+  // er ook nog overheen vermenigvuldigen, dan wordt baksteen knalrood. De
+  // status is daarom een lichte tint in de textuurkleur zelf.
+  const kind = surfaceForWallMaterial(wall.material);
+  const drawColor = mixHex(
+    wallColor ?? defaultColorFor(kind),
+    wall.status === "existing" ? null : style.color,
+    STATUS_TINT,
   );
+  const surface = useMemo(
+    () => (style.opacity >= 1 ? makeSurface(kind, length, wall.height, drawColor) : null),
+    [kind, drawColor, style.opacity, length, wall.height],
+  );
+  const finalColor = surface ? "#ffffff" : drawColor;
 
   if (length < 0.01) return null;
   const cx = (wall.start.x + wall.end.x) / 2;
@@ -96,11 +126,12 @@ function WallMesh({ wall, openings, wallColor }: { wall: Wall; openings: Opening
           <boxGeometry args={[b.w, b.h, wall.thickness]} />
           <meshStandardMaterial
             color={finalColor}
-            map={brickTex}
+            map={surface?.map}
+            normalMap={surface?.normalMap}
             transparent={style.opacity < 1}
             opacity={style.opacity}
-            roughness={wall.material === "concrete" ? 0.95 : wall.material === "brick" ? 0.88 : 0.80}
-            metalness={0}
+            roughness={surface?.roughness ?? 0.85}
+            metalness={surface?.metalness ?? 0}
           />
         </mesh>
       ))}
@@ -128,24 +159,27 @@ function RoomFloor3D({ room }: { room: Room }) {
     ? FLOOR_COLORS[room.floorMaterial]
     : (room.color ?? "#e6d6bf");
 
-  // Procedurele vloertextuur per materiaal (gecachet in lib/textures).
-  const texture = useMemo(() => {
-    switch (room.floorMaterial) {
-      case "tile": return makeTileTexture(floorColor);
-      case "wood": return makeWoodTexture(floorColor);
-      case "stone": return makeConcreteTexture(floorColor);
-      case "concrete": return makeConcreteTexture(floorColor);
-      default: return null; // carpet / standaard: vlakke kleur
-    }
-  }, [room.floorMaterial, floorColor]);
+  // Vloerafwerking op ware maat: de ruimte-afmeting bepaalt de herhaling, dus
+  // een tegel van 30 cm blijft 30 cm — ongeacht hoe groot de kamer is.
+  const surface = useMemo(
+    () =>
+      room.floorMaterial
+        ? makeSurfaceMeterUv(surfaceForFloorMaterial(room.floorMaterial), floorColor)
+        : null,
+    [room.floorMaterial, floorColor],
+  );
 
   return (
     <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} receiveShadow>
       <shapeGeometry args={[shape]} />
+      {/* Zonder afwerking valt de vloer terug op de ruimtekleur; mét afwerking
+          zit de kleur al in de textuur en zou vermenigvuldigen hem verdubbelen. */}
       <meshStandardMaterial
-        color={floorColor}
-        map={texture}
-        roughness={room.floorMaterial === "tile" ? 0.3 : room.floorMaterial === "wood" ? 0.65 : 0.9}
+        color={surface ? "#ffffff" : floorColor}
+        map={surface?.map}
+        normalMap={surface?.normalMap}
+        roughness={surface?.roughness ?? 0.9}
+        metalness={surface?.metalness ?? 0}
         side={THREE.DoubleSide}
       />
     </mesh>
@@ -1044,6 +1078,8 @@ function StaircaseModel3D({ stair, totalRise }: { stair: Staircase; totalRise: n
   const n = Math.max(2, Math.round(stair.steps));
   const w = stair.width;
   const riser = totalRise / n;
+  // Treden zijn hout: nerf over de breedte van de trede.
+  const stairSurface = useMemo(() => makeSurface("wood", w, stair.run, STAIR_COLOR), [w, stair.run]);
 
   if (stair.kind === "spiral") {
     const R = Math.max(w, stair.run) / 2;
@@ -1096,7 +1132,12 @@ function StaircaseModel3D({ stair, totalRise }: { stair: Staircase; totalRise: n
       {Array.from({ length: n }, (_, i) => (
         <mesh key={i} position={[w / 2, ((i + 1) * riser) / 2, i * depth + depth / 2]} castShadow receiveShadow>
           <boxGeometry args={[w, (i + 1) * riser, depth]} />
-          <meshStandardMaterial color={STAIR_COLOR} roughness={0.7} />
+          <meshStandardMaterial
+            color={STAIR_COLOR}
+            map={stairSurface.map}
+            normalMap={stairSurface.normalMap}
+            roughness={stairSurface.roughness}
+          />
         </mesh>
       ))}
     </group>
@@ -1106,6 +1147,11 @@ function StaircaseModel3D({ stair, totalRise }: { stair: Staircase; totalRise: n
 function ColumnModel3D({ col, levelHeight }: { col: Column; levelHeight: number }) {
   const h = col.height ?? levelHeight;
   const color = CONSTRUCTION_MATERIAL_COLOR[col.material] ?? "#a8a8a8";
+  const surface = useMemo(
+    () => makeSurface(surfaceForWallMaterial(col.material), col.size * 4, h, color),
+    [col.material, col.size, h, color],
+  );
+  // De textuur draagt de kleur al; nog eens vermenigvuldigen maakt hem dubbel donker.
   return (
     <group position={[col.position.x, 0, col.position.y]}>
       <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
@@ -1114,35 +1160,74 @@ function ColumnModel3D({ col, levelHeight }: { col: Column; levelHeight: number 
         ) : (
           <boxGeometry args={[col.size, h, col.size]} />
         )}
-        <meshStandardMaterial color={color} roughness={0.85} />
+        <meshStandardMaterial
+          map={surface.map}
+          normalMap={surface.normalMap}
+          roughness={surface.roughness}
+          metalness={surface.metalness}
+        />
       </mesh>
     </group>
   );
 }
 
 function BeamModel3D({ beam }: { beam: Beam }) {
+  const section = findSection(beam.profile);
+  const dims = section ?? BEAM_PROFILE_DIMS[beam.profile] ?? { h: 0.1, w: 0.1 };
+  const isTimber = section?.material === "timber";
   const len = dist(beam.start, beam.end);
-  if (len < 0.01) return null;
-  const dims = findSection(beam.profile) ?? BEAM_PROFILE_DIMS[beam.profile] ?? { h: 0.1, w: 0.1 };
   const fw = beam.width ?? dims.w;
   const fh = dims.h;
-  const flT = fh * 0.15;
+
+  // De herhaling volgt de werkelijke lengte, dus de nerf loopt in de lengte-
+  // richting van de balk — dwarse nerf ziet er meteen verkeerd uit.
+  const surface = useMemo(
+    () =>
+      isTimber
+        ? makeSurface("wood-beam", Math.max(0.2, len), fh)
+        : makeSurface("steel", Math.max(0.2, len), fh),
+    [isTimber, len, fh],
+  );
+
+  if (len < 0.01) return null;
   const cx = (beam.start.x + beam.end.x) / 2;
   const cz = (beam.start.y + beam.end.y) / 2;
   const rotY = -angle(beam.start, beam.end);
+  const mat = (
+    <meshStandardMaterial
+      map={surface.map}
+      normalMap={surface.normalMap}
+      roughness={surface.roughness}
+      metalness={surface.metalness}
+    />
+  );
+
+  // Hout is massief; alleen staal heeft een I-profiel met flenzen en lijf.
+  if (isTimber) {
+    return (
+      <group position={[cx, beam.height, cz]} rotation={[0, rotY, 0]}>
+        <mesh castShadow receiveShadow>
+          <boxGeometry args={[len, fh, fw]} />
+          {mat}
+        </mesh>
+      </group>
+    );
+  }
+
+  const flT = fh * 0.15;
   return (
     <group position={[cx, beam.height, cz]} rotation={[0, rotY, 0]}>
-      <mesh position={[0, fh / 2 - flT / 2, 0]} castShadow>
+      <mesh position={[0, fh / 2 - flT / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[len, flT, fw]} />
-        <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.7} />
+        {mat}
       </mesh>
-      <mesh position={[0, -fh / 2 + flT / 2, 0]} castShadow>
+      <mesh position={[0, -fh / 2 + flT / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[len, flT, fw]} />
-        <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.7} />
+        {mat}
       </mesh>
       <mesh castShadow>
         <boxGeometry args={[len, fh - 2 * flT, fw * 0.12]} />
-        <meshStandardMaterial color="#5b626b" roughness={0.4} metalness={0.7} />
+        {mat}
       </mesh>
     </group>
   );
@@ -1152,66 +1237,138 @@ function BeamModel3D({ beam }: { beam: Beam }) {
 
 const ROOF_COLOR = "#9b4a3a"; // terracotta
 
-function RoofMesh3D({ roof, walls, baseY }: { roof: Roof; walls: Wall[]; baseY: number }) {
-  const bb = useMemo(
-    () => (roof.polygon && roof.polygon.length >= 3 ? bounds(roof.polygon) : bounds(walls.flatMap((w) => [w.start, w.end]))),
-    [roof.polygon, walls],
-  );
-  const W = bb.max.x - bb.min.x;
-  const D = bb.max.y - bb.min.y;
-  const cx = (bb.min.x + bb.max.x) / 2;
-  const cz = (bb.min.y + bb.max.y) / 2;
+function RoofMesh3D({
+  roof,
+  walls,
+  dormers,
+  baseY,
+}: {
+  roof: Roof;
+  walls: Wall[];
+  dormers: Dormer[];
+  baseY: number;
+}) {
+  const fp = useMemo(() => roofFootprint(roof, walls), [roof, walls]);
+  const W = fp?.W ?? 0;
+  const D = fp?.D ?? 0;
 
   const geom = useMemo(() => {
-    const m = buildRoof(roof.type, Math.max(0.5, W), Math.max(0.5, D), roof.pitch, roof.overhang);
+    if (!fp) return null;
+    const raw = buildRoof(roof.type, Math.max(0.5, W), Math.max(0.5, D), roof.pitch, roof.overhang);
+    // Dakkapellen snijden hun footprint uit het dakvlak. Zonder dat gat kijk je
+    // vanaf de zolder nog steeds tegen het dak aan en levert de kapel niets op.
+    const m = cutRoofHoles(raw, dormerHoles(roof, fp, dormers));
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(m.positions, 3));
+    // UV's staan in meters, zodat de pannen over de nok doorlopen zonder te
+    // verspringen en overal even groot zijn.
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(m.uvs, 2));
     g.setIndex(m.indices);
     g.computeVertexNormals();
     return g;
-  }, [roof.type, roof.pitch, roof.overhang, W, D]);
+  }, [roof, fp, W, D, dormers]);
 
-  if (W <= 0.5 || D <= 0.5) return null;
+  // Buitenkant pannen, binnenkant dakbeschot — dat is wat je vanaf de zolder
+  // ziet, en het maakt de kap als ruimte herkenbaar.
+  const tiles = useMemo(() => makeSurfaceMeterUv("roof-tile", ROOF_COLOR), []);
+  const boarding = useMemo(() => makeSurfaceMeterUv("wood", "#c2a172"), []);
+
+  if (!fp || !geom || W <= 0.5 || D <= 0.5) return null;
   const rotY = -(roof.ridgeDirection * Math.PI) / 180;
 
   return (
-    <group position={[cx, baseY, cz]} rotation={[0, rotY, 0]}>
+    <group position={[fp.center.x, baseY, fp.center.y]} rotation={[0, rotY, 0]}>
       <mesh geometry={geom} castShadow receiveShadow>
-        <meshStandardMaterial color={ROOF_COLOR} roughness={0.85} side={THREE.DoubleSide} />
+        <meshStandardMaterial
+          map={tiles.map}
+          normalMap={tiles.normalMap}
+          roughness={tiles.roughness}
+          metalness={tiles.metalness}
+          side={THREE.FrontSide}
+        />
+      </mesh>
+      <mesh geometry={geom} receiveShadow>
+        <meshStandardMaterial
+          map={boarding.map}
+          normalMap={boarding.normalMap}
+          roughness={boarding.roughness}
+          side={THREE.BackSide}
+        />
       </mesh>
     </group>
   );
 }
 
-function DormerMesh3D({ dormer, baseY }: { dormer: Dormer; baseY: number }) {
+/**
+ * Een dakkapel hoort op het dakvlak te staan, niet op de zoldervloer. We zoeken
+ * de dakhoogte op de dakvoet-zijde van de kapel en zetten hem daarop; de
+ * achterkant verdwijnt dan vanzelf in de kap, precies zoals in het echt.
+ */
+function DormerMesh3D({
+  dormer,
+  roof,
+  fp,
+  baseY,
+}: {
+  dormer: Dormer;
+  roof: Roof | null;
+  fp: RoofFootprint | null;
+  baseY: number;
+}) {
   const w = dormer.width;
   const h = dormer.height;
+
+  // Positie in het dakstelsel, en de richting waarin de kapel naar buiten kijkt.
+  const local = roof && fp ? toRoofLocal(dormer.position, roof, fp) : null;
+  const rotY = roof ? -(roof.ridgeDirection * Math.PI) / 180 : 0;
+  // Aan de kant van de nok waar de kapel staat kijkt hij naar buiten; aan de
+  // andere kant staat hij een halve slag om.
+  const outward = local && local.y < 0 ? -1 : 1;
+  const heightAt = (z: number) =>
+    roof && fp && local
+      ? roofHeightAt(roof.type, fp.W, fp.D, roof.pitch, roof.overhang, { x: local.x, y: z })
+      : 0;
+
   if (dormer.type === "velux") {
+    // Een dakraam ligt ín het dakvlak: zelfde helling, zelfde hoogte.
+    const y = baseY + heightAt(local?.y ?? 0);
+    const tilt = roof && roof.type !== "flat" ? (roof.pitch * Math.PI) / 180 : 0;
     return (
-      <mesh position={[dormer.position.x, baseY + 0.6, dormer.position.y]} rotation={[-Math.PI / 4, 0, 0]} castShadow>
-        <boxGeometry args={[w, 0.04, h]} />
-        <meshStandardMaterial color="#2b3a44" roughness={0.2} metalness={0.3} />
-      </mesh>
+      <group position={[dormer.position.x, y, dormer.position.y]} rotation={[0, rotY, 0]}>
+        <group rotation={[0, outward > 0 ? 0 : Math.PI, 0]}>
+          <mesh rotation={[-tilt, 0, 0]} position={[0, 0.03, 0]} castShadow>
+            <boxGeometry args={[w, 0.04, h]} />
+            <meshStandardMaterial color="#2b3a44" roughness={0.2} metalness={0.3} />
+          </mesh>
+        </group>
+      </group>
     );
   }
-  // gable / shed dakkapel: kubus met een donker dakje
-  const depth = 1.1;
+
+  // gable / shed dakkapel: kubus met een donker dakje, staand op het dakvlak ter
+  // hoogte van zijn voorkant.
+  const depth = DORMER_DEPTH_M;
+  const front = (local?.y ?? 0) + outward * (depth / 2);
+  const y = baseY + heightAt(front);
+
   return (
-    <group position={[dormer.position.x, baseY, dormer.position.y]}>
-      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
-        <boxGeometry args={[w, h, depth]} />
-        <meshStandardMaterial color="#e8e2d6" roughness={0.7} />
-      </mesh>
-      {/* venster */}
-      <mesh position={[0, h / 2, depth / 2 + 0.01]}>
-        <boxGeometry args={[w * 0.7, h * 0.6, 0.02]} />
-        <meshStandardMaterial {...GLASS} />
-      </mesh>
-      {/* dakje */}
-      <mesh position={[0, h + 0.08, 0]} castShadow>
-        <boxGeometry args={[w + 0.1, 0.06, depth + 0.1]} />
-        <meshStandardMaterial color={ROOF_COLOR} roughness={0.85} />
-      </mesh>
+    <group position={[dormer.position.x, y, dormer.position.y]} rotation={[0, rotY, 0]}>
+      <group rotation={[0, outward > 0 ? 0 : Math.PI, 0]}>
+        <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+          <boxGeometry args={[w, h, depth]} />
+          <meshStandardMaterial color="#e8e2d6" roughness={0.7} />
+        </mesh>
+        {/* venster */}
+        <mesh position={[0, h / 2, depth / 2 + 0.01]}>
+          <boxGeometry args={[w * 0.7, h * 0.6, 0.02]} />
+          <meshStandardMaterial {...GLASS} />
+        </mesh>
+        {/* dakje */}
+        <mesh position={[0, h + 0.08, 0]} castShadow>
+          <boxGeometry args={[w + 0.1, 0.06, depth + 0.1]} />
+          <meshStandardMaterial color={ROOF_COLOR} roughness={0.85} />
+        </mesh>
+      </group>
     </group>
   );
 }
@@ -1403,11 +1560,26 @@ function LevelScene({
       {visibleLayers.roof && (
         <>
           {roofs.map((r) => (
-            <RoofMesh3D key={r.id} roof={r} walls={walls} baseY={level.height} />
+            <RoofMesh3D
+              key={r.id}
+              roof={r}
+              walls={walls}
+              dormers={dormers.filter((d) => d.roofId === r.id)}
+              baseY={level.height}
+            />
           ))}
-          {dormers.map((dm) => (
-            <DormerMesh3D key={dm.id} dormer={dm} baseY={level.height} />
-          ))}
+          {dormers.map((dm) => {
+            const host = roofs.find((r) => r.id === dm.roofId) ?? null;
+            return (
+              <DormerMesh3D
+                key={dm.id}
+                dormer={dm}
+                roof={host}
+                fp={host ? roofFootprint(host, walls) : null}
+                baseY={level.height}
+              />
+            );
+          })}
         </>
       )}
     </group>
