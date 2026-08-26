@@ -69,7 +69,7 @@ export function ComplianceBanner() {
         : { bg: "bg-blueprint/10", border: "border-blueprint/40", text: "text-blueprint" };
 
   return (
-    <div className="no-print pointer-events-auto absolute left-3 top-[60px] z-10 w-[min(18rem,calc(100vw-1.5rem))]">
+    <div className="no-print pointer-events-auto absolute left-3 top-[6.75rem] z-10 w-[min(18rem,calc(100vw-1.5rem))] lg:hidden">
       <div className={`rounded-xl border ${tone.border} ${tone.bg} shadow-lg backdrop-blur`}>
         <button
           onClick={() => setOpen((v) => !v)}

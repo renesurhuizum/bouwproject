@@ -4,15 +4,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, LayoutTemplate, Box, Frame, ListChecks, Receipt } from "lucide-react";
+import { LayoutDashboard, LayoutTemplate, ListChecks, Receipt, FileText } from "lucide-react";
 
 const ITEMS = [
   { href: "/", label: "Start", icon: LayoutDashboard },
-  { href: "/plattegrond", label: "Plan", icon: LayoutTemplate },
-  { href: "/3d", label: "3D", icon: Box },
-  { href: "/aanzichten", label: "Aanzicht", icon: Frame },
+  { href: "/plattegrond", label: "Ontwerp", icon: LayoutTemplate },
   { href: "/fases", label: "Fases", icon: ListChecks },
   { href: "/kosten", label: "Kosten", icon: Receipt },
+  { href: "/documenten", label: "Docs", icon: FileText },
 ] as const;
 
 export function BottomNav() {
@@ -21,7 +20,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="Hoofdnavigatie"
-      className="no-print safe-bottom z-20 grid grid-cols-6 border-t border-line bg-paper-raised"
+      className="no-print safe-bottom z-20 grid grid-cols-5 border-t border-line bg-paper-raised lg:hidden"
     >
       {ITEMS.map(({ href, label, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -30,14 +29,14 @@ export function BottomNav() {
             key={href}
             href={href}
             className="relative flex flex-col items-center gap-1 pb-2 pt-2.5 text-[10px] font-semibold transition-colors"
-            style={{ color: active ? "var(--color-accent)" : "var(--color-ink-400)" }}
+            style={{ color: active ? "var(--color-accent-ink)" : "var(--color-ink-500)" }}
           >
             {/* Actieve indicator pill bovenaan */}
             <span
               aria-hidden
               className="absolute left-1/2 top-0 h-0.5 w-6 -translate-x-1/2 rounded-full transition-all duration-200"
               style={{
-                background: active ? "var(--color-accent)" : "transparent",
+                background: active ? "var(--color-accent-ink)" : "transparent",
               }}
             />
 

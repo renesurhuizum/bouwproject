@@ -8,6 +8,7 @@ import { Download, Upload, RotateCcw, Compass, Check } from "lucide-react";
 import { useProject } from "@/lib/hooks";
 import { update } from "@/lib/db/repo";
 import { getDB, type BouwDB } from "@/lib/db/db";
+import { EenheidsprijzenEditor } from "@/components/kosten/EenheidsprijzenEditor";
 
 // Tabellen die in de backup mee gaan (volgorde = importvolgorde).
 const TABLES = [
@@ -250,6 +251,14 @@ export default function InstellingenPage() {
               </span>
             </div>
           </div>
+        </section>
+
+        {/* Eenheidsprijzen voor de kostenraming */}
+        <section className="space-y-3 rounded-card border border-line bg-paper-raised p-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+            Eenheidsprijzen
+          </h2>
+          <EenheidsprijzenEditor />
         </section>
 
         {/* Databeheer */}

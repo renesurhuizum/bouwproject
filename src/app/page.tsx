@@ -7,6 +7,7 @@ import { Suspense } from "react";
 import { LayoutTemplate, Box, Receipt, ListChecks, FileText, Frame, Settings, ArrowRight, TrendingUp } from "lucide-react";
 import { useProject, usePhases, useExpenses, useBudget } from "@/lib/hooks";
 import { analyzePhases, phaseProgress } from "@/lib/phases";
+import { StatusBadge, phaseState } from "@/components/ui/StatusBadge";
 import { formatEuro } from "@/lib/format";
 
 export default function Home() {
@@ -87,12 +88,12 @@ function DashboardContent() {
           Ga naar
         </h2>
         <div className="grid grid-cols-4 gap-2 sm:grid-cols-4">
-          <QuickLink href="/plattegrond" label="Plattegrond" icon={LayoutTemplate} />
+          <QuickLink href="/plattegrond" label="Werkruimte" icon={LayoutTemplate} />
           <QuickLink href="/3d" label="3D" icon={Box} />
           <QuickLink href="/aanzichten" label="Aanzichten" icon={Frame} />
           <QuickLink href="/fases" label="Fases" icon={ListChecks} />
           <QuickLink href="/kosten" label="Kosten" icon={Receipt} />
-          <QuickLink href="/werkblad" label="Werkblad" icon={FileText} />
+          <QuickLink href="/documenten" label="Documenten" icon={FileText} />
           <QuickLink href="/instellingen" label="Instellingen" icon={Settings} />
         </div>
       </section>
@@ -169,7 +170,7 @@ function DashboardContent() {
                 <span className="flex-1 text-sm font-medium text-ink-900 truncate">
                   {phase.name}
                 </span>
-                <StatusBadge status={phase.status} blocked={blocked} />
+                <StatusBadge state={phaseState(phase.status, blocked)} />
               </li>
             ))}
           </ul>
@@ -226,41 +227,6 @@ function StatCard({
         <div className="mt-1 text-[11px] text-ink-400">{sub}</div>
       )}
     </div>
-  );
-}
-
-function StatusBadge({
-  status,
-  blocked,
-}: {
-  status: "todo" | "in-progress" | "done";
-  blocked: boolean;
-}) {
-  if (status === "done") {
-    return (
-      <span className="shrink-0 rounded-full bg-ok/10 px-2.5 py-0.5 text-[10px] font-bold text-ok">
-        Klaar
-      </span>
-    );
-  }
-  if (status === "in-progress") {
-    return (
-      <span className="shrink-0 rounded-full bg-accent/10 px-2.5 py-0.5 text-[10px] font-bold text-accent">
-        Bezig
-      </span>
-    );
-  }
-  if (blocked) {
-    return (
-      <span className="shrink-0 rounded-full bg-paper-sunken px-2.5 py-0.5 text-[10px] font-medium text-ink-300">
-        Geblokkeerd
-      </span>
-    );
-  }
-  return (
-    <span className="shrink-0 rounded-full bg-blueprint/10 px-2.5 py-0.5 text-[10px] font-bold text-blueprint">
-      Kan starten
-    </span>
   );
 }
 

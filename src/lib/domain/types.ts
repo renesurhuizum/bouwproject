@@ -21,6 +21,9 @@ export interface Project extends Entity {
   description?: string;
   northDegrees?: number;  // voor noordpijl op werkblad (0 = omhoog = Noord)
   startDate?: string;     // ISO yyyy-mm-dd voor Gantt
+  // Eigen eenheidsprijzen voor de kostenraming, per postnaam uit
+  // computeQuantities(). Leeg = de kentallen uit lib/pricing.ts.
+  unitPrices?: Record<string, number>;
 }
 
 export interface Level extends Entity {

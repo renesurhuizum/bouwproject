@@ -1,7 +1,11 @@
 "use client";
 
-// Kleine legenda die verschijnt als de elektra-laag zichtbaar is.
-// Toont elk symbool + Nederlandse naam, als HTML-overlay (geen Konva).
+// Kleine legenda die verschijnt als er elektra op de verdieping ligt.
+// Ingeklapt tot een balkje, zodat hij het canvas niet bedekt tot je hem nodig
+// hebt. Toont elk symbool + Nederlandse naam, als HTML-overlay (geen Konva).
+
+import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 const ITEMS: { symbol: string; label: string }[] = [
   { symbol: "S",  label: "Stopcontact" },
@@ -16,14 +20,24 @@ const ITEMS: { symbol: string; label: string }[] = [
 ];
 
 export function ElectricalLegend() {
+  const [open, setOpen] = useState(false);
+
   return (
-    <div className="pointer-events-none absolute bottom-4 left-3 z-10 w-44 overflow-hidden rounded-xl border border-line bg-paper-raised/95 shadow-lg backdrop-blur">
-      <div className="border-b border-line px-3 py-1.5">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-500">
-          Elektra legenda
-        </span>
-      </div>
-      <ul className="divide-y divide-line">
+    <div className="no-print absolute bottom-[6.5rem] left-3 z-10 w-44 lg:bottom-4 overflow-hidden rounded-panel border border-line bg-paper-raised/95 shadow-panel backdrop-blur">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-paper-sunken"
+      >
+        <span className="label-micro">Elektra legenda</span>
+        <ChevronDown
+          size={13}
+          aria-hidden
+          className={`shrink-0 text-ink-400 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+      <ul className="divide-y divide-line border-t border-line">
         {ITEMS.map(({ symbol, label }) => (
           <li key={symbol} className="flex items-center gap-2.5 px-3 py-1">
             <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-amber-100 font-mono text-[11px] font-bold text-amber-700">
@@ -33,6 +47,7 @@ export function ElectricalLegend() {
           </li>
         ))}
       </ul>
+      )}
     </div>
   );
 }

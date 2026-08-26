@@ -3,10 +3,10 @@
 // 3D-weergave: plattegrond geëxtrudeerd naar muren. Orbit-camera om rond te kijken.
 // Plan-coördinaten (x, y in meters) → wereld (x, z). Hoogte = y omhoog.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as THREE from "three";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, Grid, Sky } from "@react-three/drei";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -1368,6 +1368,10 @@ export function Scene3D() {
   // niet één per laag — anders vangt het bovenste vlak alle kliks op.
   const activeLevel = levels.find((l) => l.id === activeLevelId) ?? levels[0] ?? null;
 
+  // De camera-prop van <Canvas> geldt alleen bij het aanmaken. De muren komen
+  // een tel later uit Dexie, dus stond de camera daarna nog op de beginwaarde —
+  // bij één verdieping op vloerhoogte, middenin het huis. Deze component richt
+  // hem eenmalig op het gebouw zodra de maten bekend zijn.
   // Camera-doel: centroid van BG-verdieping (order=1).
   const groundLevelId = levels[0]?.id ?? null;
   const groundWalls = useWalls(groundLevelId) ?? [];
@@ -1376,6 +1380,13 @@ export function Scene3D() {
   const maxElev = levels.length ? levels[levels.length - 1].elevation + levels[levels.length - 1].height : 8;
 
   const groundFloorElev = levels[0]?.elevation ?? 0;
+
+  // Straal van het grondvlak: bepaalt hoe ver de camera eraf moet staan.
+  const footprintRadius = useMemo(() => {
+    if (pts.length === 0) return 0;
+    const b = bounds(pts);
+    return Math.hypot(b.max.x - b.min.x, b.max.y - b.min.y) / 2;
+  }, [pts]);
 
   return (
     <div className="relative h-full w-full">
@@ -1436,6 +1447,10 @@ export function Scene3D() {
           <FloorPlane levelId={activeLevel.id} elevation={activeLevel.elevation} />
         )}
 
+        {!walkMode && (
+          <FitCamera center={center} radius={footprintRadius} height={maxElev} />
+        )}
+
         {walkMode ? (
           <WalkthroughMode
             startPosition={[center.x, groundFloorElev + 1.65, center.y]}
@@ -1443,6 +1458,7 @@ export function Scene3D() {
           />
         ) : (
           <OrbitControls
+            makeDefault
             target={[center.x, maxElev / 2, center.y]}
             enableDamping
             maxPolarAngle={Math.PI / 2.05}
@@ -1479,4 +1495,42 @@ export function Scene3D() {
       )}
     </div>
   );
+}
+
+/**
+ * Zet de camera eenmalig op een afstand waar het hele gebouw in beeld staat.
+ * Draait pas als er echte maten zijn en laat daarna de OrbitControls met rust,
+ * zodat een handmatig gekozen standpunt niet wordt teruggezet.
+ */
+function FitCamera({
+  center,
+  radius,
+  height,
+}: {
+  center: { x: number; y: number };
+  radius: number;
+  height: number;
+}) {
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as
+    | { target: THREE.Vector3; update: () => void }
+    | null;
+  const fitted = useRef(false);
+
+  useEffect(() => {
+    if (fitted.current || radius <= 0 || !controls) return;
+    fitted.current = true;
+
+    const distance = Math.max(9, radius * 2.4);
+    camera.position.set(
+      center.x + distance * 0.7,
+      Math.max(4, height * 0.9 + radius * 0.6),
+      center.y + distance * 0.7,
+    );
+    camera.updateProjectionMatrix();
+    controls.target.set(center.x, height / 2, center.y);
+    controls.update();
+  }, [camera, controls, center.x, center.y, radius, height]);
+
+  return null;
 }

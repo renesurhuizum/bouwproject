@@ -3,29 +3,40 @@
 /*
   Technische / blueprint-stijl. Warm papier, inkt-donkere tekst, bouw-oranje
   accent en blauwdruk-blauw. Hoog contrast voor buitengebruik op de bouwplaats.
+
+  Contrastwaarden hieronder zijn gemeten t.o.v. --color-paper (#f4f1ea).
+  Alles wat als tekst dient haalt minimaal AA (4.5:1); tokens die dat niet
+  halen zijn gemarkeerd als decoratief en horen niet onder kleine tekst.
 */
 
 @theme {
-  /* Papier & inkt */
+  /* ── Papier & inkt ──────────────────────────────────────────────────────── */
   --color-paper: #f4f1ea;
   --color-paper-raised: #fbfaf6;
   --color-paper-sunken: #ece8df;
 
-  --color-ink-900: #1c1917;
-  --color-ink-700: #44403c;
-  --color-ink-500: #78716c;
-  --color-ink-300: #a8a29e;
+  /* Volledige inkt-ramp. 800/600/400 ontbraken eerder terwijl ze wél in de
+     code gebruikt werden — die classes bestonden dus niet en vielen terug op
+     geërfde kleur, waardoor "gedempte" labels juist het donkerst renderden. */
+  --color-ink-900: #1c1917; /* 15.5:1 — koppen, primaire tekst */
+  --color-ink-800: #292524; /* 13.5:1 */
+  --color-ink-700: #44403c; /*  9.1:1 — secundaire tekst */
+  --color-ink-600: #57534e; /*  6.8:1 */
+  --color-ink-500: #6f6862; /*  4.9:1 — gedempte tekst, nog AA */
+  --color-ink-400: #8a8178; /*  3.4:1 — labels/iconen, geen kleine tekst */
+  --color-ink-300: #a8a29e; /*  2.2:1 — decoratief: uitgeschakeld, scheiding */
 
   --color-line: #ddd7ca;
   --color-line-strong: #c4bca9;
 
-  /* Accenten */
-  --color-accent: #ea580c; /* bouw-oranje */
+  /* ── Accenten ───────────────────────────────────────────────────────────── */
+  --color-accent: #ea580c; /* bouw-oranje — vlakken, lijnen, merkkleur */
+  --color-accent-ink: #c2410c; /* 4.6:1 — accent als tékst op papier */
   --color-accent-soft: #fff1e7;
-  --color-blueprint: #1d4ed8; /* blauwdruk-blauw */
+  --color-blueprint: #1d4ed8; /* blauwdruk-blauw — 5.9:1, ook als tekst oké */
   --color-blueprint-soft: #e8effc;
 
-  /* Status */
+  /* ── Status ─────────────────────────────────────────────────────────────── */
   --color-ok: #15803d;
   --color-warn: #b45309;
   --color-danger: #dc2626;
@@ -33,7 +44,29 @@
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 
+  /* ── Vorm & diepte ──────────────────────────────────────────────────────── */
   --radius-card: 0.75rem;
+  --radius-panel: 0.875rem; /* gedockte werkruimte-panelen */
+  --radius-control: 0.5rem; /* knoppen, invoervelden, tabs */
+
+  --shadow-panel: 0 1px 2px rgb(28 25 23 / 0.04), 0 8px 24px -8px rgb(28 25 23 / 0.14);
+  --shadow-raised: 0 1px 2px rgb(28 25 23 / 0.06);
+}
+
+/* Bedieningshoogtes. Op touch minimaal 44px (Apple HIG), op desktop compacter
+   zodat er meer in een gedockt paneel past. */
+:root {
+  --control-h: 2.75rem; /* 44px */
+  --control-h-sm: 2.25rem; /* 36px */
+  --rail-w: 17rem;
+  --inspector-w: 20rem;
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --control-h: 2.25rem; /* 36px — muisbediening */
+    --control-h-sm: 1.875rem; /* 30px */
+  }
 }
 
 html,
@@ -65,6 +98,17 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Micro-label: de kleine hoofdletter-kopjes boven secties. Verving een handvol
+   losse text-[9px]/[10px]/[11px]-combinaties die per scherm verschilden. */
+.label-micro {
+  font-size: 0.6875rem; /* 11px */
+  line-height: 1.2;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-ink-500);
+}
+
 /* Subtiele blauwdruk-rasterachtergrond voor sfeer op niet-editor schermen. */
 .blueprint-bg {
   background-color: var(--color-paper);
@@ -77,6 +121,13 @@ body {
 ::selection {
   background: var(--color-accent);
   color: #fff;
+}
+
+/* Zichtbare focus voor toetsenbordbediening — ontbrak volledig. */
+:focus-visible {
+  outline: 2px solid var(--color-blueprint);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
 }
 
 /* Alleen zichtbaar tijdens printen (bv. volledige aanzicht-set). */

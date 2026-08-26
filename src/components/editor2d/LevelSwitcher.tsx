@@ -123,7 +123,7 @@ export function LevelSwitcher() {
     activeLevelId !== null && levels.find((l) => l.id === activeLevelId)?.order !== 1;
 
   return (
-    <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
+    <div className="no-print absolute left-1/2 top-[3.25rem] z-20 -translate-x-1/2">
       <div className="flex items-center gap-1 rounded-xl border border-line bg-paper-raised/95 p-1 shadow-lg backdrop-blur">
         {levels.map((level) => (
           <div key={level.id} className="relative">
