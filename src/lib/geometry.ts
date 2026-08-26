@@ -27,6 +27,14 @@ export function snapToPoints(p: Point, points: Point[], radius: number): Point |
   return best;
 }
 
+// Totale lengte van een polylijn (open pad), in meters. Basis voor het aantal
+// meters leiding en kabel dat ingekocht moet worden.
+export function pathLength(points: Point[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += dist(points[i - 1], points[i]);
+  return total;
+}
+
 // Oppervlak van een (gesloten) polygoon via de schoenveterformule. m².
 export function polygonArea(poly: Point[]): number {
   if (poly.length < 3) return 0;
@@ -136,6 +144,26 @@ export function wallIntersection(
   if (Math.abs(denom) < 1e-9) return null; // parallel of degeneraat
   const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
   return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+}
+
+// Snijpunt van twee eindige segmenten a1-a2 en b1-b2. Geeft het punt plus de
+// parameters t (langs a) en u (langs b), of null als ze elkaar niet kruisen.
+export function segmentIntersection(
+  a1: Point,
+  a2: Point,
+  b1: Point,
+  b2: Point,
+): { point: Point; t: number; u: number } | null {
+  const rX = a2.x - a1.x;
+  const rY = a2.y - a1.y;
+  const sX = b2.x - b1.x;
+  const sY = b2.y - b1.y;
+  const denom = rX * sY - rY * sX;
+  if (Math.abs(denom) < 1e-9) return null; // parallel
+  const t = ((b1.x - a1.x) * sY - (b1.y - a1.y) * sX) / denom;
+  const u = ((b1.x - a1.x) * rY - (b1.y - a1.y) * rX) / denom;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return { point: { x: a1.x + t * rX, y: a1.y + t * rY }, t, u };
 }
 
 // Ligt punt p binnen de (as-georiënteerde) rechthoek min..max?

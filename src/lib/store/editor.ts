@@ -27,7 +27,8 @@ export type Tool =
   | "place-furniture"
   | "draw-pipe"
   | "construction"
-  | "roof";
+  | "roof"
+  | "section";
 
 /** Welke weergave het midden van de werkruimte vult. */
 export type ViewMode = "2d" | "3d" | "elevation";
@@ -67,7 +68,8 @@ export type SelKind =
   | "column"
   | "beam"
   | "roof"
-  | "dormer";
+  | "dormer"
+  | "section";
 
 export interface Selection {
   kind: SelKind;
@@ -109,8 +111,18 @@ interface EditorState {
   lockedLayers: Record<EditorLayer, boolean>;
   wallDefaults: WallDefaults;
   showGrid: boolean;
+  snapEnabled: boolean; // los van showGrid: raster verbergen ≠ snapping uit
   gridSnap: GridSnap;
   phaseOverlay: boolean;
+  showLegend: boolean;
+  // Lasso-modus: slepen op leeg canvas selecteert i.p.v. pannen. Nodig op
+  // touch, waar geen Shift-toets is. Niet persistent — het is een momentmodus.
+  lassoMode: boolean;
+  // Toewijsmodus vanuit de groepenkast: elk aangetikt elektra-punt gaat naar
+  // deze eindgroep. null = uit.
+  assignCircuitId: string | null;
+  // Kabelroutes als overlay op de plattegrond tonen.
+  showCableRoutes: boolean;
 
   // ── Werkruimte ─────────────────────────────────────────────────────────────
   viewMode: ViewMode;
@@ -135,6 +147,7 @@ interface EditorState {
   toggleLock: (l: EditorLayer) => void;
   setWallDefaults: (d: Partial<WallDefaults>) => void;
   toggleGrid: () => void;
+  toggleSnap: () => void;
   cycleGridSnap: () => void;
   togglePhaseOverlay: () => void;
   setViewMode: (v: ViewMode) => void;
@@ -142,6 +155,10 @@ interface EditorState {
   setActiveStepPhase: (id: string | null) => void;
   setRailOpen: (open: boolean) => void;
   setInspectorOpen: (open: boolean) => void;
+  toggleLegend: () => void;
+  setLassoMode: (v: boolean) => void;
+  setAssignCircuitId: (id: string | null) => void;
+  toggleCableRoutes: () => void;
 }
 
 export const useEditor = create<EditorState>()(
@@ -185,8 +202,13 @@ export const useEditor = create<EditorState>()(
         status: "new",
       },
       showGrid: true,
+      snapEnabled: true,
       gridSnap: "fine",
       phaseOverlay: false,
+      showLegend: true,
+      lassoMode: false,
+      assignCircuitId: null,
+      showCableRoutes: true,
 
       viewMode: "2d",
       inspectorTab: "takeoff",
@@ -202,6 +224,9 @@ export const useEditor = create<EditorState>()(
           constructionKind: tool === "construction" ? s.constructionKind : null,
           selection: null,
           multi: [],
+          lassoMode: false,
+          // Van gereedschap wisselen stopt ook het toewijzen aan een groep.
+          assignCircuitId: null,
         })),
       setPlaceKind: (placeKind) => set({ placeKind, tool: "place" }),
       setConstructionKind: (constructionKind) => set({ constructionKind, tool: "construction" }),
@@ -230,12 +255,17 @@ export const useEditor = create<EditorState>()(
       setWallDefaults: (d) =>
         set((s) => ({ wallDefaults: { ...s.wallDefaults, ...d } })),
       toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+      toggleSnap: () => set((s) => ({ snapEnabled: !s.snapEnabled })),
       togglePhaseOverlay: () => set((s) => ({ phaseOverlay: !s.phaseOverlay })),
       setViewMode: (viewMode) => set({ viewMode }),
       setInspectorTab: (inspectorTab) => set({ inspectorTab }),
       setActiveStepPhase: (activeStepPhaseId) => set({ activeStepPhaseId }),
       setRailOpen: (railOpen) => set({ railOpen }),
       setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
+      toggleLegend: () => set((s) => ({ showLegend: !s.showLegend })),
+      setLassoMode: (lassoMode) => set({ lassoMode }),
+      setAssignCircuitId: (assignCircuitId) => set({ assignCircuitId }),
+      toggleCableRoutes: () => set((s) => ({ showCableRoutes: !s.showCableRoutes })),
       cycleGridSnap: () =>
         set((s) => {
           const order: GridSnap[] = ["fine", "normal", "coarse"];
@@ -251,9 +281,12 @@ export const useEditor = create<EditorState>()(
         lockedLayers: s.lockedLayers,
         wallDefaults: s.wallDefaults,
         showGrid: s.showGrid,
+        snapEnabled: s.snapEnabled,
         gridSnap: s.gridSnap,
         viewMode: s.viewMode,
         inspectorTab: s.inspectorTab,
+        showLegend: s.showLegend,
+        showCableRoutes: s.showCableRoutes,
       }),
     },
   ),

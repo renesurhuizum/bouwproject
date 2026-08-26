@@ -8,13 +8,16 @@ import { Download, Upload, RotateCcw, Compass, Check } from "lucide-react";
 import { useProject } from "@/lib/hooks";
 import { update } from "@/lib/db/repo";
 import { getDB, type BouwDB } from "@/lib/db/db";
-import { EenheidsprijzenEditor } from "@/components/kosten/EenheidsprijzenEditor";
 
 // Tabellen die in de backup mee gaan (volgorde = importvolgorde).
+// LET OP: elke nieuwe tabel moet hier bij, anders verdwijnt hij stilzwijgend
+// bij herstellen. Trappen, kolommen, balken, daken, dakkapellen en doorsneden
+// ontbraken hier sinds ze zijn toegevoegd.
 const TABLES = [
   "projects", "levels", "walls", "openings", "rooms",
   "electrical", "plumbing", "hvac", "phases", "tasks",
   "budget", "expenses", "materials", "photos", "furniture",
+  "stairs", "columns", "beams", "roofs", "dormers", "sections",
 ] as const;
 
 type BackupTable = (typeof TABLES)[number];
@@ -253,12 +256,36 @@ export default function InstellingenPage() {
           </div>
         </section>
 
-        {/* Eenheidsprijzen voor de kostenraming */}
+        {/* Locatie (zonberekening) */}
         <section className="space-y-3 rounded-card border border-line bg-paper-raised p-4">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
-            Eenheidsprijzen
+            Locatie (zonnestand 3D)
           </h2>
-          <EenheidsprijzenEditor />
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="mb-1 block text-xs text-ink-500">Breedtegraad</span>
+              <input
+                type="number"
+                step="0.1"
+                defaultValue={project?.lat ?? 52.3}
+                onBlur={(e) => patchProject({ lat: Number(e.target.value) })}
+                className="tabular w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-900"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-ink-500">Lengtegraad</span>
+              <input
+                type="number"
+                step="0.1"
+                defaultValue={project?.lng ?? 5.3}
+                onBlur={(e) => patchProject({ lng: Number(e.target.value) })}
+                className="tabular w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-900"
+              />
+            </label>
+          </div>
+          <span className="block text-[11px] text-ink-400">
+            Bepaalt de zonnestand en schaduwen in de 3D-weergave. Standaard: Nederland (52.3, 5.3).
+          </span>
         </section>
 
         {/* Databeheer */}

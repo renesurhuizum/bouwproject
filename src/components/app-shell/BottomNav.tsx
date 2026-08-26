@@ -4,14 +4,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, LayoutTemplate, ListChecks, Receipt, FileText } from "lucide-react";
+import { LayoutDashboard, LayoutTemplate, ListChecks, Receipt, ClipboardList } from "lucide-react";
 
 const ITEMS = [
   { href: "/", label: "Start", icon: LayoutDashboard },
   { href: "/plattegrond", label: "Ontwerp", icon: LayoutTemplate },
+  { href: "/werkblad", label: "Werkblad", icon: ClipboardList },
   { href: "/fases", label: "Fases", icon: ListChecks },
   { href: "/kosten", label: "Kosten", icon: Receipt },
-  { href: "/documenten", label: "Docs", icon: FileText },
 ] as const;
 
 export function BottomNav() {

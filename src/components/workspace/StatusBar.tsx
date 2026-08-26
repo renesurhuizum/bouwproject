@@ -23,7 +23,7 @@ export function StatusBar() {
   const cycleGridSnap = useEditor((s) => s.cycleGridSnap);
   const setInspectorTab = useEditor((s) => s.setInspectorTab);
   const { counts, issues } = useIssues();
-  const { level, estimate } = useTakeoff();
+  const { level, total } = useTakeoff();
 
   const problems = counts.error + counts.warn;
 
@@ -77,7 +77,7 @@ export function StatusBar() {
           title="Kostenraming tonen"
         >
           Raming
-          <span className="tabular font-bold text-ink-900">{formatEuro(estimate.total)}</span>
+          <span className="tabular font-bold text-ink-900">{formatEuro(total)}</span>
         </button>
       </div>
     </div>

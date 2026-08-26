@@ -5,17 +5,20 @@
 // de rail links en de inspector rechts blijven staan — zodat je je selectie,
 // je stap en je raming niet kwijtraakt bij het wisselen.
 
+import { useState } from "react";
 import dynamic from "next/dynamic";
-import { PanelLeft } from "lucide-react";
+import { PanelLeft, Zap } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
-import { useWalls, useActiveLevel } from "@/lib/hooks";
+import { useWalls, useActiveLevel, useIsDesktop } from "@/lib/hooks";
 import { WorkspaceLayout } from "@/components/workspace/WorkspaceLayout";
 import { ViewSwitch } from "@/components/workspace/ViewSwitch";
 import { PhaseRail } from "@/components/workspace/PhaseRail";
 import { Inspector } from "@/components/workspace/Inspector";
 import { StatusBar } from "@/components/workspace/StatusBar";
 import { Toolbar } from "@/components/editor2d/Toolbar";
+import { SelectionPanel } from "@/components/editor2d/SelectionPanel";
 import { LevelSwitcher } from "@/components/editor2d/LevelSwitcher";
+import { GroepenkastPanel } from "@/components/editor2d/GroepenkastPanel";
 import { ElevationViewer } from "@/components/werkblad/ElevationViewer";
 
 // Konva en Three hebben window nodig → alleen in de browser laden.
@@ -45,6 +48,8 @@ export default function WerkruimtePage() {
   const setRailOpen = useEditor((s) => s.setRailOpen);
   const level = useActiveLevel();
   const walls = useWalls(level?.id) ?? [];
+  const [showGroepenkast, setShowGroepenkast] = useState(false);
+  const isDesktop = useIsDesktop();
 
   return (
     <WorkspaceLayout
@@ -54,7 +59,7 @@ export default function WerkruimtePage() {
           {/* De tekengereedschappen horen bij de plattegrond; in 3D staat de
               eigen 3D-toolbar over het beeld en in aanzicht is er niets te
               tekenen. */}
-          {viewMode === "2d" && <Toolbar />}
+          {viewMode === "2d" && isDesktop && <Toolbar />}
         </>
       }
       viewport={
@@ -63,6 +68,16 @@ export default function WerkruimtePage() {
             <>
               <PlanEditor />
               <LevelSwitcher />
+              {/* Op mobiel stapelen selectie en gereedschap in normale flow
+                  onderin, zodat een hoog contextueel paneel het selectiepaneel
+                  nooit overlapt — dezelfde opzet als vóór de werkruimte. Op
+                  desktop staan ze elk in hun eigen kolom. */}
+              {!isDesktop && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center">
+                  <SelectionPanel />
+                  <Toolbar />
+                </div>
+              )}
             </>
           )}
 
@@ -96,14 +111,26 @@ export default function WerkruimtePage() {
 
           <ViewSwitch />
 
-          {/* Alleen mobiel: de faserail is daar een uitschuifbaar paneel. */}
-          <button
-            onClick={() => setRailOpen(true)}
-            aria-label="Bouwvolgorde openen"
-            className="no-print absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-panel border border-line bg-paper-raised/95 text-ink-600 shadow-panel backdrop-blur lg:hidden"
-          >
-            <PanelLeft size={16} aria-hidden />
-          </button>
+          <div className="no-print absolute left-3 top-3 z-10 flex gap-2">
+            {/* Alleen mobiel: de faserail is daar een uitschuifbaar paneel. */}
+            <button
+              onClick={() => setRailOpen(true)}
+              aria-label="Bouwvolgorde openen"
+              className="flex h-9 w-9 items-center justify-center rounded-panel border border-line bg-paper-raised/95 text-ink-600 shadow-panel backdrop-blur lg:hidden"
+            >
+              <PanelLeft size={16} aria-hidden />
+            </button>
+            <button
+              onClick={() => setShowGroepenkast(true)}
+              title="Eindgroepen beheren en kabellengtes bekijken"
+              className="flex h-9 items-center justify-center gap-1.5 rounded-panel border border-blueprint/40 bg-paper-raised/95 px-2.5 text-xs font-semibold text-blueprint shadow-panel backdrop-blur sm:px-3"
+            >
+              <Zap size={15} aria-hidden />
+              <span className="hidden sm:inline">Groepen</span>
+            </button>
+          </div>
+
+          {showGroepenkast && <GroepenkastPanel onClose={() => setShowGroepenkast(false)} />}
         </>
       }
       inspector={<Inspector />}

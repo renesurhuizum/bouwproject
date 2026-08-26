@@ -1,19 +1,30 @@
 "use client";
 
-// Live hoeveelheden + kostenraming. Loopt mee terwijl je tekent: dit is de
-// directe terugkoppeling die een configurator zo bruikbaar maakt — je ziet
-// meteen wat een keuze aan oppervlak en geld betekent.
+// Live inkoopstaat + kosten. Loopt mee terwijl je tekent: dit is de directe
+// terugkoppeling die een configurator zo bruikbaar maakt — je ziet meteen wat
+// een keuze aan materiaal en geld betekent.
+//
+// Draait op dezelfde engine als het kostenscherm (lib/takeoff), dus de
+// bedragen hier en in /kosten kunnen niet uiteenlopen.
 
+import { useMemo } from "react";
 import { Info } from "lucide-react";
 import { useTakeoff } from "@/lib/hooks";
-import { CATEGORY_LABEL } from "@/lib/pricing";
 import { formatEuro } from "@/lib/format";
-import type { QuantityItem } from "@/lib/quantityTakeoff";
-
-const CATEGORY_ORDER: QuantityItem["category"][] = ["walls", "floors", "openings", "finishes"];
+import type { TakeoffLine } from "@/lib/takeoff/engine";
 
 export function LiveTakeoff() {
-  const { level, items, estimate } = useTakeoff();
+  const { level, lines, total, unpriced } = useTakeoff();
+
+  const grouped = useMemo(() => {
+    const byCategory = new Map<string, TakeoffLine[]>();
+    for (const line of lines) {
+      const list = byCategory.get(line.category);
+      if (list) list.push(line);
+      else byCategory.set(line.category, [line]);
+    }
+    return [...byCategory.entries()];
+  }, [lines]);
 
   if (!level) {
     return (
@@ -23,18 +34,13 @@ export function LiveTakeoff() {
     );
   }
 
-  if (items.length === 0) {
+  if (lines.length === 0) {
     return (
       <p className="px-3 py-8 text-center text-xs text-ink-500">
-        Teken muren en ruimtes — hoeveelheden en kosten verschijnen hier vanzelf.
+        Teken muren en ruimtes — materiaal en kosten verschijnen hier vanzelf.
       </p>
     );
   }
-
-  const grouped = CATEGORY_ORDER.map((cat) => ({
-    cat,
-    lines: estimate.lines.filter((l) => l.item.category === cat),
-  })).filter((g) => g.lines.length > 0);
 
   return (
     <div className="flex min-h-0 flex-col">
@@ -43,46 +49,44 @@ export function LiveTakeoff() {
         <div className="flex items-baseline justify-between gap-2">
           <span className="label-micro">Raming {level.name}</span>
           <span className="tabular text-xl font-black leading-none text-ink-900">
-            {formatEuro(estimate.total)}
+            {formatEuro(total)}
           </span>
         </div>
         <p className="mt-1 flex items-start gap-1 text-[11px] leading-snug text-ink-500">
           <Info size={11} className="mt-0.5 shrink-0" aria-hidden />
           <span>
-            Indicatieve kentallen incl. arbeid — een richtbedrag, geen offerte.
-            {estimate.unpriced > 0 && ` ${estimate.unpriced} post(en) zonder kental.`}
+            Indicatieve richtprijzen incl. snijverlies en hele verpakkingen — een richtbedrag,
+            geen offerte.
+            {unpriced > 0 && ` ${unpriced} post(en) zonder prijs.`}
           </span>
         </p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {grouped.map((g) => (
-          <section key={g.cat} className="border-b border-line last:border-b-0">
+        {grouped.map(([category, list]) => (
+          <section key={category} className="border-b border-line last:border-b-0">
             <h3 className="label-micro sticky top-0 bg-paper-raised/95 px-3 py-1.5 backdrop-blur">
-              {CATEGORY_LABEL[g.cat]}
+              {category}
             </h3>
             <ul>
-              {g.lines.map((line, idx) => (
+              {list.map((line) => (
                 <li
-                  key={`${line.item.name}-${idx}`}
+                  key={line.sourceId}
                   className="flex items-baseline gap-2 px-3 py-1.5 text-xs"
+                  title={line.detail}
                 >
-                  <span className="min-w-0 flex-1 truncate text-ink-700" title={line.item.name}>
-                    {line.item.name}
-                  </span>
+                  <span className="min-w-0 flex-1 truncate text-ink-700">{line.name}</span>
                   <span className="tabular shrink-0 text-ink-900">
-                    {line.item.quantity}
-                    <span className="ml-0.5 text-ink-400">{line.item.unit}</span>
+                    {line.buyQty}
+                    <span className="ml-0.5 text-ink-400">
+                      {line.packs != null ? (line.packName ?? "pak") : line.unit}
+                    </span>
                   </span>
                   <span className="tabular w-16 shrink-0 text-right font-semibold text-ink-600">
-                    {line.informative ? (
-                      <span className="text-ink-300" title="Meetstaat — zit al in andere posten">
-                        —
-                      </span>
-                    ) : line.total != null ? (
-                      formatEuro(line.total)
+                    {line.totalPrice != null ? (
+                      formatEuro(line.totalPrice)
                     ) : (
-                      <span className="text-ink-300" title="Geen kental bekend">
+                      <span className="text-ink-300" title="Geen richtprijs bekend">
                         n.v.t.
                       </span>
                     )}

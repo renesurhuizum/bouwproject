@@ -4,14 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Camera, Trash2, X, FlipHorizontal2, FlipVertical2, Copy } from "lucide-react";
 import { getDB } from "@/lib/db/db";
-import { create, update, remove } from "@/lib/db/repo";
+import { mBatch, mCreate, mUpdate, mRemove } from "@/lib/db/mutate";
 import type { TableName } from "@/lib/db/repo";
 import { Swatch, SwatchGrid } from "@/components/ui/Swatch";
 import { useEditor, type Selection } from "@/lib/store/editor";
 import { useProject, useFurniture } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import type { Photo, WallStatus as WallStatusType } from "@/lib/domain/types";
-import { dist, polygonArea } from "@/lib/geometry";
+import { dist, pathLength, polygonArea } from "@/lib/geometry";
 import { copySelection, TABLE_FOR_KIND, type ClipboardData } from "@/lib/clipboard";
 import { mirrorPatch, selectionBounds, type AnyEntity } from "@/lib/selectionOps";
 import { formatLength, formatArea } from "@/lib/format";
@@ -33,8 +33,8 @@ import {
   ROOF_TYPE_LABEL,
   DORMER_TYPE_LABEL,
   DORMER_DEFAULTS,
+  PIPE_SPECS,
 } from "@/lib/domain/constants";
-import { bounds } from "@/lib/geometry";
 import type {
   Wall,
   WallMaterial,
@@ -47,9 +47,14 @@ import type {
   RoofType,
   DormerType,
   Dormer,
+  Room,
 } from "@/lib/domain/types";
 import { polygonArea as polyArea } from "@/lib/geometry";
 import { nvoArea } from "@/lib/validation";
+import { atticAreasFor, type AtticContext } from "@/lib/attic";
+import { fromRoofLocal, roofFootprint } from "@/lib/roofGeometry";
+import { BalkAdvies } from "./BalkAdvies";
+import { SECTION_PROFILES, findSection, LINTEL_BEARING_M } from "@/lib/structural/sections";
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
 const MATERIALS = Object.keys(WALL_MATERIAL_LABEL) as WallMaterial[];
@@ -89,7 +94,7 @@ export function SelectionPanel() {
 
   async function addPhoto(file: File) {
     if (!project?.id || !selection?.id) return;
-    await create<Photo>("photos", {
+    await mCreate<Photo>("photos", {
       projectId: project.id,
       roomId: selection.id,
       blob: file,
@@ -156,6 +161,31 @@ export function SelectionPanel() {
     async () => (selection?.kind === "dormer" ? await getDB().dormers.get(selection.id) : null),
     [selection?.kind, selection?.id],
   );
+  const sectionLine = useLiveQuery(
+    async () => (selection?.kind === "section" ? await getDB().sections.get(selection.id) : null),
+    [selection?.kind, selection?.id],
+  );
+
+  // De kap boven deze verdieping, plus de muurhoogte waar hij op staat. Nodig
+  // om bij een zolderruimte te laten zien hoeveel er echt bruikbaar is.
+  const attic = useLiveQuery(
+    async () => {
+      if (!activeLevelId) return null;
+      const db = getDB();
+      const roofs = (await db.roofs.where("levelId").equals(activeLevelId).toArray()).filter(
+        (r) => !r.deleted,
+      );
+      const levelRoof = roofs[0] ?? null;
+      if (!levelRoof) return null;
+      const dms = (await db.dormers.where("roofId").equals(levelRoof.id).toArray()).filter(
+        (d) => !d.deleted,
+      );
+      const level = await db.levels.get(activeLevelId);
+      return { roof: levelRoof, dormers: dms, baseHeightM: level?.height ?? 0 };
+    },
+    [activeLevelId],
+    null,
+  );
 
   const tool = useEditor((s) => s.tool);
   const isPlacementMode = tool === "place" || tool === "draw-pipe";
@@ -177,7 +207,7 @@ export function SelectionPanel() {
     const db = getDB();
     const data: ClipboardData = {
       walls: [], rooms: [], openings: [], electrical: [], plumbing: [], hvac: [], furniture: [],
-      stairs: [], columns: [], beams: [], roofs: [], dormers: [],
+      stairs: [], columns: [], beams: [], roofs: [], dormers: [], sections: [],
     };
     for (const s of sels) {
       const ent = await (db[TABLE_FOR_KIND[s.kind] as keyof typeof db] as import("dexie").Table).get(s.id);
@@ -191,8 +221,11 @@ export function SelectionPanel() {
     return data;
   }
 
+  // Bulkbewerkingen zijn één undo-stap: één Ctrl+Z draait de hele actie terug.
   async function bulkDelete() {
-    for (const s of multi) await remove(TABLE_FOR_KIND[s.kind] as TableName, s.id);
+    await mBatch(async () => {
+      for (const s of multi) await mRemove(TABLE_FOR_KIND[s.kind] as TableName, s.id);
+    });
     setMulti([]);
   }
   async function bulkCopy() {
@@ -203,23 +236,31 @@ export function SelectionPanel() {
     if (!ents.length) return;
     const bb = selectionBounds(ents);
     const pivot = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2 };
-    for (const { kind, id, entity } of ents) {
-      const patch = mirrorPatch(kind, entity, axis, pivot);
-      if (Object.keys(patch).length) await update(TABLE_FOR_KIND[kind] as TableName, id, patch);
-    }
+    await mBatch(async () => {
+      for (const { kind, id, entity } of ents) {
+        const patch = mirrorPatch(kind, entity, axis, pivot);
+        if (Object.keys(patch).length) await mUpdate(TABLE_FOR_KIND[kind] as TableName, id, patch);
+      }
+    });
   }
   async function bulkWallStatus(status: WallStatusType) {
-    for (const s of multi) if (s.kind === "wall") await update("walls", s.id, { status });
+    await mBatch(async () => {
+      for (const s of multi) if (s.kind === "wall") await mUpdate("walls", s.id, { status });
+    });
   }
 
   async function addDormer(roofId: string, type: DormerType) {
-    const bb = bounds((walls ?? []).flatMap((w) => [w.start, w.end]));
-    const center = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2 };
     const def = DORMER_DEFAULTS[type];
-    const dm = await create<Dormer>("dormers", {
+    const host = roof ?? attic?.roof ?? null;
+    const fp = host ? roofFootprint(host, walls ?? []) : null;
+    // Op het dakschild, niet op de nok: op de nok is er geen dakvlak om een
+    // kapel in te zetten. Op ~70% van de weg naar de dakvoet zit hij waar je
+    // hem in het echt ook zet — laag genoeg om stahoogte te winnen.
+    const at = fp ? fromRoofLocal({ x: 0, y: fp.D * 0.35 }, host!, fp) : { x: 0, y: 0 };
+    const dm = await mCreate<Dormer>("dormers", {
       roofId,
       type,
-      position: center,
+      position: at,
       width: def.width,
       height: def.height,
     });
@@ -230,7 +271,7 @@ export function SelectionPanel() {
   if (!selection && !multiActive) return null;
 
   return (
-    <div className="no-print pointer-events-auto absolute inset-x-0 bottom-[76px] z-10 px-3 lg:static lg:px-0">
+    <div className="no-print pointer-events-auto w-full px-3 pb-1 lg:px-0 lg:pb-0">
       <div className="mx-auto max-w-md rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur lg:max-w-none lg:rounded-none lg:border-0 lg:shadow-none lg:backdrop-blur-none">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink-900">
@@ -260,7 +301,9 @@ export function SelectionPanel() {
                                 ? "Dak"
                                 : selection.kind === "dormer"
                                   ? "Dakkapel"
-                                  : "Elektra"}
+                                  : selection.kind === "section"
+                                    ? "Doorsnede"
+                                    : "Elektra"}
           </h2>
           <button
             onClick={() => select(null)}
@@ -326,7 +369,7 @@ export function SelectionPanel() {
                 {STATUSES.map((st) => (
                   <button
                     key={st}
-                    onClick={() => update("walls", wall.id, { status: st })}
+                    onClick={() => mUpdate("walls", wall.id, { status: st })}
                     className="rounded-md px-2 py-1 text-[11px] font-medium"
                     style={{
                       background: wall.status === st ? WALL_STATUS_COLOR[st] : "#ece8df",
@@ -349,7 +392,7 @@ export function SelectionPanel() {
                     title={WALL_MATERIAL_LABEL[m]}
                     background={WALL_MATERIAL_SWATCH[m]}
                     selected={wall.material === m}
-                    onClick={() => update("walls", wall.id, { material: m })}
+                    onClick={() => mUpdate("walls", wall.id, { material: m })}
                   />
                 ))}
               </SwatchGrid>
@@ -359,7 +402,7 @@ export function SelectionPanel() {
               <NumberField
                 value={Math.round(wall.thickness * 100)}
                 unit="cm"
-                onChange={(v) => update("walls", wall.id, { thickness: v / 100 })}
+                onChange={(v) => mUpdate("walls", wall.id, { thickness: v / 100 })}
               />
             </Row>
 
@@ -367,13 +410,13 @@ export function SelectionPanel() {
               <NumberField
                 value={Math.round(wall.height * 100)}
                 unit="cm"
-                onChange={(v) => update("walls", wall.id, { height: v / 100 })}
+                onChange={(v) => mUpdate("walls", wall.id, { height: v / 100 })}
               />
             </Row>
 
             <Row label="Dragend">
               <button
-                onClick={() => update("walls", wall.id, { loadBearing: !wall.loadBearing })}
+                onClick={() => mUpdate("walls", wall.id, { loadBearing: !wall.loadBearing })}
                 className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
                   wall.loadBearing ? "bg-danger text-white" : "bg-paper-sunken text-ink-700"
                 }`}
@@ -405,14 +448,14 @@ export function SelectionPanel() {
               <NumberField
                 value={Math.round(elec.heightZ * 100)}
                 unit="cm"
-                onChange={(v) => update("electrical", elec.id, { heightZ: v / 100 })}
+                onChange={(v) => mUpdate("electrical", elec.id, { heightZ: v / 100 })}
               />
             </Row>
             <div className="flex flex-wrap gap-1">
               {ELECTRICAL_HEIGHT_PRESETS.map((p) => (
                 <button
                   key={p.label}
-                  onClick={() => update("electrical", elec.id, { heightZ: p.value })}
+                  onClick={() => mUpdate("electrical", elec.id, { heightZ: p.value })}
                   className="rounded-md bg-paper-sunken px-2 py-1 text-[10px] text-ink-700"
                 >
                   {p.label}
@@ -424,7 +467,7 @@ export function SelectionPanel() {
                 type="text"
                 defaultValue={elec.group ?? ""}
                 placeholder="bv. 3"
-                onBlur={(e) => update("electrical", elec.id, { group: e.target.value })}
+                onBlur={(e) => mUpdate("electrical", elec.id, { group: e.target.value })}
                 className="w-20 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
               />
             </Row>
@@ -448,7 +491,7 @@ export function SelectionPanel() {
                             const next = linked
                               ? cur.filter((x) => x !== c.id)
                               : [...cur, c.id];
-                            void update("electrical", elec.id, { linkedIds: next });
+                            void mUpdate("electrical", elec.id, { linkedIds: next });
                           }}
                           className={`rounded-md px-2 py-1 text-[10px] font-medium ${
                             linked ? "bg-blueprint text-white" : "bg-paper-sunken text-ink-700"
@@ -481,7 +524,7 @@ export function SelectionPanel() {
                 {OPENING_TYPES.map((t) => (
                   <button
                     key={t}
-                    onClick={() => update("openings", opening.id, { type: t })}
+                    onClick={() => mUpdate("openings", opening.id, { type: t })}
                     className="rounded-md px-2 py-1 text-[11px] font-medium"
                     style={{
                       background: opening.type === t ? OPENING_COLOR[t] : "#ece8df",
@@ -497,23 +540,58 @@ export function SelectionPanel() {
               <NumberField
                 value={Math.round(opening.width * 100)}
                 unit="cm"
-                onChange={(v) => update("openings", opening.id, { width: v / 100 })}
+                onChange={(v) => mUpdate("openings", opening.id, { width: v / 100 })}
               />
             </Row>
             <Row label="Hoogte">
               <NumberField
                 value={Math.round(opening.height * 100)}
                 unit="cm"
-                onChange={(v) => update("openings", opening.id, { height: v / 100 })}
+                onChange={(v) => mUpdate("openings", opening.id, { height: v / 100 })}
               />
             </Row>
             <Row label="Borsthoogte">
               <NumberField
                 value={Math.round(opening.sillHeight * 100)}
                 unit="cm"
-                onChange={(v) => update("openings", opening.id, { sillHeight: v / 100 })}
+                onChange={(v) => mUpdate("openings", opening.id, { sillHeight: v / 100 })}
               />
             </Row>
+            {(() => {
+              // Een opening in een dragende muur vraagt om een latei: het
+              // metselwerk erboven moet ergens op rusten.
+              const host = walls.find((w) => w.id === opening.wallId);
+              if (!host?.loadBearing) return null;
+              const bearing = LINTEL_BEARING_M;
+              const lintelLength = opening.width + 2 * bearing;
+              return (
+                <div className="space-y-2">
+                  <Row label="Latei">
+                    <span className="tabular text-xs text-ink-900">
+                      {formatLength(lintelLength)}
+                      <span className="ml-1 text-[10px] text-ink-400">
+                        incl. {Math.round(bearing * 100)} cm oplegging p/z
+                      </span>
+                    </span>
+                  </Row>
+                  {opening.lintelProfile && (
+                    <Row label="Gekozen">
+                      <span className="text-xs font-medium text-ink-900">
+                        {findSection(opening.lintelProfile)?.label ?? opening.lintelProfile}
+                      </span>
+                    </Row>
+                  )}
+                  <BalkAdvies
+                    spanM={lintelLength}
+                    wallMaterial={host.material}
+                    wallThicknessM={host.thickness}
+                    wallHeightM={Math.max(0, host.height - opening.height - opening.sillHeight)}
+                    currentProfileKey={opening.lintelProfile}
+                    onPick={(key) => mUpdate("openings", opening.id, { lintelProfile: key })}
+                  />
+                </div>
+              );
+            })()}
             <DeleteButton onClick={() => removeAnd("openings", opening.id, () => select(null))} />
           </div>
         )}
@@ -526,13 +604,14 @@ export function SelectionPanel() {
             </div>
             <div className="flex items-center justify-between text-xs text-ink-500">
               <span>NVO (NEN 2580)</span>
-              <span className="tabular text-ink-900">{formatArea(nvoArea(room, walls ?? []))}</span>
+              <span className="tabular text-ink-900">{formatArea(nvoArea(room, walls ?? [], attic))}</span>
             </div>
+            <AtticSummary room={room} walls={walls ?? []} attic={attic} />
             <Row label="Naam">
               <input
                 type="text"
                 defaultValue={room.name}
-                onBlur={(e) => update("rooms", room.id, { name: e.target.value })}
+                onBlur={(e) => mUpdate("rooms", room.id, { name: e.target.value })}
                 className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
               />
             </Row>
@@ -541,7 +620,7 @@ export function SelectionPanel() {
                 type="text"
                 defaultValue={room.func ?? ""}
                 placeholder="bv. badkamer"
-                onBlur={(e) => update("rooms", room.id, { func: e.target.value })}
+                onBlur={(e) => mUpdate("rooms", room.id, { func: e.target.value })}
                 className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900 placeholder:text-ink-300"
               />
             </Row>
@@ -550,12 +629,12 @@ export function SelectionPanel() {
                 <input
                   type="color"
                   value={room.color ?? "#fef3c7"}
-                  onChange={(e) => update("rooms", room.id, { color: e.target.value })}
+                  onChange={(e) => mUpdate("rooms", room.id, { color: e.target.value })}
                   className="h-7 w-10 cursor-pointer rounded border border-line bg-paper p-0.5"
                 />
                 {room.color && (
                   <button
-                    onClick={() => update("rooms", room.id, { color: undefined })}
+                    onClick={() => mUpdate("rooms", room.id, { color: undefined })}
                     className="text-[10px] text-ink-400 hover:text-ink-700"
                   >
                     Wis
@@ -568,12 +647,12 @@ export function SelectionPanel() {
                 <input
                   type="color"
                   value={room.wallColor ?? "#f5f0e8"}
-                  onChange={(e) => update("rooms", room.id, { wallColor: e.target.value })}
+                  onChange={(e) => mUpdate("rooms", room.id, { wallColor: e.target.value })}
                   className="h-7 w-10 cursor-pointer rounded border border-line bg-paper p-0.5"
                 />
                 {room.wallColor && (
                   <button
-                    onClick={() => update("rooms", room.id, { wallColor: undefined })}
+                    onClick={() => mUpdate("rooms", room.id, { wallColor: undefined })}
                     className="text-[10px] text-ink-400 hover:text-ink-700"
                   >
                     Wis
@@ -585,7 +664,7 @@ export function SelectionPanel() {
               <select
                 value={room.floorMaterial ?? ""}
                 onChange={(e) =>
-                  update("rooms", room.id, {
+                  mUpdate("rooms", room.id, {
                     floorMaterial: e.target.value ? (e.target.value as FloorMaterial) : undefined,
                   })
                 }
@@ -643,7 +722,7 @@ export function SelectionPanel() {
               <NumberField
                 value={Math.round((hvacItem.heightZ ?? 0) * 100)}
                 unit="cm"
-                onChange={(v) => update("hvac", hvacItem.id, { heightZ: v / 100 })}
+                onChange={(v) => mUpdate("hvac", hvacItem.id, { heightZ: v / 100 })}
               />
             </Row>
             <Row label="Notitie">
@@ -651,7 +730,7 @@ export function SelectionPanel() {
                 type="text"
                 defaultValue={hvacItem.note ?? ""}
                 placeholder="bv. 1000W radiator"
-                onBlur={(e) => update("hvac", hvacItem.id, { note: e.target.value })}
+                onBlur={(e) => mUpdate("hvac", hvacItem.id, { note: e.target.value })}
                 className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900 placeholder:text-ink-300"
               />
             </Row>
@@ -666,7 +745,7 @@ export function SelectionPanel() {
                 {(["straight", "l-shape", "spiral"] as StaircaseKind[]).map((k) => (
                   <button
                     key={k}
-                    onClick={() => update("stairs", staircase.id, { kind: k })}
+                    onClick={() => mUpdate("stairs", staircase.id, { kind: k })}
                     className={`rounded-md px-2 py-1 text-[10px] font-medium ${
                       staircase.kind === k ? "bg-[#0f766e] text-white" : "bg-paper-sunken text-ink-700"
                     }`}
@@ -677,23 +756,23 @@ export function SelectionPanel() {
               </div>
             </Row>
             <Row label="Breedte">
-              <NumberField value={Math.round(staircase.width * 100)} unit="cm" onChange={(v) => update("stairs", staircase.id, { width: v / 100 })} />
+              <NumberField value={Math.round(staircase.width * 100)} unit="cm" onChange={(v) => mUpdate("stairs", staircase.id, { width: v / 100 })} />
             </Row>
             <Row label="Looplengte">
-              <NumberField value={Math.round(staircase.run * 100)} unit="cm" onChange={(v) => update("stairs", staircase.id, { run: v / 100 })} />
+              <NumberField value={Math.round(staircase.run * 100)} unit="cm" onChange={(v) => mUpdate("stairs", staircase.id, { run: v / 100 })} />
             </Row>
             <Row label="Treden">
-              <NumberField value={staircase.steps} unit="st" onChange={(v) => update("stairs", staircase.id, { steps: Math.max(2, Math.round(v)) })} />
+              <NumberField value={staircase.steps} unit="st" onChange={(v) => mUpdate("stairs", staircase.id, { steps: Math.max(2, Math.round(v)) })} />
             </Row>
             <Row label="Rotatie">
-              <NumberField value={Math.round(staircase.rotation)} unit="°" onChange={(v) => update("stairs", staircase.id, { rotation: ((Math.round(v) % 360) + 360) % 360 })} />
+              <NumberField value={Math.round(staircase.rotation)} unit="°" onChange={(v) => mUpdate("stairs", staircase.id, { rotation: ((Math.round(v) % 360) + 360) % 360 })} />
             </Row>
             <Row label="Richting">
               <div className="flex gap-1">
                 {(["up", "down"] as const).map((dir) => (
                   <button
                     key={dir}
-                    onClick={() => update("stairs", staircase.id, { direction: dir })}
+                    onClick={() => mUpdate("stairs", staircase.id, { direction: dir })}
                     className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
                       staircase.direction === dir ? "bg-accent text-white" : "bg-paper-sunken text-ink-700"
                     }`}
@@ -714,7 +793,7 @@ export function SelectionPanel() {
                 {(["square", "round"] as ColumnShape[]).map((sh) => (
                   <button
                     key={sh}
-                    onClick={() => update("columns", column.id, { shape: sh })}
+                    onClick={() => mUpdate("columns", column.id, { shape: sh })}
                     className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
                       column.shape === sh ? "bg-[#0f766e] text-white" : "bg-paper-sunken text-ink-700"
                     }`}
@@ -725,12 +804,12 @@ export function SelectionPanel() {
               </div>
             </Row>
             <Row label={column.shape === "round" ? "Diameter" : "Zijde"}>
-              <NumberField value={Math.round(column.size * 100)} unit="cm" onChange={(v) => update("columns", column.id, { size: Math.max(0.05, v / 100) })} />
+              <NumberField value={Math.round(column.size * 100)} unit="cm" onChange={(v) => mUpdate("columns", column.id, { size: Math.max(0.05, v / 100) })} />
             </Row>
             <Row label="Materiaal">
               <select
                 value={column.material}
-                onChange={(e) => update("columns", column.id, { material: e.target.value as WallMaterial })}
+                onChange={(e) => mUpdate("columns", column.id, { material: e.target.value as WallMaterial })}
                 className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
               >
                 {MATERIALS.map((m) => (
@@ -740,7 +819,7 @@ export function SelectionPanel() {
             </Row>
             <Row label="Dragend">
               <button
-                onClick={() => update("columns", column.id, { loadBearing: !column.loadBearing })}
+                onClick={() => mUpdate("columns", column.id, { loadBearing: !column.loadBearing })}
                 className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
                   column.loadBearing ? "bg-danger text-white" : "bg-paper-sunken text-ink-700"
                 }`}
@@ -752,32 +831,46 @@ export function SelectionPanel() {
           </div>
         )}
 
-        {beam && (
-          <div className="space-y-2.5">
-            <Row label="Profiel">
-              <select
-                value={beam.profile}
-                onChange={(e) => update("beams", beam.id, { profile: e.target.value as BeamProfile })}
-                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
-              >
-                {(["HEA100", "HEA140", "HEA160", "HEB200", "custom"] as BeamProfile[]).map((p) => (
-                  <option key={p} value={p}>{BEAM_PROFILE_LABEL[p]}</option>
-                ))}
-              </select>
-            </Row>
-            <Row label="Hoogte in gevel">
-              <NumberField value={Math.round(beam.height * 100)} unit="cm" onChange={(v) => update("beams", beam.id, { height: v / 100 })} />
-            </Row>
-            <DeleteButton onClick={() => removeAnd("beams", beam.id, () => select(null))} />
-          </div>
-        )}
+        {beam && (() => {
+          const spanM = dist(beam.start, beam.end);
+          return (
+            <div className="space-y-2.5">
+              <Row label="Overspanning">
+                <span className="tabular text-xs font-semibold text-ink-900">
+                  {formatLength(spanM)}
+                </span>
+              </Row>
+              <Row label="Profiel">
+                <select
+                  value={beam.profile}
+                  onChange={(e) => mUpdate("beams", beam.id, { profile: e.target.value as BeamProfile })}
+                  className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+                >
+                  {SECTION_PROFILES.map((p) => (
+                    <option key={p.key} value={p.key}>{p.label}</option>
+                  ))}
+                  <option value="custom">{BEAM_PROFILE_LABEL.custom ?? "Aangepast"}</option>
+                </select>
+              </Row>
+              <Row label="Hoogte in gevel">
+                <NumberField value={Math.round(beam.height * 100)} unit="cm" onChange={(v) => mUpdate("beams", beam.id, { height: v / 100 })} />
+              </Row>
+              <BalkAdvies
+                spanM={spanM}
+                currentProfileKey={beam.profile}
+                onPick={(key) => mUpdate("beams", beam.id, { profile: key })}
+              />
+              <DeleteButton onClick={() => removeAnd("beams", beam.id, () => select(null))} />
+            </div>
+          );
+        })()}
 
         {roof && (
           <div className="space-y-2.5">
             <Row label="Type">
               <select
                 value={roof.type}
-                onChange={(e) => update("roofs", roof.id, { type: e.target.value as RoofType })}
+                onChange={(e) => mUpdate("roofs", roof.id, { type: e.target.value as RoofType })}
                 className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
               >
                 {(["gable", "hip", "shed", "flat", "mansard"] as RoofType[]).map((t) => (
@@ -788,15 +881,15 @@ export function SelectionPanel() {
             {roof.type !== "flat" && (
               <>
                 <Row label="Helling">
-                  <NumberField value={Math.round(roof.pitch)} unit="°" onChange={(v) => update("roofs", roof.id, { pitch: Math.max(1, Math.min(80, Math.round(v))) })} />
+                  <NumberField value={Math.round(roof.pitch)} unit="°" onChange={(v) => mUpdate("roofs", roof.id, { pitch: Math.max(1, Math.min(80, Math.round(v))) })} />
                 </Row>
                 <Row label="Nokrichting">
-                  <NumberField value={Math.round(roof.ridgeDirection)} unit="°" onChange={(v) => update("roofs", roof.id, { ridgeDirection: ((Math.round(v) % 360) + 360) % 360 })} />
+                  <NumberField value={Math.round(roof.ridgeDirection)} unit="°" onChange={(v) => mUpdate("roofs", roof.id, { ridgeDirection: ((Math.round(v) % 360) + 360) % 360 })} />
                 </Row>
               </>
             )}
             <Row label="Dakoverstek">
-              <NumberField value={Math.round(roof.overhang * 100)} unit="cm" onChange={(v) => update("roofs", roof.id, { overhang: Math.max(0, v / 100) })} />
+              <NumberField value={Math.round(roof.overhang * 100)} unit="cm" onChange={(v) => mUpdate("roofs", roof.id, { overhang: Math.max(0, v / 100) })} />
             </Row>
             <div>
               <span className="mb-1 block text-xs text-ink-500">Dakkapel toevoegen</span>
@@ -821,7 +914,7 @@ export function SelectionPanel() {
             <Row label="Type">
               <select
                 value={dormer.type}
-                onChange={(e) => update("dormers", dormer.id, { type: e.target.value as DormerType })}
+                onChange={(e) => mUpdate("dormers", dormer.id, { type: e.target.value as DormerType })}
                 className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
               >
                 {(["gable-dormer", "shed-dormer", "velux"] as DormerType[]).map((t) => (
@@ -830,12 +923,30 @@ export function SelectionPanel() {
               </select>
             </Row>
             <Row label="Breedte">
-              <NumberField value={Math.round(dormer.width * 100)} unit="cm" onChange={(v) => update("dormers", dormer.id, { width: Math.max(0.3, v / 100) })} />
+              <NumberField value={Math.round(dormer.width * 100)} unit="cm" onChange={(v) => mUpdate("dormers", dormer.id, { width: Math.max(0.3, v / 100) })} />
             </Row>
             <Row label="Hoogte">
-              <NumberField value={Math.round(dormer.height * 100)} unit="cm" onChange={(v) => update("dormers", dormer.id, { height: Math.max(0.3, v / 100) })} />
+              <NumberField value={Math.round(dormer.height * 100)} unit="cm" onChange={(v) => mUpdate("dormers", dormer.id, { height: Math.max(0.3, v / 100) })} />
             </Row>
             <DeleteButton onClick={() => removeAnd("dormers", dormer.id, () => select(null))} />
+          </div>
+        )}
+
+        {sectionLine && (
+          <div className="space-y-2.5">
+            <Row label="Label">
+              <input
+                type="text"
+                defaultValue={sectionLine.label}
+                key={sectionLine.label}
+                onBlur={(e) => mUpdate("sections", sectionLine.id, { label: e.target.value || "A-A" })}
+                className="w-24 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+              />
+            </Row>
+            <p className="text-[11px] text-ink-400">
+              Bekijk de doorsnede via <strong>Aanzichten → Doorsneden</strong>.
+            </p>
+            <DeleteButton onClick={() => removeAnd("sections", sectionLine.id, () => select(null))} />
           </div>
         )}
 
@@ -850,7 +961,7 @@ export function SelectionPanel() {
                 {([0, 90, 180, 270] as const).map((deg) => (
                   <button
                     key={deg}
-                    onClick={() => void update("furniture", selectedFurniture.id, { rotation: deg })}
+                    onClick={() => void mUpdate("furniture", selectedFurniture.id, { rotation: deg })}
                     className={`rounded-md px-2 py-1 text-[11px] font-medium ${
                       Math.round(selectedFurniture.rotation) === deg
                         ? "bg-accent text-white"
@@ -867,7 +978,7 @@ export function SelectionPanel() {
                 value={Math.round(selectedFurniture.rotation)}
                 unit="°"
                 onChange={(v) =>
-                  void update("furniture", selectedFurniture.id, {
+                  void mUpdate("furniture", selectedFurniture.id, {
                     rotation: ((Math.round(v) % 360) + 360) % 360,
                   })
                 }
@@ -878,7 +989,7 @@ export function SelectionPanel() {
                 <button
                   onClick={() => {
                     const p = selectedFurniture.position;
-                    void update(
+                    void mUpdate(
                       "furniture",
                       selectedFurniture.id,
                       mirrorPatch("furniture", selectedFurniture, "h", p),
@@ -891,7 +1002,7 @@ export function SelectionPanel() {
                 <button
                   onClick={() => {
                     const p = selectedFurniture.position;
-                    void update(
+                    void mUpdate(
                       "furniture",
                       selectedFurniture.id,
                       mirrorPatch("furniture", selectedFurniture, "v", p),
@@ -908,12 +1019,12 @@ export function SelectionPanel() {
                 <input
                   type="color"
                   value={selectedFurniture.color ?? FURNITURE_DEFAULTS[selectedFurniture.kind].color}
-                  onChange={(e) => void update("furniture", selectedFurniture.id, { color: e.target.value })}
+                  onChange={(e) => void mUpdate("furniture", selectedFurniture.id, { color: e.target.value })}
                   className="h-7 w-10 cursor-pointer rounded border border-line bg-paper p-0.5"
                 />
                 {selectedFurniture.color && (
                   <button
-                    onClick={() => void update("furniture", selectedFurniture.id, { color: undefined })}
+                    onClick={() => void mUpdate("furniture", selectedFurniture.id, { color: undefined })}
                     className="text-[10px] text-ink-400 hover:text-ink-700"
                   >
                     Wis
@@ -936,7 +1047,7 @@ export function SelectionPanel() {
               <NumberField
                 value={Math.round((plumb.heightZ ?? 0) * 100)}
                 unit="cm"
-                onChange={(v) => update("plumbing", plumb.id, { heightZ: v / 100 })}
+                onChange={(v) => mUpdate("plumbing", plumb.id, { heightZ: v / 100 })}
               />
             </Row>
             <Row label="Notitie">
@@ -944,7 +1055,7 @@ export function SelectionPanel() {
                 type="text"
                 defaultValue={plumb.note ?? ""}
                 placeholder="bv. 40mm afvoer"
-                onBlur={(e) => update("plumbing", plumb.id, { note: e.target.value })}
+                onBlur={(e) => mUpdate("plumbing", plumb.id, { note: e.target.value })}
                 className="w-40 rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900 placeholder:text-ink-300"
               />
             </Row>
@@ -952,30 +1063,80 @@ export function SelectionPanel() {
           </div>
         )}
 
-        {plumb && !plumb.fixture && plumb.path && (
-          <div className="space-y-2.5">
-            <Row label="Type">
-              <span className="text-xs font-medium text-ink-900">
-                {plumb.type === "supply-cold" ? "Koud water"
-                  : plumb.type === "supply-hot" ? "Warm water"
-                  : plumb.type === "drain" ? "Afvoer"
-                  : plumb.type === "cv-pipe" ? "CV-leiding"
-                  : plumb.type}
-              </span>
-            </Row>
-            <Row label="Punten">
-              <span className="text-xs text-ink-900">{plumb.path.length}</span>
-            </Row>
-            <Row label="Hoogte">
-              <NumberField
-                value={Math.round((plumb.heightZ ?? 0) * 100)}
-                unit="cm"
-                onChange={(v) => update("plumbing", plumb.id, { heightZ: v / 100 })}
-              />
-            </Row>
-            <DeleteButton onClick={() => removeAnd("plumbing", plumb.id, () => select(null))} />
-          </div>
-        )}
+        {plumb && !plumb.fixture && plumb.path && (() => {
+          const spec = plumb.type !== "fixture" ? PIPE_SPECS[plumb.type] : null;
+          const lengthM = pathLength(plumb.path);
+          // Afschot volgt uit het hoogteverschil over de looplengte (mm/m).
+          const startZ = plumb.startZ ?? plumb.heightZ ?? 0;
+          const endZ = plumb.endZ ?? plumb.heightZ ?? 0;
+          const fall = lengthM > 0 ? ((startZ - endZ) * 1000) / lengthM : 0;
+          const minFall = spec?.minFallMmPerM;
+          const fallTooLow = minFall != null && fall < minFall;
+          return (
+            <div className="space-y-2.5">
+              <Row label="Type">
+                <span className="text-xs font-medium text-ink-900">
+                  {spec?.label ?? plumb.type}
+                </span>
+              </Row>
+              <Row label="Lengte">
+                <span className="tabular text-xs font-semibold text-ink-900">
+                  {formatLength(lengthM)}
+                </span>
+              </Row>
+              {spec && (
+                <Row label="Diameter">
+                  <select
+                    value={plumb.diameter ?? spec.defaultDiameter}
+                    onChange={(e) =>
+                      mUpdate("plumbing", plumb.id, { diameter: Number(e.target.value) })
+                    }
+                    className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
+                  >
+                    {spec.diameters.map((d) => (
+                      <option key={d} value={d}>{d} mm</option>
+                    ))}
+                  </select>
+                </Row>
+              )}
+              <Row label="Hoogte begin">
+                <NumberField
+                  value={Math.round(startZ * 100)}
+                  unit="cm"
+                  onChange={(v) => mUpdate("plumbing", plumb.id, { startZ: v / 100 })}
+                />
+              </Row>
+              <Row label="Hoogte eind">
+                <NumberField
+                  value={Math.round(endZ * 100)}
+                  unit="cm"
+                  onChange={(v) => mUpdate("plumbing", plumb.id, { endZ: v / 100 })}
+                />
+              </Row>
+              {minFall != null && (
+                <Row label="Afschot">
+                  <span
+                    className={`tabular text-xs font-semibold ${fallTooLow ? "text-danger" : "text-ok"}`}
+                    title={`Minimaal ${minFall} mm/m voor een afvoer`}
+                  >
+                    {fall.toFixed(1)} mm/m
+                  </span>
+                </Row>
+              )}
+              {fallTooLow && (
+                <p className="rounded-lg bg-danger/10 px-2 py-1.5 text-[11px] leading-snug text-danger">
+                  Te weinig afschot: een afvoer heeft minimaal {minFall} mm per meter
+                  nodig. Zet de begin-hoogte hoger of de eind-hoogte lager.
+                </p>
+              )}
+              <p className="text-[11px] leading-snug text-ink-400">
+                Sleep de punten op de tekening om de leiding te verleggen; dubbelklik
+                op een punt om het te verwijderen.
+              </p>
+              <DeleteButton onClick={() => removeAnd("plumbing", plumb.id, () => select(null))} />
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -986,8 +1147,55 @@ async function removeAnd(
   id: string,
   after: () => void,
 ) {
-  await remove(table, id);
+  await mRemove(table, id);
   after();
+}
+
+/**
+ * Wat levert de zolder écht op? Onder een kap is de footprint misleidend: pas
+ * vanaf 1,50 m telt de vloer mee, en pas vanaf 2,30 m mag er een slaapkamer in.
+ */
+function AtticSummary({
+  room,
+  walls,
+  attic,
+}: {
+  room: Room;
+  walls: Wall[];
+  attic: AtticContext | null | undefined;
+}) {
+  const areas = useMemo(() => atticAreasFor(room, walls, attic), [room, walls, attic]);
+  if (!areas) return null;
+
+  const pct = areas.grossM2 > 0 ? Math.round((areas.usableM2 / areas.grossM2) * 100) : 0;
+  return (
+    <div className="rounded-md border border-line bg-paper/60 p-2.5 space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-medium text-ink-700">Onder de kap</span>
+        <span className="text-[10px] text-ink-400">{pct}% bruikbaar</span>
+      </div>
+      {/* Balkje: het bruikbare deel binnen het bruto oppervlak. */}
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-100">
+        <div className="h-full rounded-full bg-cyan-600" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="flex items-center justify-between text-xs text-ink-500">
+        <span>Bruikbaar (≥ 1,50 m)</span>
+        <span className="tabular text-cyan-700">{formatArea(areas.usableM2)}</span>
+      </div>
+      <div className="flex items-center justify-between text-xs text-ink-500">
+        <span>Verblijfsruimte (≥ 2,30 m)</span>
+        <span className="tabular text-green-700">{formatArea(areas.livingM2)}</span>
+      </div>
+      <div className="flex items-center justify-between text-xs text-ink-500">
+        <span>Hoogste punt</span>
+        <span className="tabular text-ink-900">{formatLength(areas.maxHeadroomM)}</span>
+      </div>
+      <p className="text-[10px] leading-snug text-ink-400">
+        Een kniewand zet je op de 1,50 m-lijn; de ruimte erachter is bergruimte.
+        Een dakkapel verschuift beide lijnen naar buiten.
+      </p>
+    </div>
+  );
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -1043,7 +1251,7 @@ function WallLengthField({ wall }: { wall: Wall }) {
     if (len === 0) return;
     const dx = (wall.end.x - wall.start.x) / len;
     const dy = (wall.end.y - wall.start.y) / len;
-    void update("walls", wall.id, {
+    void mUpdate("walls", wall.id, {
       end: { x: wall.start.x + dx * newLenM, y: wall.start.y + dy * newLenM },
     });
   }

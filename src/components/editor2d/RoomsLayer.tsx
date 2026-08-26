@@ -1,11 +1,13 @@
 "use client";
 
-import { Fragment, useMemo } from "react";
+import { useMemo } from "react";
 import { Layer, Line, Text, Rect, Group, Arrow } from "react-konva";
-import type { Room, Wall, Level } from "@/lib/domain/types";
+import type { Room, Wall, Level, Roof, Dormer } from "@/lib/domain/types";
 import { polygonArea, polygonCentroid } from "@/lib/geometry";
 import { formatArea } from "@/lib/format";
 import { validateRooms } from "@/lib/validation";
+import { atticAreasFor, type AtticAreas, type AtticContext } from "@/lib/attic";
+import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, type ViewState } from "./viewport";
 
 export type RoomPhaseStatus = "todo" | "in-progress" | "done";
@@ -19,6 +21,14 @@ interface Props {
   levels?: Level[];
   // Fase-overlay: kleurt ruimtes op werkvoortgang (grijs/oranje/groen).
   phaseStatusByRoom?: Map<string, RoomPhaseStatus> | null;
+  /**
+   * Het dak boven deze verdieping. Staat er een kap op, dan is de footprint
+   * niet meer hetzelfde als het bruikbare oppervlak, en toont het label beide.
+   */
+  roof?: Roof | null;
+  dormers?: Dormer[];
+  /** Muurhoogte van deze verdieping — de kniewand waar het dak op staat. */
+  baseHeightM?: number;
 }
 
 const PHASE_FILL: Record<RoomPhaseStatus, string> = {
@@ -118,13 +128,37 @@ function StaircaseLines({
   }
 }
 
-export function RoomsLayer({ view, rooms, selectedId, onSelect, walls = [], levels = [], phaseStatusByRoom = null }: Props) {
+export function RoomsLayer({
+  view,
+  rooms,
+  selectedId,
+  onSelect,
+  walls = [],
+  levels = [],
+  phaseStatusByRoom = null,
+  roof = null,
+  dormers = [],
+  baseHeightM = 0,
+}: Props) {
   // Bouwbesluit validatie — gememoïseerd zodat pannen/zoomen (view-changes)
   // niet elke frame alle ruimtes opnieuw valideert.
   const warnRoomIds = useMemo(() => {
     const issues = validateRooms(rooms, levels);
     return new Set(issues.filter((i) => i.entityId).map((i) => i.entityId!));
   }, [rooms, levels]);
+
+  // Bruikbaar oppervlak onder de kap. Rastert per ruimte, dus alleen doen als
+  // er echt een schuin dak boven staat — en nooit opnieuw bij pannen/zoomen.
+  const atticByRoom = useMemo(() => {
+    const out = new Map<string, AtticAreas>();
+    if (!roof) return out;
+    const ctx: AtticContext = { roof, dormers, baseHeightM };
+    for (const room of rooms) {
+      const a = atticAreasFor(room, walls, ctx);
+      if (a) out.set(room.id, a);
+    }
+    return out;
+  }, [rooms, roof, walls, dormers, baseHeightM]);
 
   return (
     <Layer>
@@ -137,7 +171,13 @@ export function RoomsLayer({ view, rooms, selectedId, onSelect, walls = [], leve
         });
 
         const area = polygonArea(room.polygon);
-        const areaLabel = formatArea(area);
+        const attic = atticByRoom.get(room.id) ?? null;
+        // Onder een kap is de footprint een leugen: zeg wat je er echt aan hebt.
+        const areaLabel =
+          attic && attic.usableM2 < attic.grossM2 - 0.05
+            ? `${formatArea(attic.usableM2)} bruikbaar van ${formatArea(attic.grossM2)}`
+            : formatArea(area);
+        const livingLabel = attic ? `${formatArea(attic.livingM2)} boven 2,30 m` : null;
         const c = metersToScreen(polygonCentroid(room.polygon), view);
         const selected = room.id === selectedId;
         const staircase = isStaircase(room.name);
@@ -167,21 +207,29 @@ export function RoomsLayer({ view, rooms, selectedId, onSelect, walls = [], leve
                 ? "rgba(234, 88, 12, 0.9)"
                 : "rgba(234, 88, 12, 0.35)";
 
-        const labelW = Math.max(room.name.length * 6.5 + 16, 80);
-        const labelH = 34;
+        const subLabel = overlayActive ? null : areaLabel;
+        const labelW = Math.max(
+          room.name.length * 6.5 + 16,
+          (subLabel?.length ?? 0) * 5.2 + 16,
+          80,
+        );
+        const labelH = livingLabel && !overlayActive ? 46 : 34;
 
         return (
-          <Fragment key={room.id}>
+          <DraggableEntity
+            key={room.id}
+            kind="room"
+            entity={room}
+            anchor={room.polygon[0]}
+            view={view}
+            onSelect={onSelect}
+          >
             <Line
-              id={room.id}
-              name="room"
               points={pts}
               closed
               fill={fillColor}
               stroke={strokeColor}
               strokeWidth={selected ? 2 : 1}
-              onClick={() => onSelect(room.id)}
-              onTap={() => onSelect(room.id)}
             />
             {staircase && <StaircaseLines polygon={room.polygon} view={view} />}
             <Group x={c.x - labelW / 2} y={c.y - labelH / 2} listening={false}>
@@ -226,8 +274,19 @@ export function RoomsLayer({ view, rooms, selectedId, onSelect, walls = [], leve
                 }
                 align="center"
               />
+              {livingLabel && !overlayActive && (
+                <Text
+                  text={livingLabel}
+                  width={labelW}
+                  y={31}
+                  fontSize={9}
+                  fontFamily="system-ui, sans-serif"
+                  fill="#16a34a"
+                  align="center"
+                />
+              )}
             </Group>
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>

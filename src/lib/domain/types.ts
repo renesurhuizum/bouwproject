@@ -21,9 +21,11 @@ export interface Project extends Entity {
   description?: string;
   northDegrees?: number;  // voor noordpijl op werkblad (0 = omhoog = Noord)
   startDate?: string;     // ISO yyyy-mm-dd voor Gantt
-  // Eigen eenheidsprijzen voor de kostenraming, per postnaam uit
-  // computeQuantities(). Leeg = de kentallen uit lib/pricing.ts.
-  unitPrices?: Record<string, number>;
+  revisionNumber?: number; // revisie-nummer (0 = eerste uitgave)
+  revisionDate?: string;   // ISO datum van laatste revisie
+  drawingScale?: number;   // tekeningschaal: 50 | 100 | 200 (1:50 etc.)
+  lat?: number;            // breedtegraad voor zonberekening (NL ≈ 52.3)
+  lng?: number;            // lengtegraad (NL ≈ 5.3)
 }
 
 export interface Level extends Entity {
@@ -70,6 +72,11 @@ export interface Opening extends Entity {
   height: number; // m
   sillHeight: number; // borsthoogte in m (0 bij deur/doorgang)
   offset: number; // m vanaf wall.start langs de muur
+  /**
+   * Gekozen latei-profiel (sleutel in de doorsnedetabel). Alleen zinvol bij een
+   * opening in een dragende muur: het metselwerk erboven moet ergens op rusten.
+   */
+  lintelProfile?: string;
 }
 
 export type FloorMaterial = "tile" | "wood" | "carpet" | "stone" | "concrete";
@@ -98,16 +105,40 @@ export type ElectricalType =
   | "perilex" // kookgroep 2-fase (krachtstroom)
   | "outdoor"; // buitenpunt
 
+// Zekeringtype van een eindgroep. Bepaalt de benodigde aderdoorsnede.
+export type BreakerKind = "B10" | "B16" | "C16" | "B20" | "perilex";
+
+// Een eindgroep in de meterkast. Voorheen was dit alleen een vrij tekstveld op
+// elk item, waardoor er niets over een groep te zeggen viel: geen zekering,
+// geen kabeltype, geen totaal aantal meters.
+export interface ElectricalCircuit extends Entity {
+  projectId: string;
+  number: string; // "1", "2a"
+  name: string; // "Keuken achterwand"
+  breaker: BreakerKind;
+  cableSpec: string; // "3×2,5 mm²"
+  residualCurrent?: string; // aardlekgroep-cluster, bv. "ALS1"
+  color: string; // kleur van de route-overlay op de plattegrond
+  panelId?: string; // ElectricalItem van type "panel" waar de groep vertrekt
+  /** Loopt de kabel via het plafond of via de vloer? Bepaalt de stijglengtes. */
+  routeAt?: "ceiling" | "floor";
+}
+
 export interface ElectricalItem extends Entity {
   levelId: string;
   type: ElectricalType;
   position: Point;
   heightZ: number; // m boven vloer
-  group?: string; // groepnummer
+  circuitId?: string; // eindgroep-ref
+  group?: string; // verouderd: vrij tekstveld, vervangen door circuitId
   wallId?: string;
   label?: string;
   note?: string;
-  path?: Point[]; // kabeltraject (optioneel)
+  /**
+   * Handmatig kabeltraject. Leeg = de route wordt automatisch bepaald langs de
+   * muren vanaf de meterkast (zie lib/routing/cableRouting.ts).
+   */
+  path?: Point[];
   linkedIds?: string[]; // gekoppelde elementen (schakelaar → lichtpunt)
 }
 
@@ -117,6 +148,9 @@ export type PlumbingType =
   | "drain" // afvoer (leiding)
   | "cv-pipe" // cv-leiding (leiding)
   | "fixture"; // tappunt/sanitair
+
+// De leidingtypes (alles behalve "fixture"): deze hebben een pad en een diameter.
+export type PlumbingPipeType = Exclude<PlumbingType, "fixture">;
 
 export type FixtureKind =
   | "toilet"
@@ -135,7 +169,11 @@ export interface PlumbingItem extends Entity {
   position?: Point; // bij tappunt/sanitair
   diameter?: number; // mm
   fixture?: FixtureKind;
-  heightZ?: number; // m
+  heightZ?: number; // m — bij tappunten; bij leidingen de terugval voor start/eind
+  // Begin- en eindhoogte van een leiding (m). Twee waarden i.p.v. één, zodat
+  // afschot van een afvoer uitgerekend en gecontroleerd kan worden.
+  startZ?: number;
+  endZ?: number;
   note?: string;
 }
 
@@ -200,7 +238,11 @@ export interface Column extends Entity {
   loadBearing: boolean;
 }
 
-export type BeamProfile = "HEA100" | "HEA140" | "HEA160" | "HEB200" | "custom";
+// Sleutel in de doorsnedetabel (lib/structural/sections.ts). Vroeger een vaste
+// lijst van vier profielen; nu de volledige HEA/HEB/IPE/hout-tabel, zodat de
+// profielkeuze uit de constructieberekening ook opgeslagen kan worden.
+// "custom" blijft geldig voor handmatig ingevoerde maten.
+export type BeamProfile = string;
 
 export interface Beam extends Entity {
   levelId: string;
@@ -222,6 +264,13 @@ export interface Roof extends Entity {
   ridgeDirection: number; // richting van de nok (graden, 0 = nok langs X)
   overhang: number; // dakoversteek in m
   polygon?: Point[]; // optioneel dakvoet-polygoon; anders bounding box van de muren
+}
+
+export interface SectionLine extends Entity {
+  levelId: string;
+  start: Point;
+  end: Point;
+  label: string; // "A-A", "B-B"…
 }
 
 export type DormerType = "gable-dormer" | "shed-dormer" | "velux";
@@ -289,6 +338,18 @@ export interface MaterialItem extends Entity {
   unitPrice?: number;
   status: MaterialStatus;
   phaseId?: string;
+  /**
+   * Herkomst uit de hoeveelheidsberekening. Aanwezig = deze regel is automatisch
+   * afgeleid uit de plattegrond en wordt bijgewerkt als het plan verandert.
+   * Leeg = handmatig toegevoegd; daar blijft de sync vanaf.
+   */
+  sourceId?: string;
+  articleKey?: string;
+  /** Verpakkingsnaam, bv. "rol à 100 m" — zodat duidelijk is wat je bestelt. */
+  packName?: string;
+  /** Gebruiker heeft het aantal zelf aangepast; de sync overschrijft dat niet. */
+  quantityOverridden?: boolean;
+  supplier?: string;
 }
 
 export interface Photo extends Entity {

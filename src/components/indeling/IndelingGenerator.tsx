@@ -6,7 +6,7 @@
 import { useMemo, useState } from "react";
 import { Sparkles, X, Check, Square, PencilRuler } from "lucide-react";
 import { getDB } from "@/lib/db/db";
-import { create, remove } from "@/lib/db/repo";
+import { mBatch, mCreate, mRemove } from "@/lib/db/mutate";
 import { useEditor } from "@/lib/store/editor";
 import { useWalls } from "@/lib/hooks";
 import type { Wall, Room, Opening } from "@/lib/domain/types";
@@ -81,11 +81,14 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
     if (!activeLevelId || applying) return;
     setApplying(true);
     const db = getDB();
+    // Een gegenereerde indeling vervangt in één klap het hele plan; dat moet
+    // met één Ctrl+Z terug te draaien zijn.
+    await mBatch(async () => {
     // Bestaande ruimtes wissen (worden opnieuw gegenereerd).
     const oldRooms = (await db.rooms.where("levelId").equals(activeLevelId).toArray()).filter(
       (r) => !r.deleted,
     );
-    for (const r of oldRooms) await remove("rooms", r.id);
+    for (const r of oldRooms) await mRemove("rooms", r.id);
 
     if (!basedOnPlan) {
       // Nieuwe rechthoek: ook de bestaande muren + bijbehorende openingen wissen.
@@ -93,16 +96,16 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
         (w) => !w.deleted,
       );
       const wallIds = new Set(oldWalls.map((w) => w.id));
-      for (const w of oldWalls) await remove("walls", w.id);
+      for (const w of oldWalls) await mRemove("walls", w.id);
       const allOpenings = (await db.openings.toArray()).filter((o) => !o.deleted);
-      for (const o of allOpenings) if (wallIds.has(o.wallId)) await remove("openings", o.id);
+      for (const o of allOpenings) if (wallIds.has(o.wallId)) await mRemove("openings", o.id);
 
       // Buitenmuren (dragend) + voordeur op de gekozen zijde.
       const outer = outerWalls(layout.outer);
       const doorIdx = DOOR_OUTER_INDEX[doorSide];
       for (let i = 0; i < outer.length; i++) {
         const seg = outer[i];
-        const wall = await create<Wall>("walls", {
+        const wall = await mCreate<Wall>("walls", {
           levelId: activeLevelId,
           start: seg.a,
           end: seg.b,
@@ -114,7 +117,7 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
         });
         if (i === doorIdx) {
           const len = dist(seg.a, seg.b);
-          await create<Opening>("openings", {
+          await mCreate<Opening>("openings", {
             wallId: wall.id,
             type: "door",
             width: 1.0,
@@ -127,7 +130,7 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
     }
     // Interne wanden + doorgang tussen de kamers.
     for (const seg of layout.cuts) {
-      const wall = await create<Wall>("walls", {
+      const wall = await mCreate<Wall>("walls", {
         levelId: activeLevelId,
         start: seg.a,
         end: seg.b,
@@ -139,7 +142,7 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
       });
       const len = dist(seg.a, seg.b);
       if (len > 0.8) {
-        await create<Opening>("openings", {
+        await mCreate<Opening>("openings", {
           wallId: wall.id,
           type: "passage",
           width: Math.min(0.9, len * 0.6),
@@ -150,13 +153,14 @@ export function IndelingGenerator({ onClose }: { onClose: () => void }) {
       }
     }
     for (const r of layout.rooms) {
-      await create<Room>("rooms", {
+      await mCreate<Room>("rooms", {
         levelId: activeLevelId,
         name: r.name,
         func: r.func,
         polygon: rectPolygon(r.rect),
       });
     }
+    });
     setApplying(false);
     onClose();
   }

@@ -11,6 +11,7 @@ import {
   useRooms,
   useElectrical,
   useWalls,
+  useOpenings,
   usePlumbing,
   useHvac,
 } from "@/lib/hooks";
@@ -20,6 +21,8 @@ import {
   validateRooms,
   validateRoomServices,
   validateWalls,
+  validatePipeFall,
+  validateLintels,
   type ValidationIssue,
 } from "@/lib/validation";
 
@@ -32,6 +35,7 @@ export function ComplianceBanner() {
   const rooms = useRooms(level?.id) ?? [];
   const electrical = useElectrical(level?.id) ?? [];
   const walls = useWalls(level?.id) ?? [];
+  const openings = useOpenings(level?.id) ?? [];
   const plumbing = usePlumbing(level?.id) ?? [];
   const hvac = useHvac(level?.id ?? null) ?? [];
   const [open, setOpen] = useState(false);
@@ -39,6 +43,7 @@ export function ComplianceBanner() {
   // Deferred: tijdens continue edits (slider/sleep) coalescen de validatie-runs
   // zodat de editor responsief blijft; de banner loopt hooguit een tel achter.
   const dWalls = useDeferredValue(walls);
+  const dOpenings = useDeferredValue(openings);
   const dElectrical = useDeferredValue(electrical);
   const dRooms = useDeferredValue(rooms);
   const dPlumbing = useDeferredValue(plumbing);
@@ -51,8 +56,10 @@ export function ComplianceBanner() {
       ...validateElectrical(dElectrical),
       ...validateRooms(dRooms, [level]),
       ...validateRoomServices(dRooms, dPlumbing, dElectrical, dHvac),
+      ...validatePipeFall(dPlumbing),
+      ...validateLintels(dWalls, dOpenings),
     ];
-  }, [dWalls, dElectrical, dRooms, dPlumbing, dHvac, level]);
+  }, [dWalls, dOpenings, dElectrical, dRooms, dPlumbing, dHvac, level]);
 
   if (issues.length === 0) return null;
 

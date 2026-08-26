@@ -1,24 +1,29 @@
 "use client";
 
+// Meubellaag. Slepen loopt via DraggableEntity, zodat meubels dezelfde snapping,
+// laagvergrendeling en undo-registratie krijgen als de rest van de plattegrond.
+// De rotatie-handle is een eigen draggable node binnen die groep; Konva laat het
+// slepen daarvan niet doorlekken naar de ouder.
+
 import { Fragment } from "react";
 import { Layer, Rect, Text, Group, Circle, Line } from "react-konva";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
 import type { Furniture } from "@/lib/domain/types";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { FurnitureSymbol } from "./furnitureSymbols";
+import { DraggableEntity } from "./DraggableEntity";
 
 interface Props {
   view: ViewState;
   furniture: Furniture[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onMove: (id: string, x: number, y: number) => void;
   onRotate?: (id: string, rotation: number) => void;
 }
 
 const HANDLE_DIST = 28; // px boven het meubel
 
-export function FurnitureLayer({ view, furniture, selectedId, onSelect, onMove, onRotate }: Props) {
+export function FurnitureLayer({ view, furniture, selectedId, onSelect, onRotate }: Props) {
   return (
     <Layer>
       {furniture.map((item) => {
@@ -37,25 +42,20 @@ export function FurnitureLayer({ view, furniture, selectedId, onSelect, onMove, 
         const handleY = screenPos.y + (halfDiag + HANDLE_DIST) * Math.sin(handleRad);
 
         return (
-          <Fragment key={item.id}>
+          <DraggableEntity
+            key={item.id}
+            kind="furniture"
+            entity={item}
+            anchor={item.position}
+            view={view}
+            onSelect={onSelect}
+          >
             <Group
               x={screenPos.x}
               y={screenPos.y}
               rotation={item.rotation}
               offsetX={sw / 2}
               offsetY={sd / 2}
-              draggable
-              onClick={() => onSelect(item.id)}
-              onTap={() => onSelect(item.id)}
-              onDragEnd={(e) => {
-                const stage = e.target.getStage();
-                if (!stage) return;
-                const pos = e.target.absolutePosition();
-                // convert back to meters
-                const mx = (pos.x - view.x) / (view.scale * 50);
-                const my = (pos.y - view.y) / (view.scale * 50);
-                onMove(item.id, mx, my);
-              }}
             >
               <Rect
                 width={sw}
@@ -85,19 +85,11 @@ export function FurnitureLayer({ view, furniture, selectedId, onSelect, onMove, 
                   listening={false}
                 />
               )}
-              {selected && (
-                <>
-                  <Circle x={0}   y={0}   radius={5} fill="#ea580c" />
-                  <Circle x={sw}  y={0}   radius={5} fill="#ea580c" />
-                  <Circle x={0}   y={sd}  radius={5} fill="#ea580c" />
-                  <Circle x={sw}  y={sd}  radius={5} fill="#ea580c" />
-                </>
-              )}
             </Group>
 
             {/* Vrije rotatie-handle (alleen bij selectie) */}
             {selected && onRotate && (
-              <>
+              <Fragment>
                 <Line
                   points={[screenPos.x, screenPos.y, handleX, handleY]}
                   stroke="#ea580c"
@@ -127,9 +119,9 @@ export function FurnitureLayer({ view, furniture, selectedId, onSelect, onMove, 
                     e.target.position({ x: handleX, y: handleY });
                   }}
                 />
-              </>
+              </Fragment>
             )}
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>

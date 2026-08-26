@@ -20,6 +20,9 @@ import {
   LockOpen,
   Building2,
   Triangle,
+  Scissors,
+  Magnet,
+  SquareDashed,
 } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import { useHistory } from "@/lib/history";
@@ -55,6 +58,7 @@ import {
 } from "@/lib/domain/constants";
 import { Swatch, SwatchGrid } from "@/components/ui/Swatch";
 import { FURNITURE_CATEGORIES, FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
+import { findSection } from "@/lib/structural/sections";
 
 const PLACE_TYPES: ElectricalType[] = [
   "socket",
@@ -103,7 +107,9 @@ const LAYERS: { key: EditorLayer; label: string }[] = [
 
 const STAIRCASE_KINDS: StaircaseKind[] = ["straight", "l-shape", "spiral"];
 const COLUMN_SHAPES: ColumnShape[] = ["square", "round"];
-const BEAM_PROFILES: BeamProfile[] = ["HEA100", "HEA140", "HEA160", "HEB200", "custom"];
+// Een compacte greep uit de doorsnedetabel; de rest kies je in het paneel
+// nadat de balk getekend is (mét profieladvies).
+const BEAM_PROFILES: BeamProfile[] = ["IPE160", "HEA140", "HEA160", "HEB200", "HOUT75x225"];
 const ROOF_TYPES: RoofType[] = ["gable", "hip", "shed", "flat", "mansard"];
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
@@ -122,6 +128,10 @@ export function Toolbar() {
   const toggleLock = useEditor((s) => s.toggleLock);
   const showGrid = useEditor((s) => s.showGrid);
   const toggleGrid = useEditor((s) => s.toggleGrid);
+  const snapEnabled = useEditor((s) => s.snapEnabled);
+  const toggleSnap = useEditor((s) => s.toggleSnap);
+  const lassoMode = useEditor((s) => s.lassoMode);
+  const setLassoMode = useEditor((s) => s.setLassoMode);
   const gridSnap = useEditor((s) => s.gridSnap);
   const cycleGridSnap = useEditor((s) => s.cycleGridSnap);
   const furniturePaletteKind = useEditor((s) => s.furniturePaletteKind);
@@ -135,6 +145,8 @@ export function Toolbar() {
 
   const undo = useHistory((s) => s.undo);
   const redo = useHistory((s) => s.redo);
+  const canUndo = useHistory((s) => s.past.length > 0);
+  const canRedo = useHistory((s) => s.future.length > 0);
 
   const SNAP_LABEL = { fine: "10cm", normal: "50cm", coarse: "1m" };
   const [showLayers, setShowLayers] = useState(false);
@@ -166,7 +178,7 @@ export function Toolbar() {
   }
 
   return (
-    <div className="no-print pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 p-3 lg:pointer-events-auto lg:static lg:z-auto lg:min-h-0 lg:shrink-0 lg:max-h-[55%] lg:items-stretch lg:gap-1.5 lg:overflow-y-auto lg:border-t lg:border-line lg:p-2">
+    <div className="no-print pointer-events-none flex w-full flex-col items-center gap-2 p-3 lg:pointer-events-auto lg:min-h-0 lg:max-h-[55%] lg:shrink-0 lg:items-stretch lg:gap-1.5 lg:overflow-y-auto lg:border-t lg:border-line lg:p-2">
 
       {/* Contextueel paneel: muur-opties */}
       {tool === "wall" && (
@@ -457,7 +469,7 @@ export function Toolbar() {
                       : "bg-paper-sunken text-ink-700"
                   }`}
                 >
-                  {BEAM_PROFILE_LABEL[pr]}
+                  {findSection(pr)?.label ?? BEAM_PROFILE_LABEL[pr] ?? pr}
                 </button>
               ))}
             </div>
@@ -494,6 +506,13 @@ export function Toolbar() {
               />
             ))}
           </SwatchGrid>
+        </div>
+      )}
+
+      {/* Doorsnede-hint */}
+      {tool === "section" && (
+        <div className="pointer-events-auto rounded-xl border border-line bg-paper-raised/95 px-3 py-2 text-[11px] text-ink-600 shadow-lg backdrop-blur">
+          Klik twee punten om een doorsnedelijn (A-A) te tekenen · zie <strong>Aanzichten → Doorsneden</strong>
         </div>
       )}
 
@@ -542,27 +561,42 @@ export function Toolbar() {
         </div>
       )}
 
-      {/* Hoofd-dock */}
-      <div className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-2xl border border-line bg-paper-raised/95 p-1.5 shadow-xl backdrop-blur lg:w-full lg:overflow-x-visible lg:flex-wrap lg:justify-center lg:rounded-control lg:border-0 lg:bg-paper-sunken lg:shadow-none lg:backdrop-blur-none">
+      {/* Hoofd-dock — scrollt horizontaal op smalle schermen i.p.v. af te kappen;
+          in de gedockte rail breekt hij juist af over meerdere regels. */}
+      <div className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-2xl border border-line bg-paper-raised/95 p-1.5 shadow-xl backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:w-full lg:flex-wrap lg:justify-center lg:overflow-x-visible lg:rounded-control lg:border-0 lg:bg-paper-sunken lg:shadow-none lg:backdrop-blur-none">
         <button
           onClick={() => void undo()}
+          disabled={!canUndo}
           aria-label="Ongedaan maken"
-          className="flex h-11 w-10 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
+          title="Ongedaan maken (Ctrl+Z)"
+          className="flex h-11 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900 disabled:pointer-events-none disabled:opacity-30"
         >
           <Undo2 size={17} />
           <span>Undo</span>
         </button>
         <button
           onClick={() => void redo()}
+          disabled={!canRedo}
           aria-label="Opnieuw"
-          className="flex h-11 w-10 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900"
+          title="Opnieuw (Ctrl+Shift+Z)"
+          className="flex h-11 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-500 hover:bg-paper-sunken hover:text-ink-900 disabled:pointer-events-none disabled:opacity-30"
         >
           <Redo2 size={17} />
           <span>Redo</span>
         </button>
-        <div className="mx-0.5 h-7 w-px bg-line" />
+        <div className="mx-0.5 h-7 w-px shrink-0 bg-line" />
         <ToolBtn active={tool === "select"} onClick={() => setTool("select")} label="Kies">
           <MousePointer2 size={20} />
+        </ToolBtn>
+        <ToolBtn
+          active={lassoMode}
+          onClick={() => {
+            if (tool !== "select") setTool("select");
+            setLassoMode(!lassoMode);
+          }}
+          label="Lasso"
+        >
+          <SquareDashed size={20} />
         </ToolBtn>
         <ToolBtn active={tool === "wall"} onClick={() => setTool("wall")} label="Muur">
           <Minus size={20} strokeWidth={3} />
@@ -622,20 +656,36 @@ export function Toolbar() {
         >
           <Triangle size={20} />
         </ToolBtn>
-        <div className="mx-0.5 h-7 w-px bg-line" />
+        <ToolBtn
+          active={tool === "section"}
+          onClick={() => setTool(tool === "section" ? "select" : "section")}
+          label="Doorsnede"
+        >
+          <Scissors size={20} />
+        </ToolBtn>
+        <div className="mx-0.5 h-7 w-px shrink-0 bg-line" />
         <ToolBtn active={showLayers} onClick={() => setShowLayers((v) => !v)} label="Lagen">
           <Layers size={20} />
         </ToolBtn>
         <ToolBtn active={showGrid} onClick={toggleGrid} label="Raster">
           <Grid3x3 size={20} />
         </ToolBtn>
+        <ToolBtn active={snapEnabled} onClick={toggleSnap} label="Magneet">
+          <Magnet size={20} />
+        </ToolBtn>
         <button
           onClick={cycleGridSnap}
-          className="flex h-11 w-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-700 hover:bg-paper-sunken"
+          disabled={!snapEnabled}
+          title={
+            snapEnabled
+              ? "Snap-maat wijzigen · Alt ingedrukt = snapping tijdelijk uit"
+              : "Snapping staat uit"
+          }
+          className="flex h-11 w-12 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium text-ink-700 hover:bg-paper-sunken disabled:opacity-40"
           aria-label="Wijzig snap-maat"
         >
           <span className="text-[10px] font-bold text-ink-900">{SNAP_LABEL[gridSnap]}</span>
-          <span>Snap</span>
+          <span>Maat</span>
         </button>
       </div>
     </div>
@@ -658,7 +708,7 @@ function ToolBtn({
       onClick={onClick}
       aria-label={label}
       aria-pressed={active}
-      className={`flex h-11 w-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium transition-colors ${
+      className={`flex h-11 w-12 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[9px] font-medium transition-colors ${
         active ? "bg-accent text-white" : "text-ink-700 hover:bg-paper-sunken"
       }`}
     >

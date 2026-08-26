@@ -9,7 +9,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { Settings, LayoutTemplate, ListChecks, Receipt, FileText } from "lucide-react";
+import { Settings, LayoutTemplate, ListChecks, Receipt, ClipboardList, Frame } from "lucide-react";
 import { useProject } from "@/lib/hooks";
 import { update } from "@/lib/db/repo";
 
@@ -17,7 +17,8 @@ const NAV = [
   { href: "/plattegrond", label: "Werkruimte", icon: LayoutTemplate },
   { href: "/fases", label: "Fases", icon: ListChecks },
   { href: "/kosten", label: "Kosten", icon: Receipt },
-  { href: "/documenten", label: "Documenten", icon: FileText },
+  { href: "/aanzichten", label: "Aanzichten", icon: Frame },
+  { href: "/werkblad", label: "Werkblad", icon: ClipboardList },
 ] as const;
 
 export function TopBar() {

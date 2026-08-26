@@ -3,14 +3,17 @@
 
 import type {
   ElectricalItem,
+  Opening,
   HvacItem,
   PlumbingItem,
   Room,
   Wall,
   Level,
 } from "./domain/types";
-import { bounds, pointInPolygon, polygonArea, projectOnSegment } from "./geometry";
+import { bounds, pathLength, pointInPolygon, polygonArea, projectOnSegment } from "./geometry";
+import { PIPE_SPECS } from "./domain/constants";
 import { roomWalls } from "./roomWalls";
+import { atticAreasFor, type AtticContext } from "./attic";
 
 export interface ValidationIssue {
   severity: "error" | "warn" | "info";
@@ -72,6 +75,71 @@ export function validateWalls(walls: Wall[]): ValidationIssue[] {
         message:
           "Dragende muur staat gepland voor sloop — laat eerst een constructeur rekenen (staalbalk/portaal) en check vergunningsplicht bij het Omgevingsloket",
         entityId: wall.id,
+      });
+    }
+  }
+
+  return issues;
+}
+
+// ── Lateien boven openingen in dragende muren ────────────────────────────────
+
+// Boven elke opening in een dragende muur moet het metselwerk ergens op rusten.
+// Zonder latei zakt de muur en scheurt het werk erboven.
+export function validateLintels(walls: Wall[], openings: Opening[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const wallById = new Map(walls.map((w) => [w.id, w]));
+
+  for (const op of openings) {
+    const wall = wallById.get(op.wallId);
+    if (!wall?.loadBearing) continue;
+    if (op.lintelProfile) continue;
+    issues.push({
+      severity: "warn",
+      message: `${OPENING_NOUN[op.type]} van ${op.width.toFixed(2)} m in een dragende muur heeft nog geen latei — kies er een (indicatief) en laat die toetsen`,
+      entityId: op.id,
+    });
+  }
+
+  return issues;
+}
+
+const OPENING_NOUN: Record<Opening["type"], string> = {
+  door: "Deur",
+  window: "Raam",
+  passage: "Doorgang",
+};
+
+// ── Afschot van afvoerleidingen ──────────────────────────────────────────────
+
+// Een afvoer zonder voldoende afschot loopt niet leeg en gaat stinken of
+// verstoppen. Het afschot volgt uit het hoogteverschil over de looplengte.
+export function validatePipeFall(items: PlumbingItem[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  for (const item of items) {
+    if (item.type === "fixture" || !item.path || item.path.length < 2) continue;
+    const spec = PIPE_SPECS[item.type];
+    const minFall = spec?.minFallMmPerM;
+    if (minFall == null) continue;
+
+    const length = pathLength(item.path);
+    if (length <= 0) continue;
+    const startZ = item.startZ ?? item.heightZ ?? 0;
+    const endZ = item.endZ ?? item.heightZ ?? 0;
+    const fall = ((startZ - endZ) * 1000) / length;
+
+    if (fall < 0) {
+      issues.push({
+        severity: "error",
+        message: `Afvoer loopt omhoog (${(-fall).toFixed(1)} mm/m tegendraads) — water stroomt de verkeerde kant op`,
+        entityId: item.id,
+      });
+    } else if (fall < minFall) {
+      issues.push({
+        severity: "warn",
+        message: `Afvoer heeft te weinig afschot: ${fall.toFixed(1)} mm/m, minimaal ${minFall} mm/m nodig`,
+        entityId: item.id,
       });
     }
   }
@@ -272,7 +340,16 @@ export function validateRoomServices(
 // Benadering: bruto polygoon-oppervlak min de halve dikte van de werkelijk
 // aangrenzende muren langs de omtrek (polygon ligt op de muur-hartlijnen).
 
-export function nvoArea(room: Room, walls: Wall[]): number {
+export function nvoArea(
+  room: Room,
+  walls: Wall[],
+  /**
+   * De kap boven deze verdieping, als die er is. NEN 2580 telt vloer pas mee
+   * vanaf 1,50 m stahoogte, dus onder een schuin dak is de NVO nooit groter
+   * dan het bruikbare deel.
+   */
+  attic?: AtticContext | null,
+): number {
   const bruto = polygonArea(room.polygon);
   if (room.polygon.length < 3) return bruto;
 
@@ -294,5 +371,10 @@ export function nvoArea(room: Room, walls: Wall[]): number {
     }
     inset += edgeLen * (thickness / 2);
   }
-  return Math.max(0, bruto - inset);
+  const netto = Math.max(0, bruto - inset);
+
+  // Beide aftrekposten (muurdikte en stahoogte) overlappen deels langs de rand;
+  // de kleinste van de twee is de eerlijke bovengrens, niet de som.
+  const a = atticAreasFor(room, walls, attic);
+  return a ? Math.min(netto, a.usableM2) : netto;
 }

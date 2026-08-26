@@ -93,7 +93,7 @@ function DashboardContent() {
           <QuickLink href="/aanzichten" label="Aanzichten" icon={Frame} />
           <QuickLink href="/fases" label="Fases" icon={ListChecks} />
           <QuickLink href="/kosten" label="Kosten" icon={Receipt} />
-          <QuickLink href="/documenten" label="Documenten" icon={FileText} />
+          <QuickLink href="/werkblad" label="Werkblad" icon={FileText} />
           <QuickLink href="/instellingen" label="Instellingen" icon={Settings} />
         </div>
       </section>

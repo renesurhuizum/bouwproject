@@ -15,8 +15,8 @@ import { useTakeoff } from "@/lib/hooks";
 import { formatEuro } from "@/lib/format";
 import { SegmentedControl, type Segment } from "@/components/ui/SegmentedControl";
 import { Button } from "@/components/ui/Button";
-import { SelectionPanel } from "@/components/editor2d/SelectionPanel";
 import { ComplianceBanner } from "@/components/editor2d/ComplianceBanner";
+import { SelectionPanel } from "@/components/editor2d/SelectionPanel";
 import { LiveTakeoff } from "./LiveTakeoff";
 import { IssuesList } from "./IssuesList";
 
@@ -75,11 +75,12 @@ function DockedInspector() {
 
 function FloatingInspector() {
   const [sheetOpen, setSheetOpen] = useState(false);
-  const { estimate } = useTakeoff();
+  const { total } = useTakeoff();
 
   return (
     <>
-      <SelectionPanel />
+      {/* Het selectiepaneel zit op mobiel in de onderste stapel van de
+          werkruimte-pagina, samen met de gereedschapsbalk — hier dus niet. */}
       <ComplianceBanner />
 
       {/* Raming-chip rechtsboven — op mobiel het enige nieuwe element; de
@@ -90,7 +91,7 @@ function FloatingInspector() {
         title="Hoeveelheden en kostenraming"
       >
         <Receipt size={14} className="text-accent-ink" aria-hidden />
-        <span className="tabular">{formatEuro(estimate.total)}</span>
+        <span className="tabular">{formatEuro(total)}</span>
       </button>
 
       {sheetOpen && (

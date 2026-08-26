@@ -5,12 +5,13 @@
 import { useDeferredValue, useMemo, useSyncExternalStore } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { getDB } from "./db/db";
-import type { Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer } from "./domain/types";
+import type { Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer, SectionLine } from "./domain/types";
 import { useEditor, type Selection } from "./store/editor";
-import { computeQuantities } from "./quantityTakeoff";
-import { estimateCosts } from "./pricing";
+import { computeTakeoff } from "./takeoff/engine";
 import {
   validateElectrical,
+  validateLintels,
+  validatePipeFall,
   validateRooms,
   validateRoomServices,
   validateWalls,
@@ -160,6 +161,37 @@ export function useBudget(projectId?: string | null) {
   );
 }
 
+// Eindgroepen (meterkast) van het project.
+export function useCircuits(projectId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!projectId) return [];
+      const rows = notDeleted(
+        await getDB().circuits.where("projectId").equals(projectId).toArray(),
+      );
+      return rows.sort((a, b) =>
+        a.number.localeCompare(b.number, "nl", { numeric: true }),
+      );
+    },
+    [projectId],
+    [],
+  );
+}
+
+// Alle elektra van het project (over alle verdiepingen) — nodig omdat een groep
+// verdiepingen kan overspannen.
+export function useAllElectrical(levelIds: string[]) {
+  const key = levelIds.join(",");
+  return useLiveQuery(
+    async () => {
+      if (levelIds.length === 0) return [];
+      return notDeleted(await getDB().electrical.where("levelId").anyOf(levelIds).toArray());
+    },
+    [key],
+    [],
+  );
+}
+
 export function useMaterials(projectId?: string | null) {
   return useLiveQuery(
     async () => {
@@ -239,6 +271,17 @@ export function useRoofs(levelId?: string | null) {
   );
 }
 
+export function useSections(levelId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      return notDeleted(await getDB().sections.where("levelId").equals(levelId).toArray());
+    },
+    [levelId],
+    [] as SectionLine[],
+  );
+}
+
 export function useDormers(roofIds: string[]) {
   const key = roofIds.join(",");
   return useLiveQuery(
@@ -292,28 +335,55 @@ export function useActiveLevel() {
   return levels.find((l) => l.id === activeLevelId) ?? levels[0] ?? null;
 }
 
-/** Hoeveelheidsstaat + kostenraming van de actieve verdieping. */
+/**
+ * Inkoopstaat + kosten van de actieve verdieping, via dezelfde engine als het
+ * kostenscherm — één berekening, zodat de werkruimte en /kosten nooit
+ * verschillende bedragen tonen.
+ */
 export function useTakeoff() {
   const project = useProject();
   const level = useActiveLevel();
   const walls = useWalls(level?.id) ?? [];
   const rooms = useRooms(level?.id) ?? [];
   const openings = useOpenings(level?.id) ?? [];
+  const plumbing = usePlumbing(level?.id) ?? [];
+  const beams = useBeams(level?.id) ?? [];
+  const levelIds = useMemo(() => (level ? [level.id] : []), [level]);
+  const electrical = useAllElectrical(levelIds) ?? [];
+  const circuits = useCircuits(project?.id) ?? [];
 
   // Deferred, net als de compliance-controle: tijdens slepen mag de raming een
   // tel achterlopen zolang het canvas maar vloeiend blijft.
   const dWalls = useDeferredValue(walls);
   const dRooms = useDeferredValue(rooms);
   const dOpenings = useDeferredValue(openings);
-  const overrides = project?.unitPrices;
+  const dPlumbing = useDeferredValue(plumbing);
+  const dElectrical = useDeferredValue(electrical);
+  const dBeams = useDeferredValue(beams);
 
-  const items = useMemo(
-    () => (level ? computeQuantities(dWalls, dRooms, dOpenings, level) : []),
-    [dWalls, dRooms, dOpenings, level],
+  const lines = useMemo(() => {
+    if (!level) return [];
+    return computeTakeoff({
+      levels: [level],
+      walls: dWalls,
+      rooms: dRooms,
+      openings: dOpenings,
+      plumbing: dPlumbing,
+      electrical: dElectrical,
+      circuits,
+      beams: dBeams,
+    });
+  }, [level, dWalls, dRooms, dOpenings, dPlumbing, dElectrical, circuits, dBeams]);
+
+  const total = useMemo(
+    () => lines.reduce((sum, l) => sum + (l.totalPrice ?? 0), 0),
+    [lines],
   );
-  const estimate = useMemo(() => estimateCosts(items, overrides), [items, overrides]);
 
-  return { level, items, estimate };
+  /** Posten zonder richtprijs — expliciet tonen, anders lijkt het totaal compleet. */
+  const unpriced = useMemo(() => lines.filter((l) => l.totalPrice == null).length, [lines]);
+
+  return { level, lines, total, unpriced };
 }
 
 /** Alle NEN/Bouwbesluit-meldingen van de actieve verdieping. */
@@ -322,9 +392,11 @@ export function useIssues() {
   const rooms = useRooms(level?.id) ?? [];
   const electrical = useElectrical(level?.id) ?? [];
   const walls = useWalls(level?.id) ?? [];
+  const openings = useOpenings(level?.id) ?? [];
   const plumbing = usePlumbing(level?.id) ?? [];
   const hvac = useHvac(level?.id ?? null) ?? [];
 
+  const dOpenings = useDeferredValue(openings);
   const dWalls = useDeferredValue(walls);
   const dElectrical = useDeferredValue(electrical);
   const dRooms = useDeferredValue(rooms);
@@ -338,8 +410,10 @@ export function useIssues() {
       ...validateElectrical(dElectrical),
       ...validateRooms(dRooms, [level]),
       ...validateRoomServices(dRooms, dPlumbing, dElectrical, dHvac),
+      ...validatePipeFall(dPlumbing),
+      ...validateLintels(dWalls, dOpenings),
     ];
-  }, [dWalls, dElectrical, dRooms, dPlumbing, dHvac, level]);
+  }, [dWalls, dOpenings, dElectrical, dRooms, dPlumbing, dHvac, level]);
 
   /**
    * Zoekt op bij welk soort element een melding hoort. ValidationIssue kent
