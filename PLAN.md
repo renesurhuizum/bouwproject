@@ -127,7 +127,7 @@ de klassieke renovatie-fout (muur dicht vóórdat de elektra erin zit).
 | 2D-editor | **react-konva** (canvas) | Muren tekenen met snapping |
 | State | **Zustand** | Eén genormaliseerde store |
 | Opslag | **Dexie.js (IndexedDB)** | Offline-first, lokaal; later cloud-sync |
-| UI | **Tailwind + shadcn/ui** | Snel, strak, toegankelijk |
+| UI | **Tailwind 4 + eigen primitives** (`src/components/ui/`) | Snel, strak, toegankelijk; geen extra afhankelijkheden |
 | Grafieken | Recharts | Kostenoverzichten |
 | Maat/PDF | jsPDF / print-CSS | Werktekeningen exporteren |
 

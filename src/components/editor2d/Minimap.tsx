@@ -99,7 +99,7 @@ export function Minimap({ walls, view, stageWidth, stageHeight, onJumpTo }: Prop
   );
 
   return (
-    <div className="absolute right-3 top-16 z-20 rounded-md border border-stone-300 bg-stone-50/90 shadow-md backdrop-blur-sm overflow-hidden">
+    <div className="no-print absolute right-3 top-[9.5rem] z-20 lg:top-16 overflow-hidden rounded-control border border-line bg-paper-raised/90 shadow-panel backdrop-blur-sm">
       <svg
         width={MAP_W}
         height={MAP_H}

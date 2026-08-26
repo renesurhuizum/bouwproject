@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Printer, ArrowLeft, Map as MapIcon, Frame, ListTree, Download, DoorOpen, Zap } from "lucide-react";
+import { Printer, ArrowLeft, Map as MapIcon, Frame, ListTree, Download, DoorOpen, Zap, Receipt } from "lucide-react";
 import {
   useProject,
   useLevels,
@@ -36,7 +36,7 @@ import { computeCircuitRoutes } from "@/lib/routing/cableRouting";
 import { BREAKER_SPECS, CABLE_DRUM_M } from "@/lib/domain/constants";
 import { findSection, LINTEL_BEARING_M } from "@/lib/structural/sections";
 import { dist } from "@/lib/geometry";
-import { formatLength } from "@/lib/format";
+import { formatLength, formatEuro } from "@/lib/format";
 import { svgToPngBlob, downloadBlob } from "@/lib/exportImage";
 import { formatArea, formatHeight } from "@/lib/format";
 import {
@@ -46,7 +46,7 @@ import {
 } from "@/lib/domain/constants";
 import type { ElectricalType, FixtureKind } from "@/lib/domain/types";
 
-type Tab = "plan" | "aanzichten" | "kozijnstaat" | "elektra" | "specs";
+type Tab = "plan" | "aanzichten" | "kozijnstaat" | "elektra" | "specs" | "raming";
 
 const TABS: { key: Tab; label: string; icon: typeof MapIcon }[] = [
   { key: "plan", label: "Plan", icon: MapIcon },
@@ -54,6 +54,7 @@ const TABS: { key: Tab; label: string; icon: typeof MapIcon }[] = [
   { key: "kozijnstaat", label: "Kozijnstaat", icon: DoorOpen },
   { key: "elektra", label: "Trekplan", icon: Zap },
   { key: "specs", label: "Specificaties", icon: ListTree },
+  { key: "raming", label: "Kostenraming", icon: Receipt },
 ];
 
 const PLAN_SVG_ID = "werkblad-plan-svg";
@@ -172,6 +173,11 @@ export default function WerkbladPage() {
           })
         : [],
     [level, walls, rooms, openings, plumbing, allElectrical, circuits, beams],
+  );
+
+  const ramingTotaal = useMemo(
+    () => quantities.reduce((sum, l) => sum + (l.totalPrice ?? 0), 0),
+    [quantities],
   );
 
   const datum = new Intl.DateTimeFormat("nl-NL", { dateStyle: "long" }).format(new Date());
@@ -613,6 +619,63 @@ export default function WerkbladPage() {
                     ))}
                 </div>
               </Section>
+            )}
+          </div>
+        )}
+
+        {/* ── KOSTENRAMING ─────────────────────────────────────── */}
+        {tab === "raming" && (
+          <div className="space-y-4">
+            <p className="text-xs text-ink-500">
+              Uit de getekende plattegrond, met indicatieve richtprijzen inclusief snijverlies
+              en hele verpakkingen. Een richtbedrag om op te sturen — geen offerte.
+            </p>
+            {quantities.length === 0 ? (
+              <p className="py-8 text-center text-sm text-ink-400">
+                Nog niets te ramen. Teken eerst muren en ruimtes.
+              </p>
+            ) : (
+              <>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b-2 border-ink-900 text-left">
+                      <th className="py-1.5 font-semibold text-ink-700">Post</th>
+                      <th className="py-1.5 text-right font-semibold text-ink-700">Inkoop</th>
+                      <th className="py-1.5 text-right font-semibold text-ink-700">Prijs/eh.</th>
+                      <th className="py-1.5 text-right font-semibold text-ink-700">Bedrag</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {quantities.map((line) => (
+                      <tr key={line.sourceId} className="border-b border-line/60">
+                        <td className="py-1.5 text-ink-700">
+                          {line.name}
+                          <span className="ml-1.5 text-ink-400">{line.category}</span>
+                        </td>
+                        <td className="tabular py-1.5 text-right text-ink-900">
+                          {line.buyQty} {line.packs != null ? (line.packName ?? "pak") : line.unit}
+                        </td>
+                        <td className="tabular py-1.5 text-right text-ink-500">
+                          {line.unitPrice != null ? formatEuro(line.unitPrice) : "—"}
+                        </td>
+                        <td className="tabular py-1.5 text-right font-semibold text-ink-900">
+                          {line.totalPrice != null ? formatEuro(line.totalPrice) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-ink-900">
+                      <td colSpan={3} className="py-2 text-sm font-bold text-ink-900">
+                        Totaal raming
+                      </td>
+                      <td className="tabular py-2 text-right text-sm font-black text-ink-900">
+                        {formatEuro(ramingTotaal)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </>
             )}
           </div>
         )}

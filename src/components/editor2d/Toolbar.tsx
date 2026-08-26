@@ -34,6 +34,7 @@ import type {
   HvacType,
   OpeningType,
   WallStatus,
+  WallMaterial,
   StaircaseKind,
   ColumnShape,
   BeamProfile,
@@ -49,7 +50,13 @@ import {
   COLUMN_SHAPE_LABEL,
   BEAM_PROFILE_LABEL,
   ROOF_TYPE_LABEL,
+  ROOF_TYPE_SHAPE,
+  WALL_MATERIAL_LABEL,
+  WALL_MATERIAL_SHORT,
+  WALL_MATERIAL_SWATCH,
+  WALL_MATERIAL_THICKNESS,
 } from "@/lib/domain/constants";
+import { Swatch, SwatchGrid } from "@/components/ui/Swatch";
 import { FURNITURE_CATEGORIES, FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { findSection } from "@/lib/structural/sections";
 
@@ -106,6 +113,7 @@ const BEAM_PROFILES: BeamProfile[] = ["IPE160", "HEA140", "HEA160", "HEB200", "H
 const ROOF_TYPES: RoofType[] = ["gable", "hip", "shed", "flat", "mansard"];
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
+const WALL_MATERIALS = Object.keys(WALL_MATERIAL_LABEL) as WallMaterial[];
 
 export function Toolbar() {
   const tool = useEditor((s) => s.tool);
@@ -170,11 +178,11 @@ export function Toolbar() {
   }
 
   return (
-    <div className="pointer-events-none flex w-full flex-col items-center gap-2 p-3">
+    <div className="no-print pointer-events-none flex w-full flex-col items-center gap-2 p-3 lg:pointer-events-auto lg:min-h-0 lg:max-h-[55%] lg:shrink-0 lg:items-stretch lg:gap-1.5 lg:overflow-y-auto lg:border-t lg:border-line lg:p-2">
 
       {/* Contextueel paneel: muur-opties */}
       {tool === "wall" && (
-        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
+        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur lg:max-w-none lg:rounded-none lg:border-0 lg:bg-paper-raised lg:shadow-none lg:backdrop-blur-none">
           {STATUSES.map((st) => (
             <button
               key={st}
@@ -214,12 +222,32 @@ export function Toolbar() {
             min={1}
             onChange={(v) => setWallDefaults({ height: v })}
           />
+
+          {/* Materiaal als staaltje: je ziet meteen wat je gaat tekenen, en de
+              dikte volgt automatisch het gekozen materiaal. */}
+          <div className="w-full basis-full">
+            <p className="label-micro mb-1.5">Materiaal</p>
+            <SwatchGrid columns={3}>
+              {WALL_MATERIALS.map((m) => (
+                <Swatch
+                  key={m}
+                  label={WALL_MATERIAL_SHORT[m]}
+                  title={WALL_MATERIAL_LABEL[m]}
+                  background={WALL_MATERIAL_SWATCH[m]}
+                  selected={wallDefaults.material === m}
+                  onClick={() =>
+                    setWallDefaults({ material: m, thickness: WALL_MATERIAL_THICKNESS[m] })
+                  }
+                />
+              ))}
+            </SwatchGrid>
+          </div>
         </div>
       )}
 
       {/* Installatie-paneel — Elektra / Water / Verwarming / Deuren */}
       {isPlaceOrPipe && (
-        <div className="pointer-events-auto w-full max-w-sm rounded-xl border border-line bg-paper-raised/97 shadow-lg backdrop-blur">
+        <div className="pointer-events-auto w-full max-w-sm rounded-xl border border-line bg-paper-raised/97 shadow-lg backdrop-blur lg:max-w-none lg:rounded-none lg:border-0 lg:bg-paper-raised lg:shadow-none lg:backdrop-blur-none">
           {/* Tabbladen */}
           <div className="flex border-b border-line">
             {(
@@ -360,7 +388,7 @@ export function Toolbar() {
 
       {/* Meubels-palet */}
       {tool === "place-furniture" && (
-        <div className="pointer-events-auto w-full max-w-sm rounded-xl border border-line bg-paper-raised/97 p-2 shadow-lg backdrop-blur">
+        <div className="pointer-events-auto w-full max-w-sm rounded-xl border border-line bg-paper-raised/97 p-2 shadow-lg backdrop-blur lg:max-w-none lg:rounded-none lg:border-0 lg:bg-paper-raised lg:shadow-none lg:backdrop-blur-none">
           {FURNITURE_CATEGORIES.map((cat) => (
             <div key={cat.label} className="mb-1.5">
               <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-ink-400">
@@ -388,7 +416,7 @@ export function Toolbar() {
 
       {/* Constructie-paneel — trappen / kolommen / balken */}
       {tool === "construction" && (
-        <div className="pointer-events-auto w-full max-w-sm space-y-2 rounded-xl border border-line bg-paper-raised/97 p-2 shadow-lg backdrop-blur">
+        <div className="pointer-events-auto w-full max-w-sm space-y-2 rounded-xl border border-line bg-paper-raised/97 p-2 shadow-lg backdrop-blur lg:max-w-none lg:rounded-none lg:border-0 lg:bg-paper-raised lg:shadow-none lg:backdrop-blur-none">
           <div>
             <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-ink-400">Trappen</p>
             <div className="flex flex-wrap gap-1">
@@ -451,24 +479,33 @@ export function Toolbar() {
 
       {/* Dak-paneel */}
       {tool === "roof" && (
-        <div className="pointer-events-auto w-full max-w-sm rounded-xl border border-line bg-paper-raised/97 p-2 shadow-lg backdrop-blur">
+        <div className="pointer-events-auto w-full max-w-sm rounded-xl border border-line bg-paper-raised/97 p-2 shadow-lg backdrop-blur lg:max-w-none lg:rounded-none lg:border-0 lg:bg-paper-raised lg:shadow-none lg:backdrop-blur-none">
           <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-ink-400">
             Daktype
             <span className="ml-1 font-normal normal-case text-ink-300">· klik op de plattegrond om te plaatsen</span>
           </p>
-          <div className="flex flex-wrap gap-1">
+          <SwatchGrid columns={3}>
             {ROOF_TYPES.map((t) => (
-              <button
+              <Swatch
                 key={t}
+                label={ROOF_TYPE_LABEL[t]}
+                title={ROOF_TYPE_LABEL[t]}
+                selected={roofType === t}
                 onClick={() => setRoofType(t)}
-                className={`rounded-lg px-2 py-1.5 text-[10px] font-medium ${
-                  roofType === t ? "bg-[#7c3aed] text-white" : "bg-paper-sunken text-ink-700"
-                }`}
-              >
-                {ROOF_TYPE_LABEL[t]}
-              </button>
+                icon={
+                  <svg viewBox="0 0 24 16" className="h-6 w-9" aria-hidden>
+                    <path
+                      d={ROOF_TYPE_SHAPE[t]}
+                      fill={roofType === t ? "#7c3aed" : "var(--color-line-strong)"}
+                      stroke={roofType === t ? "#5b21b6" : "var(--color-ink-400)"}
+                      strokeWidth="1"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                }
+              />
             ))}
-          </div>
+          </SwatchGrid>
         </div>
       )}
 
@@ -481,7 +518,7 @@ export function Toolbar() {
 
       {/* Lagen-paneel */}
       {showLayers && (
-        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur">
+        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-xl border border-line bg-paper-raised/95 p-2 shadow-lg backdrop-blur lg:max-w-none lg:rounded-none lg:border-0 lg:bg-paper-raised lg:shadow-none lg:backdrop-blur-none">
           {LAYERS.map((l) => (
             <div
               key={l.key}
@@ -524,8 +561,9 @@ export function Toolbar() {
         </div>
       )}
 
-      {/* Hoofd-dock — scrollt horizontaal op smalle schermen i.p.v. af te kappen */}
-      <div className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-2xl border border-line bg-paper-raised/95 p-1.5 shadow-xl backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* Hoofd-dock — scrollt horizontaal op smalle schermen i.p.v. af te kappen;
+          in de gedockte rail breekt hij juist af over meerdere regels. */}
+      <div className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-2xl border border-line bg-paper-raised/95 p-1.5 shadow-xl backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:w-full lg:flex-wrap lg:justify-center lg:overflow-x-visible lg:rounded-control lg:border-0 lg:bg-paper-sunken lg:shadow-none lg:backdrop-blur-none">
         <button
           onClick={() => void undo()}
           disabled={!canUndo}

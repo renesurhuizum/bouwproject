@@ -6,6 +6,7 @@ import { Camera, Trash2, X, FlipHorizontal2, FlipVertical2, Copy } from "lucide-
 import { getDB } from "@/lib/db/db";
 import { mBatch, mCreate, mUpdate, mRemove } from "@/lib/db/mutate";
 import type { TableName } from "@/lib/db/repo";
+import { Swatch, SwatchGrid } from "@/components/ui/Swatch";
 import { useEditor, type Selection } from "@/lib/store/editor";
 import { useProject, useFurniture } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
@@ -16,6 +17,8 @@ import { mirrorPatch, selectionBounds, type AnyEntity } from "@/lib/selectionOps
 import { formatLength, formatArea } from "@/lib/format";
 import {
   WALL_MATERIAL_LABEL,
+  WALL_MATERIAL_SHORT,
+  WALL_MATERIAL_SWATCH,
   WALL_STATUS_LABEL,
   WALL_STATUS_COLOR,
   ELECTRICAL_LABEL,
@@ -268,8 +271,8 @@ export function SelectionPanel() {
   if (!selection && !multiActive) return null;
 
   return (
-    <div className="pointer-events-auto w-full px-3 pb-1">
-      <div className="mx-auto max-w-md rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur">
+    <div className="no-print pointer-events-auto w-full px-3 pb-1 lg:px-0 lg:pb-0">
+      <div className="mx-auto max-w-md rounded-xl border border-line bg-paper-raised/97 p-3 shadow-xl backdrop-blur lg:max-w-none lg:rounded-none lg:border-0 lg:shadow-none lg:backdrop-blur-none">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink-900">
             {multiActive
@@ -379,21 +382,21 @@ export function SelectionPanel() {
               </div>
             </Row>
 
-            <Row label="Materiaal">
-              <select
-                value={wall.material}
-                onChange={(e) =>
-                  mUpdate("walls", wall.id, { material: e.target.value as WallMaterial })
-                }
-                className="rounded-md border border-line bg-paper px-2 py-1 text-xs text-ink-900"
-              >
+            <div className="py-1">
+              <div className="mb-1.5 text-xs font-medium text-ink-600">Materiaal</div>
+              <SwatchGrid columns={3}>
                 {MATERIALS.map((m) => (
-                  <option key={m} value={m}>
-                    {WALL_MATERIAL_LABEL[m]}
-                  </option>
+                  <Swatch
+                    key={m}
+                    label={WALL_MATERIAL_SHORT[m]}
+                    title={WALL_MATERIAL_LABEL[m]}
+                    background={WALL_MATERIAL_SWATCH[m]}
+                    selected={wall.material === m}
+                    onClick={() => mUpdate("walls", wall.id, { material: m })}
+                  />
                 ))}
-              </select>
-            </Row>
+              </SwatchGrid>
+            </div>
 
             <Row label="Dikte">
               <NumberField

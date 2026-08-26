@@ -1615,8 +1615,9 @@ export function PlanEditor() {
 
       <RoomDivider divideRect={divideRect} onClear={() => setDivideRect(null)} />
 
-      {/* Elektra-legenda: alleen zichtbaar als elektra-laag aan staat */}
-      {visibleLayers.electrical && <ElectricalLegend />}
+      {/* Elektra-legenda: alleen als de laag aan staat én er iets te verklaren
+          valt. Anders bedekte een lege legenda de plattegrond. */}
+      {visibleLayers.electrical && electrical.length > 0 && <ElectricalLegend />}
 
       {/* Minimap */}
       {walls.length > 0 && (

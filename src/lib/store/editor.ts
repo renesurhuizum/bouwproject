@@ -30,6 +30,12 @@ export type Tool =
   | "roof"
   | "section";
 
+/** Welke weergave het midden van de werkruimte vult. */
+export type ViewMode = "2d" | "3d" | "elevation";
+
+/** Welk tabblad het inspector-paneel rechts toont. */
+export type InspectorTab = "selection" | "takeoff" | "issues";
+
 export type GridSnap = "fine" | "normal" | "coarse";
 // fine = 10 cm, normal = 50 cm, coarse = 100 cm
 export const GRID_SNAP_M: Record<GridSnap, number> = {
@@ -118,6 +124,15 @@ interface EditorState {
   // Kabelroutes als overlay op de plattegrond tonen.
   showCableRoutes: boolean;
 
+  // ── Werkruimte ─────────────────────────────────────────────────────────────
+  viewMode: ViewMode;
+  inspectorTab: InspectorTab;
+  /** Fase die als "huidige stap" is aangeklikt in de faserail. */
+  activeStepPhaseId: string | null;
+  /** Alleen mobiel: rail en inspector zijn daar uitschuifbare sheets. */
+  railOpen: boolean;
+  inspectorOpen: boolean;
+
   setActiveLevel: (id: string) => void;
   setTool: (t: Tool) => void;
   setPlaceKind: (p: PlaceKind | null) => void;
@@ -135,6 +150,11 @@ interface EditorState {
   toggleSnap: () => void;
   cycleGridSnap: () => void;
   togglePhaseOverlay: () => void;
+  setViewMode: (v: ViewMode) => void;
+  setInspectorTab: (t: InspectorTab) => void;
+  setActiveStepPhase: (id: string | null) => void;
+  setRailOpen: (open: boolean) => void;
+  setInspectorOpen: (open: boolean) => void;
   toggleLegend: () => void;
   setLassoMode: (v: boolean) => void;
   setAssignCircuitId: (id: string | null) => void;
@@ -190,6 +210,12 @@ export const useEditor = create<EditorState>()(
       assignCircuitId: null,
       showCableRoutes: true,
 
+      viewMode: "2d",
+      inspectorTab: "takeoff",
+      activeStepPhaseId: null,
+      railOpen: false,
+      inspectorOpen: false,
+
       setActiveLevel: (id) => set({ activeLevelId: id, selection: null, multi: [] }),
       setTool: (tool) =>
         set((s) => ({
@@ -208,7 +234,14 @@ export const useEditor = create<EditorState>()(
       setFurniturePaletteKind: (kind) =>
         set({ furniturePaletteKind: kind, tool: kind ? "place-furniture" : "select" }),
       setPipeType: (pipeType) => set({ pipeType }),
-      select: (selection) => set({ selection, multi: [] }),
+      select: (selection) =>
+        set((s) => ({
+          selection,
+          multi: [],
+          // Iets aanklikken toont meteen de eigenschappen ervan.
+          inspectorTab: selection ? "selection" : s.inspectorTab,
+          inspectorOpen: selection ? true : s.inspectorOpen,
+        })),
       setMulti: (multi) => set({ multi, selection: null }),
       setClipboard: (clipboard) => set({ clipboard }),
       toggleLayer: (l) =>
@@ -224,6 +257,11 @@ export const useEditor = create<EditorState>()(
       toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
       toggleSnap: () => set((s) => ({ snapEnabled: !s.snapEnabled })),
       togglePhaseOverlay: () => set((s) => ({ phaseOverlay: !s.phaseOverlay })),
+      setViewMode: (viewMode) => set({ viewMode }),
+      setInspectorTab: (inspectorTab) => set({ inspectorTab }),
+      setActiveStepPhase: (activeStepPhaseId) => set({ activeStepPhaseId }),
+      setRailOpen: (railOpen) => set({ railOpen }),
+      setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
       toggleLegend: () => set((s) => ({ showLegend: !s.showLegend })),
       setLassoMode: (lassoMode) => set({ lassoMode }),
       setAssignCircuitId: (assignCircuitId) => set({ assignCircuitId }),
@@ -245,6 +283,8 @@ export const useEditor = create<EditorState>()(
         showGrid: s.showGrid,
         snapEnabled: s.snapEnabled,
         gridSnap: s.gridSnap,
+        viewMode: s.viewMode,
+        inspectorTab: s.inspectorTab,
         showLegend: s.showLegend,
         showCableRoutes: s.showCableRoutes,
       }),

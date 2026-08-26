@@ -592,3 +592,43 @@ export const PHASE_TASK_TEMPLATES: Record<number, string[]> = {
     "Opleverinspectie",
   ],
 };
+
+// ── Visuele staaltjes ─────────────────────────────────────────────────────────
+// CSS-achtergronden die het materiaal herkenbaar maken in de keuzelijst. Puur
+// gradiënten, geen afbeeldingen — blijft dus scherp en werkt offline.
+
+/** Korte naam onder een staaltje; de volledige naam blijft de tooltip. */
+export const WALL_MATERIAL_SHORT: Record<WallMaterial, string> = {
+  brick: "Baksteen",
+  "sand-lime": "Kalkzandsteen",
+  concrete: "Beton",
+  "aerated-concrete": "Cellenbeton",
+  "timber-frame": "Houtskelet",
+  gypsum: "Gipsplaat",
+  other: "Anders",
+};
+
+export const WALL_MATERIAL_SWATCH: Record<WallMaterial, string> = {
+  brick:
+    "repeating-linear-gradient(180deg, transparent 0 6px, rgba(255,255,255,0.34) 6px 7px), " +
+    "repeating-linear-gradient(90deg, rgba(0,0,0,0.10) 0 1px, transparent 1px 14px), #b45f3f",
+  "sand-lime":
+    "repeating-linear-gradient(180deg, transparent 0 7px, rgba(0,0,0,0.10) 7px 8px), #dcd9d1",
+  concrete:
+    "radial-gradient(rgba(0,0,0,0.11) 0.5px, transparent 0.6px) 0 0/5px 5px, #9e9a94",
+  "aerated-concrete":
+    "repeating-linear-gradient(180deg, transparent 0 8px, rgba(0,0,0,0.09) 8px 9px), #ccd0cc",
+  "timber-frame":
+    "repeating-linear-gradient(90deg, rgba(0,0,0,0.16) 0 2px, transparent 2px 9px), #a9743f",
+  gypsum: "linear-gradient(180deg, #f2f0eb, #e6e3dc)",
+  other: "repeating-linear-gradient(45deg, #cfc9bf 0 4px, #bdb6ab 4px 8px)",
+};
+
+// Daksilhouetten als SVG-pad binnen een 24×16 viewBox.
+export const ROOF_TYPE_SHAPE: Record<RoofType, string> = {
+  gable: "M2 15 L12 4 L22 15 Z",
+  hip: "M2 15 L7 5 L17 5 L22 15 Z",
+  shed: "M2 15 L2 9 L22 3 L22 15 Z",
+  flat: "M2 15 L2 6 L22 6 L22 15 Z",
+  mansard: "M2 15 L5 8 L9 3 L15 3 L19 8 L22 15 Z",
+};
