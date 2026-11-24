@@ -5,8 +5,9 @@
 // Tik op een melding om het element op de plattegrond te openen.
 
 import { useDeferredValue, useMemo, useState } from "react";
-import { TriangleAlert, Info, ShieldCheck, MapPin, Download } from "lucide-react";
-import type { ProjectModel } from "@/lib/model";
+import { TriangleAlert, Info, ShieldCheck, MapPin, Download, MessageSquareShare } from "lucide-react";
+import { entityLocation, type ProjectModel } from "@/lib/model";
+import { exportBcf } from "@/lib/bcf/exportBcf";
 import { detectClashes, type ClashCategory } from "@/lib/clashDetection";
 import { validateElectrical, validateRooms, validateRoomServices, validateWalls } from "@/lib/validation";
 import { useShowOnPlan } from "./useShowOnPlan";
@@ -20,6 +21,7 @@ interface Item {
   levelId: string;
   levelName: string;
   entityIds: string[];
+  at?: { x: number; y: number };
 }
 
 const CAT_LABEL: Record<Cat, string> = {
@@ -42,7 +44,13 @@ export function collectIssues(model: ProjectModel): Item[] {
       ...validateRooms(lm.rooms, [lm.level]),
       ...validateRoomServices(lm.rooms, lm.plumbing, lm.electrical, lm.hvac),
     ]) {
-      items.push({ ...base, severity: v.severity, message: v.message, entityIds: v.entityId ? [v.entityId] : [] });
+      items.push({
+        ...base,
+        severity: v.severity,
+        message: v.message,
+        entityIds: v.entityId ? [v.entityId] : [],
+        at: v.entityId ? entityLocation(model, v.entityId) : undefined,
+      });
     }
   }
   return items.sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
@@ -77,6 +85,19 @@ export function Controle({ model }: { model: ProjectModel }) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `modelcontrole-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function exportBcfFile() {
+    const bytes = exportBcf(
+      model,
+      items.filter((i) => showInfo || i.severity !== "info"),
+    );
+    const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `issues-${new Date().toISOString().slice(0, 10)}.bcfzip`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -139,9 +160,14 @@ export function Controle({ model }: { model: ProjectModel }) {
             {visible.length === 0 && <li className="px-1 text-xs text-ink-500">Niets in deze categorie.</li>}
           </ul>
 
-          <button onClick={exportCsv} className="flex items-center gap-1.5 text-xs font-medium text-blueprint">
-            <Download size={14} /> Controlerapport als CSV (voor aannemer/installateur)
-          </button>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+            <button onClick={exportCsv} className="flex items-center gap-1.5 text-xs font-medium text-blueprint">
+              <Download size={14} /> Rapport als CSV (Excel)
+            </button>
+            <button onClick={exportBcfFile} className="flex items-center gap-1.5 text-xs font-medium text-blueprint" title="BCF 2.1 — opent in Revit, ArchiCAD, Solibri, BIMcollab, Bonsai">
+              <MessageSquareShare size={14} /> Issues als BCF (BIM-software)
+            </button>
+          </div>
         </>
       )}
 

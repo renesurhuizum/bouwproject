@@ -173,3 +173,30 @@ export function findEntity(model: ProjectModel, id: string): { kind: ModelEntity
   }
   return null;
 }
+
+/** Ruwe planlocatie van een element (voor camerastandpunten, BCF). */
+export function entityLocation(model: ProjectModel, id: string): { x: number; y: number } | undefined {
+  const mid = (a: { x: number; y: number }, b: { x: number; y: number }) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const centroid = (pts: { x: number; y: number }[]) =>
+    pts.length ? { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length } : undefined;
+  for (const lm of model.levels) {
+    const w = lm.walls.find((x) => x.id === id);
+    if (w) return mid(w.start, w.end);
+    const r = lm.rooms.find((x) => x.id === id);
+    if (r) return centroid(r.polygon);
+    const o = lm.openings.find((x) => x.id === id);
+    if (o) {
+      const ow = lm.walls.find((x) => x.id === o.wallId);
+      if (!ow) continue;
+      const L = Math.hypot(ow.end.x - ow.start.x, ow.end.y - ow.start.y) || 1;
+      const t = o.offset / L;
+      return { x: ow.start.x + (ow.end.x - ow.start.x) * t, y: ow.start.y + (ow.end.y - ow.start.y) * t };
+    }
+    for (const it of [...lm.electrical, ...lm.furniture, ...lm.columns, ...lm.stairs]) if (it.id === id) return it.position;
+    for (const it of [...lm.plumbing, ...lm.hvac]) if (it.id === id) return it.position ?? centroid(it.path ?? []);
+    const b = lm.beams.find((x) => x.id === id);
+    if (b) return mid(b.start, b.end);
+    if (lm.level.id === id) return centroid(lm.walls.flatMap((x) => [x.start, x.end]));
+  }
+  return undefined;
+}

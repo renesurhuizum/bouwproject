@@ -8,6 +8,7 @@ import { useState } from "react";
 import { FileDown, Check } from "lucide-react";
 import type { ProjectModel } from "@/lib/model";
 import { exportIfc } from "@/lib/ifc/exportIfc";
+import { IfcImport } from "./IfcImport";
 
 export function Uitwisseling({ model }: { model: ProjectModel }) {
   const [furniture, setFurniture] = useState(true);
@@ -79,8 +80,10 @@ export function Uitwisseling({ model }: { model: ProjectModel }) {
         )}
       </section>
 
+      <IfcImport model={model} />
+
       <section className="space-y-2 rounded-card border border-line bg-paper-raised p-4 text-xs text-ink-700">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">Wat zit erin?</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">Wat zit er in de export?</h2>
         <ul className="list-disc space-y-1 pl-4">
           <li>Bouwlagen met peil, muren met echte sparingen, deuren en ramen met maten.</li>
           <li>

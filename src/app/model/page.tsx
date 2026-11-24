@@ -13,7 +13,7 @@ type Tab = "controle" | "energie" | "uitwisseling";
 const TABS: { key: Tab; label: string }[] = [
   { key: "controle", label: "Controle" },
   { key: "energie", label: "Energie" },
-  { key: "uitwisseling", label: "IFC-export" },
+  { key: "uitwisseling", label: "IFC / BIM" },
 ];
 
 export default function ModelPage() {

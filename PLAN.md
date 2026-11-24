@@ -175,11 +175,26 @@ erbovenop, zodat telefoon + laptop synchroniseren.
   ISSO 51), radiatorvermogen bij 45/55/70 °C, warmtepomp-geschiktheid, isolatieadvies
   gesorteerd op winst met ISDE-grenzen, en "wat als"-scenario's (ISDE / nieuwbouw).
 
+- **IFC-import** (`src/lib/ifc/importIfc.ts`, via `web-ifc`): muren, deuren,
+  ramen, ruimtes, kolommen en balken uit Revit/ArchiCAD/Bonsai-modellen. Maten
+  worden uit de berekende 3D-vorm gehaald (kleinste omhullende rechthoek), dus
+  het werkt ongeacht hoe het element in IFC is gemodelleerd. Eenheden (mm/m/ft)
+  en RD-coördinaten worden omgerekend; bouwlagen koppelen op peil. De wasm staat
+  lokaal (`public/web-ifc/`, via postinstall) zodat het offline werkt.
+- **4D in 3D** (`src/lib/buildSequence.ts`): knop "Bouwvolgorde" in 3D. Schuif of
+  speel door de fases; te slopen muren verdwijnen bij Sloop, staal/kolommen bij
+  Constructief, nieuwe muren bij Ruwbouw (gips bij Wanden dicht), leidingen bij
+  1e fase, eindmontage bij 2e fase, meubels bij Afwerking. Een muur met een eigen
+  fase (selectiepaneel) volgt die fase. Geel = nieuw in deze fase.
+- **BCF 2.1-export** (`src/lib/bcf/`): botsingen en aandachtspunten als issues met
+  camerastandpunt en geselecteerde elementen; de GUID's zijn gelijk aan die van de
+  IFC-export, dus IFC + BCF samen openen werkt in Solibri/BIMcollab/Revit.
+
 **Volgende BIM-stappen (nog niet gebouwd)**
-- IFC-*import* (onderlegger of model van architect inlezen, bv. via `web-ifc`)
-- 4D in 3D: model per fase tonen (schuif door de bouwvolgorde)
-- BCF-issues: botsingen uitwisselen met architect/installateur
 - Leidinghoogtes per traject-punt (afschot echt modelleren)
+- Fase-keuze ook voor balken, kolommen en installaties (nu: alleen muren, rest default)
+- IFC-import van daken, trappen en installaties
+- BCF-*import* (reacties van architect terug in de app)
 
 ---
 
