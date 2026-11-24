@@ -48,6 +48,7 @@ import type {
 } from "@/lib/domain/types";
 import { polygonArea as polyArea } from "@/lib/geometry";
 import { nvoArea } from "@/lib/validation";
+import { WallBimFields, OpeningBimFields, RoofBimFields } from "./BimFields";
 import { atticAreasFor, type AtticContext } from "@/lib/attic";
 import { fromRoofLocal, roofFootprint } from "@/lib/roofGeometry";
 import { BalkAdvies } from "./BalkAdvies";
@@ -430,6 +431,8 @@ export function SelectionPanel() {
               </div>
             )}
 
+            <WallBimFields wall={wall} />
+
             <DeleteButton onClick={() => removeAnd("walls", wall.id, () => select(null))} />
           </div>
         )}
@@ -554,6 +557,7 @@ export function SelectionPanel() {
                 onChange={(v) => mUpdate("openings", opening.id, { sillHeight: v / 100 })}
               />
             </Row>
+            <OpeningBimFields opening={opening} wall={(walls ?? []).find((w) => w.id === opening.wallId)} />
             {(() => {
               // Een opening in een dragende muur vraagt om een latei: het
               // metselwerk erboven moet ergens op rusten.
@@ -902,6 +906,7 @@ export function SelectionPanel() {
                 ))}
               </div>
             </div>
+            <RoofBimFields roof={roof} />
             <DeleteButton onClick={() => removeAnd("roofs", roof.id, () => select(null))} />
           </div>
         )}

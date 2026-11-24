@@ -4,6 +4,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { getDB } from "./db/db";
+import { loadProjectModel } from "./model";
 import type { Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer, SectionLine } from "./domain/types";
 
 function notDeleted<T extends { deleted?: boolean }>(rows: T[] | undefined): T[] {
@@ -282,4 +283,11 @@ export function useDormers(roofIds: string[]) {
     [key],
     [] as Dormer[],
   );
+}
+
+// Volledig projectmodel (alle verdiepingen) — voor de Model-module
+// (botsingscontrole, bouwfysica, IFC-export). Live: elke wijziging in de
+// database herberekent het snapshot.
+export function useProjectModel() {
+  return useLiveQuery(() => loadProjectModel(getDB()));
 }

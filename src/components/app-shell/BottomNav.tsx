@@ -4,7 +4,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, LayoutTemplate, Box, Frame, ListChecks, Receipt, ClipboardList } from "lucide-react";
+import { LayoutDashboard, LayoutTemplate, Box, Frame, ListChecks, Receipt, ClipboardList, ScanSearch } from "lucide-react";
 
 const ITEMS = [
   { href: "/", label: "Start", icon: LayoutDashboard },
@@ -14,6 +14,7 @@ const ITEMS = [
   { href: "/werkblad", label: "Werkblad", icon: ClipboardList },
   { href: "/fases", label: "Fases", icon: ListChecks },
   { href: "/kosten", label: "Kosten", icon: Receipt },
+  { href: "/model", label: "Model", icon: ScanSearch },
 ] as const;
 
 export function BottomNav() {
@@ -22,7 +23,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="Hoofdnavigatie"
-      className="no-print safe-bottom z-20 grid grid-cols-7 border-t border-line bg-paper-raised"
+      className="no-print safe-bottom z-20 grid grid-cols-8 border-t border-line bg-paper-raised"
     >
       {ITEMS.map(({ href, label, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);

@@ -4,7 +4,8 @@
 
 import Link from "next/link";
 import { Suspense } from "react";
-import { LayoutTemplate, Box, Receipt, ListChecks, FileText, Frame, Settings, ArrowRight, TrendingUp } from "lucide-react";
+import { LayoutTemplate, Box, Receipt, ListChecks, FileText, Frame, Settings, ArrowRight, TrendingUp, ScanSearch } from "lucide-react";
+import { ModelHealth } from "@/components/model/ModelHealth";
 import { useProject, usePhases, useExpenses, useBudget } from "@/lib/hooks";
 import { analyzePhases, phaseProgress } from "@/lib/phases";
 import { formatEuro } from "@/lib/format";
@@ -93,6 +94,7 @@ function DashboardContent() {
           <QuickLink href="/fases" label="Fases" icon={ListChecks} />
           <QuickLink href="/kosten" label="Kosten" icon={Receipt} />
           <QuickLink href="/werkblad" label="Werkblad" icon={FileText} />
+          <QuickLink href="/model" label="Model" icon={ScanSearch} />
           <QuickLink href="/instellingen" label="Instellingen" icon={Settings} />
         </div>
       </section>
@@ -123,6 +125,8 @@ function DashboardContent() {
           />
         </Link>
       )}
+
+      <ModelHealth />
 
       {/* Kosten stats */}
       <section aria-label="Kosten" className="grid grid-cols-2 gap-3">

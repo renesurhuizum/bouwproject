@@ -22,7 +22,7 @@ import { downloadBlob } from "@/lib/exportImage";
 import { mUpdate as dbUpdate } from "@/lib/db/mutate";
 import { useLiveQuery } from "dexie-react-hooks";
 import type { Wall, Opening, ElectricalItem, PlumbingItem, Room, Level, Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer } from "@/lib/domain/types";
-import { useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers } from "@/lib/hooks";
+import { usePhases, useWalls, useElectrical, useOpenings, useRooms, usePlumbing, useProject, useFurniture, useHvac, useStairs, useColumns, useBeams, useRoofs, useDormers } from "@/lib/hooks";
 import { FURNITURE_DEFAULTS } from "@/lib/domain/furniture";
 import { ELECTRICAL_LABEL, BEAM_PROFILE_DIMS } from "@/lib/domain/constants";
 import { findSection } from "@/lib/structural/sections";
@@ -42,6 +42,19 @@ import { mCreate as dbCreate } from "@/lib/db/mutate";
 import { useEditor } from "@/lib/store/editor";
 import { use3DEdit } from "./use3DEdit";
 import { WalkthroughMode } from "./WalkthroughMode";
+import { BuildSequenceBar } from "./BuildSequenceBar";
+import {
+  useBuildSequence,
+  visibleAt,
+  activeAt,
+  wallSpan,
+  electricalSpan,
+  plumbingSpan,
+  hvacSpan,
+  phaseOrderMap,
+  STEP,
+  type Span,
+} from "@/lib/buildSequence";
 import { dist, angle, polygonCentroid, projectOnSegment } from "@/lib/geometry";
 import type { Point } from "@/lib/domain/types";
 
@@ -91,7 +104,7 @@ function wallBoxes(length: number, height: number, openings: Opening[]): Box[] {
   return boxes;
 }
 
-function WallMesh({ wall, openings, wallColor }: { wall: Wall; openings: Opening[]; wallColor?: string }) {
+function WallMesh({ wall, openings, wallColor, highlight }: { wall: Wall; openings: Opening[]; wallColor?: string; highlight?: boolean }) {
   const length = dist(wall.start, wall.end);
   const style = STATUS_3D[wall.status];
 
@@ -108,10 +121,11 @@ function WallMesh({ wall, openings, wallColor }: { wall: Wall; openings: Opening
     STATUS_TINT,
   );
   const surface = useMemo(
-    () => (style.opacity >= 1 ? makeSurface(kind, length, wall.height, drawColor) : null),
-    [kind, drawColor, style.opacity, length, wall.height],
+    () => (style.opacity >= 1 && !highlight ? makeSurface(kind, length, wall.height, drawColor) : null),
+    [kind, drawColor, style.opacity, length, wall.height, highlight],
   );
-  const finalColor = surface ? "#ffffff" : drawColor;
+  // 4D: wat in de getoonde fase nieuw is, licht geel op.
+  const finalColor = highlight ? "#facc15" : surface ? "#ffffff" : drawColor;
 
   if (length < 0.01) return null;
   const cx = (wall.start.x + wall.end.x) / 2;
@@ -1433,27 +1447,41 @@ function FloorPlane({ levelId, elevation }: { levelId: string; elevation: number
 function LevelScene({
   level,
   visibleLayers,
+  phaseOrders,
   selectedFurnitureId,
   gizmoMode,
 }: {
   level: Level;
   visibleLayers: Record<string, boolean>;
+  phaseOrders: Map<string, number>;
   selectedFurnitureId: string | null;
   gizmoMode: "translate" | "rotate";
 }) {
-  const walls = useWalls(level.id) ?? [];
-  const electrical = useElectrical(level.id) ?? [];
+  // 4D: bij een gekozen bouwstap alleen tonen wat er op dat moment staat.
+  const step = useBuildSequence((s) => s.step);
+  const at = (span: Span) => visibleAt(span, step);
+  const fixed = (appear: number): Span => ({ appear });
+
+  const wallsRaw = useWalls(level.id);
+  const allWalls = useMemo(() => wallsRaw ?? [], [wallsRaw]);
+  // Gememoiseerd: wallColorById hangt hiervan af en is relatief duur.
+  const walls = useMemo(
+    () => allWalls.filter((w) => visibleAt(wallSpan(w, phaseOrders), step)),
+    [allWalls, phaseOrders, step],
+  );
+  const electrical = (useElectrical(level.id) ?? []).filter((e) => at(electricalSpan(e)));
   const openings = useOpenings(level.id) ?? [];
   const rooms = useRooms(level.id) ?? [];
-  const plumbing = usePlumbing(level.id) ?? [];
-  const furniture = useFurniture(level.id) ?? [];
-  const hvac = useHvac(level.id) ?? [];
-  const stairs = useStairs(level.id) ?? [];
-  const columns = useColumns(level.id) ?? [];
-  const beams = useBeams(level.id) ?? [];
-  const roofs = useRoofs(level.id) ?? [];
-  const roofIds = useMemo(() => roofs.map((r) => r.id), [roofs]);
-  const dormers = useDormers(roofIds) ?? [];
+  const plumbing = (usePlumbing(level.id) ?? []).filter((p) => at(plumbingSpan(p)));
+  const furniture = (useFurniture(level.id) ?? []).filter(() => at(fixed(STEP.finishing)));
+  const hvac = (useHvac(level.id) ?? []).filter((h) => at(hvacSpan(h)));
+  const stairs = (useStairs(level.id) ?? []).filter(() => at(fixed(STEP.shell)));
+  const columns = (useColumns(level.id) ?? []).filter(() => at(fixed(STEP.structural)));
+  const beams = (useBeams(level.id) ?? []).filter(() => at(fixed(STEP.structural)));
+  const roofsRaw = useRoofs(level.id);
+  const roofs = (roofsRaw ?? []).filter(() => at(fixed(STEP.shell)));
+  const roofIds = useMemo(() => (roofsRaw ?? []).map((r) => r.id), [roofsRaw]);
+  const dormers = (useDormers(roofIds) ?? []).filter(() => at(fixed(STEP.shell)));
 
   const openingsByWall = useMemo(() => {
     const m = new Map<string, Opening[]>();
@@ -1507,7 +1535,13 @@ function LevelScene({
           ))}
       {visibleLayers.structure &&
         walls.map((w) => (
-          <WallMesh key={w.id} wall={w} openings={openingsByWall.get(w.id) ?? []} wallColor={wallColorById.get(w.id)} />
+          <WallMesh
+            key={w.id}
+            wall={w}
+            openings={openingsByWall.get(w.id) ?? []}
+            wallColor={wallColorById.get(w.id)}
+            highlight={activeAt(wallSpan(w, phaseOrders), step)}
+          />
         ))}
       {visibleLayers.electrical &&
         electrical.map((it) => <ElectricalMarker key={it.id} item={it} />)}
@@ -1563,7 +1597,7 @@ function LevelScene({
             <RoofMesh3D
               key={r.id}
               roof={r}
-              walls={walls}
+              walls={allWalls}
               dormers={dormers.filter((d) => d.roofId === r.id)}
               baseY={level.height}
             />
@@ -1575,7 +1609,7 @@ function LevelScene({
                 key={dm.id}
                 dormer={dm}
                 roof={host}
-                fp={host ? roofFootprint(host, walls) : null}
+                fp={host ? roofFootprint(host, allWalls) : null}
                 baseY={level.height}
               />
             );
@@ -1591,6 +1625,9 @@ export function Scene3D() {
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const project = useProject();
   const editMode = use3DEdit((s) => s.mode);
+  const phasesRaw = usePhases(project?.id);
+  const phaseOrders = useMemo(() => phaseOrderMap(phasesRaw ?? []), [phasesRaw]);
+  const phases = phasesRaw ?? [];
   const selectedItem = use3DEdit((s) => s.selectedItem);
   const [walkMode, setWalkMode] = useState(false);
   const [dayMode, setDayMode] = useState(true);
@@ -1738,6 +1775,7 @@ export function Scene3D() {
             key={level.id}
             level={level}
             visibleLayers={visibleLayers}
+            phaseOrders={phaseOrders}
             selectedFurnitureId={selectedFurnitureId}
             gizmoMode={gizmoMode}
           />
@@ -1859,6 +1897,8 @@ export function Scene3D() {
           </div>
         )}
       </div>
+
+      {!walkMode && <BuildSequenceBar phases={phases} />}
 
       {walkMode && (
         <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center">
