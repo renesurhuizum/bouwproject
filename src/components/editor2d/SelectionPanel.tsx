@@ -47,6 +47,7 @@ import type {
 } from "@/lib/domain/types";
 import { polygonArea as polyArea } from "@/lib/geometry";
 import { nvoArea } from "@/lib/validation";
+import { WallBimFields, OpeningBimFields, RoofBimFields } from "./BimFields";
 
 const STATUSES: WallStatus[] = ["new", "existing", "demolish"];
 const MATERIALS = Object.keys(WALL_MATERIAL_LABEL) as WallMaterial[];
@@ -387,6 +388,8 @@ export function SelectionPanel() {
               </div>
             )}
 
+            <WallBimFields wall={wall} />
+
             <DeleteButton onClick={() => removeAnd("walls", wall.id, () => select(null))} />
           </div>
         )}
@@ -511,6 +514,7 @@ export function SelectionPanel() {
                 onChange={(v) => update("openings", opening.id, { sillHeight: v / 100 })}
               />
             </Row>
+            <OpeningBimFields opening={opening} wall={(walls ?? []).find((w) => w.id === opening.wallId)} />
             <DeleteButton onClick={() => removeAnd("openings", opening.id, () => select(null))} />
           </div>
         )}
@@ -809,6 +813,7 @@ export function SelectionPanel() {
                 ))}
               </div>
             </div>
+            <RoofBimFields roof={roof} />
             <DeleteButton onClick={() => removeAnd("roofs", roof.id, () => select(null))} />
           </div>
         )}

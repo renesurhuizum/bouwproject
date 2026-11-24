@@ -34,6 +34,7 @@ export interface Level extends Entity {
   bgImageScale?: number; // m/pixel, zodat het op de juiste schaal past
   bgImageOffsetX?: number; // wereld-x van linkerbovenhoek in m
   bgImageOffsetY?: number; // wereld-y van linkerbovenhoek in m
+  floorRc?: number; // Rc begane-grondvloer (m²K/W) — alleen relevant voor laagste verdieping
 }
 
 export type WallStatus = "existing" | "new" | "demolish";
@@ -56,6 +57,10 @@ export interface Wall extends Entity {
   material: WallMaterial;
   loadBearing: boolean; // dragend?
   status: WallStatus;
+  // Bouwfysica (optioneel; anders defaults per materiaal/status)
+  isExternal?: boolean; // gevel? undefined = automatisch bepalen
+  insulationRc?: number; // Rc-waarde totale constructie in m²K/W
+  phaseId?: string; // in welke fase wordt deze muur gebouwd/gesloopt (4D)
 }
 
 export type OpeningType = "door" | "window" | "passage";
@@ -67,6 +72,7 @@ export interface Opening extends Entity {
   height: number; // m
   sillHeight: number; // borsthoogte in m (0 bij deur/doorgang)
   offset: number; // m vanaf wall.start langs de muur
+  uValue?: number; // W/m²K (kozijn + glas); default per type
 }
 
 export type FloorMaterial = "tile" | "wood" | "carpet" | "stone" | "concrete";
@@ -219,6 +225,7 @@ export interface Roof extends Entity {
   ridgeDirection: number; // richting van de nok (graden, 0 = nok langs X)
   overhang: number; // dakoversteek in m
   polygon?: Point[]; // optioneel dakvoet-polygoon; anders bounding box van de muren
+  insulationRc?: number; // m²K/W
 }
 
 export type DormerType = "gable-dormer" | "shed-dormer" | "velux";

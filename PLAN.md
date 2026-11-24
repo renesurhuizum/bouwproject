@@ -157,6 +157,30 @@ erbovenop, zodat telefoon + laptop synchroniseren.
 **Fase 5 — Werkmodus & export**
 - Wandaanzichten met maatvoering, PDF-export, foto's, on-site checklists
 
+**Fase 6 — BIM (Model-module, `/model`)**
+- **IFC4-export** (`src/lib/ifc/`): bouwlagen, muren met sparingen, deuren/ramen,
+  ruimtes, kolommen, stalen liggers (I-profiel), trappen, daken, meubels en alle
+  installaties. Met Pset_WallCommon (dragend, gevel, U-waarde, status
+  EXISTING/NEW/DEMOLISH), hoeveelheden (Qto_*), materialen en fase. Stabiele
+  GUID's per element. Gevalideerd met IfcOpenShell (schema + EXPRESS-regels).
+- **Botsingscontrole** (`src/lib/clashDetection.ts`): leidingen × kolommen/balken/
+  dragende muren (op hoogte), leidingen onderling, toilet-afvoer Ø, lange afvoeren
+  (afschot), elektra in kozijnen/op sloopmuren/in natte zones (NEN 1010),
+  overlappende openingen, latei-hint, opleggingen en overspanning van stalen balken,
+  dragende muren die niet boven elkaar staan. Draait live in de banner op de
+  plattegrond en volledig op `/model` (met "toon op plan" en CSV-rapport).
+- **Bouwfysica** (`src/lib/thermal.ts`): Rc/U per muur, raam, dak en vloer
+  (lege velden = aangenomen waarde per materiaal), automatische gevelherkenning
+  (straal-test) met windrichting, indicatief warmteverlies per ruimte (vereenvoudigd
+  ISSO 51), radiatorvermogen bij 45/55/70 °C, warmtepomp-geschiktheid, isolatieadvies
+  gesorteerd op winst met ISDE-grenzen, en "wat als"-scenario's (ISDE / nieuwbouw).
+
+**Volgende BIM-stappen (nog niet gebouwd)**
+- IFC-*import* (onderlegger of model van architect inlezen, bv. via `web-ifc`)
+- 4D in 3D: model per fase tonen (schuif door de bouwvolgorde)
+- BCF-issues: botsingen uitwisselen met architect/installateur
+- Leidinghoogtes per traject-punt (afschot echt modelleren)
+
 ---
 
 ## 7. Open keuzes (jouw beslissing)

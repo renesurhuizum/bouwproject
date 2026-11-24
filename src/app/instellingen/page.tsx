@@ -14,6 +14,7 @@ const TABLES = [
   "projects", "levels", "walls", "openings", "rooms",
   "electrical", "plumbing", "hvac", "phases", "tasks",
   "budget", "expenses", "materials", "photos", "furniture",
+  "stairs", "columns", "beams", "roofs", "dormers",
 ] as const;
 
 type BackupTable = (typeof TABLES)[number];
