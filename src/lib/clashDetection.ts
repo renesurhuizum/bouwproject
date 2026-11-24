@@ -45,13 +45,35 @@ function segments(path?: Point[]): [Point, Point][] {
 
 const fmtCm = (m: number) => `${Math.round(m * 100)} cm`;
 
+/** Hoogte per traject-punt: lineair van start- naar eindhoogte over de lengte. */
+export function pathHeights(path: Point[], startZ?: number, endZ?: number): number[] | undefined {
+  if (startZ == null && endZ == null) return undefined;
+  const a = startZ ?? endZ!;
+  const b = endZ ?? startZ!;
+  const cum = [0];
+  for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + dist(path[i - 1], path[i]));
+  const total = cum[cum.length - 1] || 1;
+  return cum.map((c) => a + (b - a) * (c / total));
+}
+
+/** Hoogte van een leiding op punt p van segment i. */
+function zAt(run: { zs?: number[]; z?: number; path: Point[] }, i: number, p: Point): number | undefined {
+  if (!run.zs) return run.z;
+  const a = run.path[i];
+  const b = run.path[i + 1];
+  const L = dist(a, b) || 1;
+  const t = Math.max(0, Math.min(1, dist(a, p) / L));
+  return run.zs[i] + (run.zs[i + 1] - run.zs[i]) * t;
+}
+
 // ── Leidingtrajecten verzamelen (water, afvoer, cv, ventilatie) ───────────────
 
 interface Run {
   id: string;
   label: string;
   path: Point[];
-  z?: number; // hoogte boven vloer (m), onbekend = undefined
+  z?: number; // gemiddelde hoogte boven vloer (m), onbekend = undefined
+  zs?: number[]; // hoogte per traject-punt (afschot), indien bekend
   radius: number; // m (halve diameter)
   isDrain: boolean;
 }
@@ -67,7 +89,9 @@ function collectRuns(lm: LevelModel): Run[] {
   for (const p of lm.plumbing) {
     if (p.type === "fixture" || !p.path || p.path.length < 2) continue;
     const d = (p.diameter ?? (p.type === "drain" ? 50 : 16)) / 1000;
-    runs.push({ id: p.id, label: label[p.type], path: p.path, z: p.heightZ, radius: d / 2, isDrain: p.type === "drain" });
+    const zs = pathHeights(p.path, p.startZ ?? p.heightZ, p.endZ ?? p.heightZ);
+    const z = zs ? (zs[0] + zs[zs.length - 1]) / 2 : undefined;
+    runs.push({ id: p.id, label: label[p.type], path: p.path, z, zs, radius: d / 2, isDrain: p.type === "drain" });
   }
   for (const h of lm.hvac) {
     if (!h.path || h.path.length < 2) continue;
@@ -88,7 +112,7 @@ function collectRuns(lm: LevelModel): Run[] {
 
 function checkRunsVsStructure(lm: LevelModel, runs: Run[], push: (c: Omit<Clash, "levelId" | "levelName">) => void) {
   for (const run of runs) {
-    for (const [a, b] of segments(run.path)) {
+    for (const [si, [a, b]] of segments(run.path).entries()) {
       // Kolommen: een leiding mag nooit door een kolom.
       for (const col of lm.columns) {
         const d = distToSegment(col.position, a, b);
@@ -108,7 +132,8 @@ function checkRunsVsStructure(lm: LevelModel, runs: Run[], push: (c: Omit<Clash,
         const p = segmentIntersection(a, b, beam.start, beam.end);
         if (!p) continue;
         const h = BEAM_PROFILE_DIMS[beam.profile].h;
-        if (run.z == null) {
+        const rz = zAt(run, si, p);
+        if (rz == null) {
           push({
             severity: "info",
             category: "leidingen",
@@ -118,12 +143,12 @@ function checkRunsVsStructure(lm: LevelModel, runs: Run[], push: (c: Omit<Clash,
           });
           continue;
         }
-        const gap = Math.abs(run.z - beam.height) - h / 2 - run.radius;
+        const gap = Math.abs(rz - beam.height) - h / 2 - run.radius;
         if (gap < 0) {
           push({
             severity: "error",
             category: "leidingen",
-            message: `${run.label} op ${fmtCm(run.z)} botst met stalen balk ${beam.profile} (op ${fmtCm(beam.height)}) — boren in een stalen ligger mag niet zonder constructeur`,
+            message: `${run.label} op ${fmtCm(rz)} botst met stalen balk ${beam.profile} (op ${fmtCm(beam.height)}) — boren in een stalen ligger mag niet zonder constructeur`,
             entityIds: [run.id, beam.id],
             at: p,
           });
@@ -145,7 +170,8 @@ function checkRunsVsStructure(lm: LevelModel, runs: Run[], push: (c: Omit<Clash,
         if (!p) continue;
         // Raken aan het eind telt niet als doorvoer (leiding stopt bij de muur).
         if (dist(p, a) < 0.05 || dist(p, b) < 0.05) continue;
-        if (run.z != null && run.z > wall.height) continue;
+        const wz = zAt(run, si, p);
+        if (wz != null && wz > wall.height) continue;
         // Gaat de leiding door een bestaande opening? Dan geen sparing nodig.
         const { t } = projectOnSegment(p, wall.start, wall.end);
         const along = t * dist(wall.start, wall.end);
@@ -153,7 +179,7 @@ function checkRunsVsStructure(lm: LevelModel, runs: Run[], push: (c: Omit<Clash,
           (o) =>
             o.wallId === wall.id &&
             Math.abs(o.offset - along) < o.width / 2 &&
-            (run.z == null || (run.z >= o.sillHeight && run.z <= o.sillHeight + o.height)),
+            (wz == null || (wz >= o.sillHeight && wz <= o.sillHeight + o.height)),
         );
         if (throughOpening) {
           push({
@@ -186,15 +212,17 @@ function checkRunsVsRuns(runs: Run[], push: (c: Omit<Clash, "levelId" | "levelNa
       const A = runs[i];
       const B = runs[j];
       if (A.z == null || B.z == null) continue; // zonder hoogte: kruisen is normaal (over/onder)
-      for (const [a, b] of segments(A.path)) {
-        for (const [c, d] of segments(B.path)) {
+      for (const [ai, [a, b]] of segments(A.path).entries()) {
+        for (const [bi, [c, d]] of segments(B.path).entries()) {
           const p = segmentIntersection(a, b, c, d);
           if (!p) continue;
-          if (Math.abs(A.z - B.z) < A.radius + B.radius) {
+          const za = zAt(A, ai, p)!;
+          const zb = zAt(B, bi, p)!;
+          if (Math.abs(za - zb) < A.radius + B.radius) {
             push({
               severity: "error",
               category: "leidingen",
-              message: `${A.label} en ${B.label} kruisen op dezelfde hoogte (${fmtCm(A.z)}) — één van beide moet over/onder`,
+              message: `${A.label} en ${B.label} kruisen op dezelfde hoogte (${fmtCm(za)}) — één van beide moet over/onder`,
               entityIds: [A.id, B.id],
               at: p,
             });
@@ -221,21 +249,6 @@ function checkDrains(lm: LevelModel, runs: Run[], push: (c: Omit<Clash, "levelId
             at: fx.position,
           });
         }
-      }
-    }
-    // Lange horizontale afvoer → afschot kost hoogte.
-    for (const d of near) {
-      let len = 0;
-      for (const [a, b] of segments(d.path)) len += dist(a, b);
-      const drop = len * 0.01; // min. 1 cm/m afschot
-      if (len > 6) {
-        push({
-          severity: "info",
-          category: "leidingen",
-          message: `Afvoer van ${FIXTURE_LABEL[fx.fixture]} is ${len.toFixed(1)} m lang — met 1 cm/m afschot zakt hij ${fmtCm(drop)}; check of dit in vloer/kruipruimte past`,
-          entityIds: [fx.id, d.id],
-          at: fx.position,
-        });
       }
     }
   }
@@ -374,20 +387,6 @@ function checkOpenings(lm: LevelModel, push: (c: Omit<Clash, "levelId" | "levelN
             message: `Slechts ${fmtCm(gap)} metselwerk tussen twee openingen — te smal voor een stabiel penant; overweeg één latei/kozijn`,
             entityIds: [o.id, next.id],
             at: at(o),
-          });
-        }
-      }
-      // Grote opening in dragende muur zonder balk erboven → latei nodig.
-      if (w.loadBearing && w.status !== "demolish" && o.width > 1.0 && o.type !== "passage") {
-        const p = at(o);
-        const hasBeam = lm.beams.some((b) => distToSegment(p, b.start, b.end) < w.thickness + 0.1);
-        if (!hasBeam) {
-          push({
-            severity: "info",
-            category: "structuur",
-            message: `Opening van ${fmtCm(o.width)} in dragende muur — vergeet de latei niet (staal of prefab beton, oplegging ≥ 10 cm per zijde)`,
-            entityIds: [o.id, w.id],
-            at: p,
           });
         }
       }

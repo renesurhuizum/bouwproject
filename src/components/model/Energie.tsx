@@ -19,7 +19,7 @@ import {
   DESIGN_TEMP_INSIDE,
   type ScenarioKey,
 } from "@/lib/thermal";
-import { update } from "@/lib/db/repo";
+import { mUpdate as update } from "@/lib/db/mutate";
 import { useShowOnPlan } from "./useShowOnPlan";
 
 const fmtW = (w: number) => (w >= 1000 ? `${(w / 1000).toFixed(1).replace(".", ",")} kW` : `${Math.round(w)} W`);

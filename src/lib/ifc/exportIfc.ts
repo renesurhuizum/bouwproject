@@ -22,6 +22,7 @@ import { buildRoof } from "../roofGeometry";
 import { bounds, dist, polygonArea } from "../geometry";
 import { isExternalWall, openingU, uFromRc, wallRc, roofRc } from "../thermal";
 import { nvoArea } from "../validation";
+import { pathHeights } from "../clashDetection";
 import { StepWriter, Raw, enumv, typed, ifcGuid, type Ref, type StepValue } from "./step";
 
 const P = (p: Point): [number, number] => [p.x, -p.y];
@@ -474,7 +475,8 @@ function exportMep(c: Ctx, lm: LevelModel, storeyPl: Ref, out: Ref[]) {
       continue;
     }
     const d = (p.diameter ?? (p.type === "drain" ? 50 : 16)) / 1000;
-    exportRun(c, storeyPl, out, p.id, p.path, p.heightZ ?? (p.type === "drain" ? 0.05 : 0.1), d, "IFCPIPESEGMENT", pipeName[p.type], pipeStyle[p.type]);
+    const def = p.type === "drain" ? 0.05 : 0.1;
+    exportRun(c, storeyPl, out, p.id, p.path, pathHeights(p.path ?? [], p.startZ ?? p.heightZ ?? def, p.endZ ?? p.heightZ ?? def), d, "IFCPIPESEGMENT", pipeName[p.type], pipeStyle[p.type]);
   }
 
   // HVAC
@@ -499,9 +501,11 @@ function exportMep(c: Ctx, lm: LevelModel, storeyPl: Ref, out: Ref[]) {
   }
 }
 
-function exportRun(c: Ctx, storeyPl: Ref, out: Ref[], id: string, path: { x: number; y: number }[] | undefined, z: number, diameter: number, entity: string, name: string, style: string) {
+function exportRun(c: Ctx, storeyPl: Ref, out: Ref[], id: string, path: { x: number; y: number }[] | undefined, zIn: number | number[] | undefined, diameter: number, entity: string, name: string, style: string) {
   if (!path || path.length < 2) return;
   for (let i = 0; i < path.length - 1; i++) {
+    // Afschot: per segment de gemiddelde hoogte (horizontaal geëxporteerd).
+    const z = Array.isArray(zIn) ? (zIn[i] + zIn[i + 1]) / 2 : (zIn ?? 0);
     const L = dist(path[i], path[i + 1]);
     if (L < 0.005) continue;
     const [sx, sy] = P(path[i]);

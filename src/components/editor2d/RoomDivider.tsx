@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { LayoutDashboard, Plus, Minus, Wand2, X } from "lucide-react";
-import { create } from "@/lib/db/repo";
+import { mBatch, mCreate } from "@/lib/db/mutate";
 import { useEditor } from "@/lib/store/editor";
 import {
   generateFloorplan,
@@ -121,10 +121,13 @@ export function RoomDivider({ divideRect, onClear }: Props) {
       };
       const layout = generateFloorplan(divideRect, rooms, opts);
 
+      // Een gegenereerde indeling is één undo-stap — anders kost terugdraaien
+      // tientallen keren Ctrl+Z.
+      await mBatch(async () => {
       // Muren aanmaken — bewaar de DB-IDs voor deurplaatsing.
       const wallIds: string[] = [];
       for (const w of layout.walls) {
-        const created = await create<Wall>("walls", {
+        const created = await mCreate<Wall>("walls", {
           levelId: activeLevelId,
           start: w.start,
           end: w.end,
@@ -139,7 +142,7 @@ export function RoomDivider({ divideRect, onClear }: Props) {
 
       // Ruimtes aanmaken met kleur uit het algoritme.
       for (const r of layout.rooms) {
-        await create<Room>("rooms", {
+        await mCreate<Room>("rooms", {
           levelId: activeLevelId,
           name: r.name,
           polygon: r.polygon,
@@ -151,7 +154,7 @@ export function RoomDivider({ divideRect, onClear }: Props) {
       for (const door of layout.doors) {
         const wallId = wallIds[door.wallIndex];
         if (!wallId) continue;
-        await create<Opening>("openings", {
+        await mCreate<Opening>("openings", {
           wallId,
           type: "door",
           width: door.width,
@@ -160,6 +163,7 @@ export function RoomDivider({ divideRect, onClear }: Props) {
           offset: door.offset,
         });
       }
+      });
 
       onClear();
       setTool("select");

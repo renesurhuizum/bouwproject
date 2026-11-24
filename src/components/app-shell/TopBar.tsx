@@ -15,7 +15,9 @@ export function TopBar() {
   const activeLevelId = useEditor((s) => s.activeLevelId);
   const setActiveLevel = useEditor((s) => s.setActiveLevel);
 
-  const showLevels = pathname === "/plattegrond" || pathname === "/3d";
+  // Op de plattegrond heeft de canvas-eigen LevelSwitcher (met hernoemen,
+  // toevoegen en achtergrondafbeelding) dezelfde tabs al — hier niet nog eens.
+  const showLevels = pathname === "/3d";
 
   return (
     <header className="no-print safe-top z-20 flex items-center justify-between gap-2 border-b border-line bg-paper-raised px-3 pb-2">

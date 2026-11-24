@@ -2,12 +2,21 @@
 
 // Deuren & ramen-laag. Tekent de opening als onderbreking in de muur, met een
 // deurzwaai-symbool (deur) of dubbele lijn (raam).
+//
+// Openingen zitten vast aan een muur, dus ze slepen niet vrij rond: tijdens het
+// slepen wordt de opening op de dichtstbijzijnde muur geprojecteerd en binnen
+// die muur geklemd. Sleep je hem tot bij een andere muur, dan verhuist hij
+// daarheen (wallId + offset in één stap).
 
-import { Fragment } from "react";
-import { Layer, Line, Circle } from "react-konva";
+import { useRef } from "react";
+import { Layer, Line, Circle, Group } from "react-konva";
+import type { KonvaEventObject } from "konva/lib/Node";
 import type { Opening, Wall, Point } from "@/lib/domain/types";
 import { OPENING_COLOR } from "@/lib/domain/constants";
-import { metersToScreen, metersToPx, type ViewState } from "./viewport";
+import { projectOnSegment } from "@/lib/geometry";
+import { mUpdate } from "@/lib/db/mutate";
+import { useEditor } from "@/lib/store/editor";
+import { metersToScreen, metersToPx, BASE_PPM, type ViewState } from "./viewport";
 
 interface Props {
   view: ViewState;
@@ -21,15 +30,24 @@ function add(a: Point, b: Point, s: number): Point {
   return { x: a.x + b.x * s, y: a.y + b.y * s };
 }
 
+function wallLength(w: Wall): number {
+  return Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
+}
+
 export function OpeningsLayer({ view, walls, openings, selectedId, onSelect }: Props) {
   const wallById = new Map(walls.map((w) => [w.id, w]));
+  const tool = useEditor((s) => s.tool);
+  const lockedLayers = useEditor((s) => s.lockedLayers);
+  const draggable = tool === "select" && !lockedLayers.structure;
+  // Waar de opening tijdens het slepen terechtkomt; gevuld door dragBoundFunc.
+  const dropRef = useRef<{ wallId: string; offset: number } | null>(null);
 
   return (
     <Layer>
       {openings.map((op) => {
         const wall = wallById.get(op.wallId);
         if (!wall) return null;
-        const len = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+        const len = wallLength(wall);
         if (len < 0.01) return null;
 
         const dir = { x: (wall.end.x - wall.start.x) / len, y: (wall.end.y - wall.start.y) / len };
@@ -105,24 +123,67 @@ export function OpeningsLayer({ view, walls, openings, selectedId, onSelect }: P
           );
         }
 
+        const pxPerM = BASE_PPM * view.scale;
+
+        // Houd de opening op een muur: projecteer het middelpunt op de
+        // dichtstbijzijnde muur en klem hem binnen die muur.
+        function dragBoundFunc(pos: { x: number; y: number }) {
+          const dropped = {
+            x: centerM.x + pos.x / pxPerM,
+            y: centerM.y + pos.y / pxPerM,
+          };
+          let best: { wall: Wall; offset: number; d: number } | null = null;
+          for (const w of walls) {
+            const wLen = wallLength(w);
+            if (wLen < op.width) continue; // te kort voor deze opening
+            const { t, dist: d } = projectOnSegment(dropped, w.start, w.end);
+            const offset = Math.min(Math.max(t * wLen, half), wLen - half);
+            if (!best || d < best.d) best = { wall: w, offset, d };
+          }
+          if (!best) return { x: 0, y: 0 };
+          dropRef.current = { wallId: best.wall.id, offset: best.offset };
+          const bLen = wallLength(best.wall);
+          const bDir = {
+            x: (best.wall.end.x - best.wall.start.x) / bLen,
+            y: (best.wall.end.y - best.wall.start.y) / bLen,
+          };
+          const target = add(best.wall.start, bDir, best.offset);
+          return { x: (target.x - centerM.x) * pxPerM, y: (target.y - centerM.y) * pxPerM };
+        }
+
+        async function handleDragEnd(e: KonvaEventObject<DragEvent>) {
+          e.target.position({ x: 0, y: 0 });
+          const drop = dropRef.current;
+          dropRef.current = null;
+          if (!drop) return;
+          const patch: Record<string, unknown> = { offset: drop.offset };
+          if (drop.wallId !== op.wallId) patch.wallId = drop.wallId;
+          await mUpdate("openings", op.id, patch);
+        }
+
         return (
-          <Fragment key={op.id}>
+          <Group
+            key={op.id}
+            id={op.id}
+            name="opening"
+            draggable={draggable}
+            dragBoundFunc={dragBoundFunc}
+            onDragEnd={(e) => void handleDragEnd(e)}
+            onClick={() => onSelect(op.id)}
+            onTap={() => onSelect(op.id)}
+          >
             {cut}
             {selected && (
               <Circle x={center.x} y={center.y} radius={metersToPx(half, view) + 6} stroke="#fb923c" strokeWidth={2} />
             )}
             {symbol}
-            {/* Onzichtbaar tikvlak voor selectie */}
+            {/* Onzichtbaar tik-/sleepvlak */}
             <Line
-              id={op.id}
-              name="opening"
               points={[a.x, a.y, b.x, b.y]}
               stroke="transparent"
               strokeWidth={Math.max(wallW, 22)}
-              onClick={() => onSelect(op.id)}
-              onTap={() => onSelect(op.id)}
             />
-          </Fragment>
+          </Group>
         );
       })}
     </Layer>

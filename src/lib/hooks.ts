@@ -5,7 +5,7 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { getDB } from "./db/db";
 import { loadProjectModel } from "./model";
-import type { Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer } from "./domain/types";
+import type { Furniture, HvacItem, Staircase, Column, Beam, Roof, Dormer, SectionLine } from "./domain/types";
 
 function notDeleted<T extends { deleted?: boolean }>(rows: T[] | undefined): T[] {
   return (rows ?? []).filter((r) => !r.deleted);
@@ -150,6 +150,37 @@ export function useBudget(projectId?: string | null) {
   );
 }
 
+// Eindgroepen (meterkast) van het project.
+export function useCircuits(projectId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!projectId) return [];
+      const rows = notDeleted(
+        await getDB().circuits.where("projectId").equals(projectId).toArray(),
+      );
+      return rows.sort((a, b) =>
+        a.number.localeCompare(b.number, "nl", { numeric: true }),
+      );
+    },
+    [projectId],
+    [],
+  );
+}
+
+// Alle elektra van het project (over alle verdiepingen) — nodig omdat een groep
+// verdiepingen kan overspannen.
+export function useAllElectrical(levelIds: string[]) {
+  const key = levelIds.join(",");
+  return useLiveQuery(
+    async () => {
+      if (levelIds.length === 0) return [];
+      return notDeleted(await getDB().electrical.where("levelId").anyOf(levelIds).toArray());
+    },
+    [key],
+    [],
+  );
+}
+
 export function useMaterials(projectId?: string | null) {
   return useLiveQuery(
     async () => {
@@ -226,6 +257,17 @@ export function useRoofs(levelId?: string | null) {
     },
     [levelId],
     [] as Roof[],
+  );
+}
+
+export function useSections(levelId?: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!levelId) return [];
+      return notDeleted(await getDB().sections.where("levelId").equals(levelId).toArray());
+    },
+    [levelId],
+    [] as SectionLine[],
   );
 }
 

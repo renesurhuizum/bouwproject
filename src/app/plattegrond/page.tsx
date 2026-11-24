@@ -4,13 +4,14 @@
 
 import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Pencil, Sparkles, ListChecks } from "lucide-react";
+import { Pencil, Sparkles, ListChecks, Zap } from "lucide-react";
 import { useEditor } from "@/lib/store/editor";
 import { Toolbar } from "@/components/editor2d/Toolbar";
 import { SelectionPanel } from "@/components/editor2d/SelectionPanel";
 import { ComplianceBanner } from "@/components/editor2d/ComplianceBanner";
 import { LevelSwitcher } from "@/components/editor2d/LevelSwitcher";
 import { IndelingGenerator } from "@/components/indeling/IndelingGenerator";
+import { GroepenkastPanel } from "@/components/editor2d/GroepenkastPanel";
 import { useProject } from "@/lib/hooks";
 import { update } from "@/lib/db/repo";
 
@@ -29,6 +30,7 @@ const PlanEditor = dynamic(
 
 export default function PlattegrondPage() {
   const [showGen, setShowGen] = useState(false);
+  const [showGroepenkast, setShowGroepenkast] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -61,9 +63,15 @@ export default function PlattegrondPage() {
     <div className="absolute inset-0 overflow-hidden">
       <PlanEditor />
       <LevelSwitcher />
-      <SelectionPanel />
       <ComplianceBanner />
-      <Toolbar />
+
+      {/* Onderste bediening: het selectie-paneel stapelt in normale flow bóven
+          de toolbar, zodat een hoger contextueel paneel (bv. Daktype) het
+          paneel nooit kan overlappen. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center">
+        <SelectionPanel />
+        <Toolbar />
+      </div>
 
       {/* Projectnaam — klikbaar om te bewerken */}
       {project && (
@@ -100,6 +108,13 @@ export default function PlattegrondPage() {
           <Sparkles size={15} /> Indeling
         </button>
         <button
+          onClick={() => setShowGroepenkast(true)}
+          className="flex items-center gap-1.5 rounded-xl border border-blueprint/40 bg-paper-raised/95 px-3 py-2 text-xs font-semibold text-blueprint shadow-lg backdrop-blur"
+          title="Eindgroepen beheren en kabellengtes bekijken"
+        >
+          <Zap size={15} /> Groepen
+        </button>
+        <button
           onClick={togglePhaseOverlay}
           className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur ${
             phaseOverlay
@@ -113,6 +128,7 @@ export default function PlattegrondPage() {
       </div>
 
       {showGen && <IndelingGenerator onClose={() => setShowGen(false)} />}
+      {showGroepenkast && <GroepenkastPanel onClose={() => setShowGroepenkast(false)} />}
     </div>
   );
 }

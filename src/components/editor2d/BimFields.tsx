@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import type { Opening, Roof, Wall } from "@/lib/domain/types";
-import { update } from "@/lib/db/repo";
+import { mUpdate as update } from "@/lib/db/mutate";
 import { useProject, usePhases, useRooms, useWalls } from "@/lib/hooks";
 import {
   isExternalWall,
