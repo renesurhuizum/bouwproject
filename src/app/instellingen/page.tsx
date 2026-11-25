@@ -4,7 +4,9 @@
 // en data-beheer (backup downloaden / importeren / project resetten).
 
 import { useRef, useState } from "react";
-import { Download, Upload, RotateCcw, Compass, Check } from "lucide-react";
+import { Download, Upload, RotateCcw, Compass, Check, House } from "lucide-react";
+import { laadOntwerpDeBoer, ONTWERP_NAAM, ONTWERP_TEKENINGEN } from "@/lib/templates/ontwerpDeBoer";
+import { useEditor } from "@/lib/store/editor";
 import { useProject } from "@/lib/hooks";
 import { update } from "@/lib/db/repo";
 import { getDB, type BouwDB } from "@/lib/db/db";
@@ -54,6 +56,28 @@ export default function InstellingenPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const setActiveLevel = useEditor((st) => st.setActiveLevel);
+
+  async function loadDesign() {
+    if (!project) return;
+    if (
+      !confirm(
+        "Het schetsontwerp laden vervangt alle verdiepingen, muren, ruimtes, installaties en inrichting van dit project. " +
+          "Fasering, kosten en taken blijven staan. Tip: download eerst een backup. Doorgaan?",
+      )
+    )
+      return;
+    setBusy("design");
+    try {
+      const { groundLevelId } = await laadOntwerpDeBoer(project.id);
+      setActiveLevel(groundLevelId);
+      alert("Ontwerp geladen. Bekijk het in 3D of op de plattegrond.");
+    } catch (e) {
+      alert("Laden mislukt: " + (e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   function flashSaved() {
     setSaved(true);
@@ -219,6 +243,35 @@ export default function InstellingenPage() {
               Bepaalt het startpunt van de tijdlijn (Gantt).
             </span>
           </label>
+        </section>
+
+        {/* Basisontwerp */}
+        <section className="space-y-3 rounded-card border border-line bg-paper-raised p-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+            Basisontwerp
+          </h2>
+          <p className="text-sm text-ink-700">{ONTWERP_NAAM}</p>
+          <p className="text-[11px] text-ink-400">
+            Voorhuis (bestaand) in Vandersanden Hubertus met trasraam Carbon, achterhuis nieuw in zwart
+            hout met dakpanelen RAL 7024, overdekt terras en glazen achtergevel. Maten uit de schetsen
+            (1:100) — controleer ze tegen de definitieve tekeningen.
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {ONTWERP_TEKENINGEN.map((t) => (
+              <a key={t.src} href={t.src} target="_blank" rel="noreferrer" className="group block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={t.src} alt={t.titel} className="aspect-[4/3] w-full rounded-lg border border-line object-cover" />
+                <span className="mt-0.5 block truncate text-[11px] text-ink-500 group-hover:text-ink-900">{t.titel}</span>
+              </a>
+            ))}
+          </div>
+          <button
+            onClick={loadDesign}
+            disabled={!!busy}
+            className="flex items-center gap-2 rounded-lg bg-ink-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            <House size={16} /> {busy === "design" ? "Bezig…" : "Ontwerp (opnieuw) laden"}
+          </button>
         </section>
 
         {/* Noordrichting */}

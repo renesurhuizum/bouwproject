@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Roof } from "./domain/types";
 import {
   buildRoof,
+  gableRoofHeightAt,
   cutRoofHoles,
   dormerHoles,
   roofFootprint,
@@ -210,5 +211,27 @@ describe("roofFootprint", () => {
 
   it("geeft null zonder muren", () => {
     expect(roofFootprint(gable, [])).toBeNull();
+  });
+});
+
+describe("buildRoof met wolfseind", () => {
+  const opts = { gableEnds: false, hipStart: { run: 1.8, foot: 0.7 }, hipEnd: { run: 1.2, foot: 0 } };
+
+  it("geen enkele normaal wijst naar beneden", () => {
+    for (const [, ny] of faceNormals(buildRoof("gable", 12, 11, 45, 0.4, opts))) {
+      expect(ny).toBeGreaterThanOrEqual(-1e-9);
+    }
+  });
+
+  it("de nok begint en eindigt op de run van het schild", () => {
+    const m = buildRoof("gable", 12, 11, 45, 0.4, opts);
+    expect(m.ridgeStart).toBeCloseTo(-6.4 + 1.8, 6);
+    expect(m.ridgeEnd).toBeCloseTo(6.4 - 1.2, 6);
+  });
+
+  it("dakhoogte daalt in het schild naar de onderrand", () => {
+    // Aan de voorrand (x = −hw) ligt het schild op `foot`; op de nok op volle hoogte.
+    expect(gableRoofHeightAt(12, 11, 45, 0.4, -6.4, 0, opts)).toBeCloseTo(0.7, 6);
+    expect(gableRoofHeightAt(12, 11, 45, 0.4, 0, 0, opts)).toBeCloseTo(5.9, 6);
   });
 });

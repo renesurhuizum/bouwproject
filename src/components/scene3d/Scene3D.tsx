@@ -32,6 +32,7 @@ import {
   dormerHoles,
   roofFootprint,
   roofHeightAt,
+  gableRoofHeightAt,
   toRoofLocal,
   DORMER_DEPTH_M,
   type RoofFootprint,
@@ -42,6 +43,7 @@ import { mCreate as dbCreate } from "@/lib/db/mutate";
 import { useEditor } from "@/lib/store/editor";
 import { use3DEdit } from "./use3DEdit";
 import { WalkthroughMode } from "./WalkthroughMode";
+import { facadeTextureFor, facadeTextureWorldUV, TILE_SIZE, ROOF_TILE_SIZE, roofTextures } from "./facadeTextures";
 import { BuildSequenceBar } from "./BuildSequenceBar";
 import {
   useBuildSequence,
@@ -67,6 +69,10 @@ const STATUS_3D: Record<Wall["status"], { color: string; opacity: number }> = {
   demolish: { color: "#dc2626", opacity: 0.35 },
 };
 
+const NO_OPENINGS: Opening[] = [];
+const INTERIOR_PLASTER = "#efebe4";
+const DEFAULT_FRAME = "#45494e"; // RAL 7024 grafietgrijs
+
 interface Box {
   localX: number; // midden langs de muur (lokaal, -L/2..L/2)
   y: number; // midden hoogte
@@ -74,83 +80,293 @@ interface Box {
   h: number; // hoogte van het segment
 }
 
-// Splits een muur in massieve segmenten rond de openingen (echte gaten).
-function wallBoxes(length: number, height: number, openings: Opening[]): Box[] {
+// Splits een muur (of een horizontale band y0..y1 ervan) in massieve
+// segmenten rond de openingen (echte gaten).
+function wallBoxes(length: number, y0: number, y1: number, openings: Opening[]): Box[] {
   const clamp = (v: number) => Math.max(0, Math.min(length, v));
   const ops = openings
     .map((o) => ({ s: clamp(o.offset - o.width / 2), e: clamp(o.offset + o.width / 2), o }))
-    .filter((x) => x.e > x.s)
+    .filter((x) => x.e > x.s && x.o.sillHeight < y1 && x.o.sillHeight + x.o.height > y0)
     .sort((a, b) => a.s - b.s);
 
   const boxes: Box[] = [];
-  const solid = (a: number, b: number) => {
-    if (b - a < 0.001) return;
-    boxes.push({ localX: (a + b) / 2 - length / 2, y: height / 2, w: b - a, h: height });
+  const push = (a: number, b: number, ya: number, yb: number) => {
+    if (b - a < 0.001 || yb - ya < 0.001) return;
+    boxes.push({ localX: (a + b) / 2 - length / 2, y: (ya + yb) / 2, w: b - a, h: yb - ya });
   };
 
   let cursor = 0;
   for (const { s, e, o } of ops) {
-    if (s > cursor) solid(cursor, s);
+    if (s > cursor) push(cursor, s, y0, y1);
+    const a = Math.max(s, cursor);
     const top = o.sillHeight + o.height;
-    if (o.sillHeight > 0.001) {
-      boxes.push({ localX: (s + e) / 2 - length / 2, y: o.sillHeight / 2, w: e - s, h: o.sillHeight });
-    }
-    if (top < height - 0.001) {
-      boxes.push({ localX: (s + e) / 2 - length / 2, y: (top + height) / 2, w: e - s, h: height - top });
-    }
+    push(a, e, y0, Math.min(o.sillHeight, y1));
+    push(a, e, Math.max(top, y0), y1);
     cursor = Math.max(cursor, e);
   }
-  if (cursor < length) solid(cursor, length);
+  if (cursor < length) push(cursor, length, y0, y1);
   return boxes;
 }
 
-function WallMesh({ wall, openings, wallColor, highlight }: { wall: Wall; openings: Opening[]; wallColor?: string; highlight?: boolean }) {
+// Contour van een wand met schuine bovenkant en/of topgevel, met deuren als
+// inkepingen in de onderrand en ramen als gaten.
+function shapedWallGeometry(wall: Wall, length: number, bottom: number, openings: Opening[]) {
+  const L = length;
+  const h0 = wall.height;
+  const h1 = wall.heightEnd ?? wall.height;
+  const peak = wall.gablePeak ?? 0;
+  const topAt = (s: number) => {
+    const lin = h0 + (h1 - h0) * (s / L);
+    return peak > 0 ? lin + peak * (1 - Math.abs(s - L / 2) / (L / 2)) : lin;
+  };
+  const x = (s: number) => s - L / 2;
+  const eps = 0.02;
+  const inside = openings
+    .map((o) => ({ s: o.offset - o.width / 2, e: o.offset + o.width / 2, o }))
+    .filter(({ s, e, o }) => {
+      const top = o.sillHeight + o.height;
+      return s > eps && e < L - eps && top < Math.min(topAt(s), topAt(e)) - eps;
+    })
+    .sort((a, b) => a.s - b.s);
+
+  const shape = new THREE.Shape();
+  shape.moveTo(x(0), bottom);
+  for (const { s, e, o } of inside) {
+    if (o.sillHeight > bottom + 0.001) continue; // gat, geen inkeping
+    const top = o.sillHeight + o.height;
+    shape.lineTo(x(s), bottom);
+    shape.lineTo(x(s), top);
+    shape.lineTo(x(e), top);
+    shape.lineTo(x(e), bottom);
+  }
+  shape.lineTo(x(L), bottom);
+  shape.lineTo(x(L), Math.max(bottom + 0.01, h1));
+  if (peak > 0) shape.lineTo(x(L / 2), (h0 + h1) / 2 + peak);
+  shape.lineTo(x(0), Math.max(bottom + 0.01, h0));
+  shape.closePath();
+  for (const { s, e, o } of inside) {
+    if (o.sillHeight <= bottom + 0.001) continue;
+    const hole = new THREE.Path();
+    const top = o.sillHeight + o.height;
+    hole.moveTo(x(s), o.sillHeight);
+    hole.lineTo(x(e), o.sillHeight);
+    hole.lineTo(x(e), top);
+    hole.lineTo(x(s), top);
+    hole.closePath();
+    shape.holes.push(hole);
+  }
+  const g = new THREE.ExtrudeGeometry(shape, { depth: wall.thickness, bevelEnabled: false });
+  g.translate(0, 0, -wall.thickness / 2);
+  return g;
+}
+
+function makeFacadeMaterial(
+  kind: NonNullable<Wall["facade"]>["kind"],
+  color: string,
+  mortar: string | undefined,
+  w: number,
+  h: number,
+  offX: number,
+  offY: number,
+) {
+  const map = facadeTextureFor(kind, color, mortar, w, h);
+  if (map) {
+    const tile = TILE_SIZE[kind];
+    map.offset.set(offX / tile.w, offY / tile.h);
+  }
+  return new THREE.MeshStandardMaterial({
+    map: map ?? undefined,
+    color: map ? "#ffffff" : color,
+    roughness: kind === "brick" ? 0.92 : kind === "plaster" ? 0.95 : 0.75,
+    metalness: 0,
+  });
+}
+
+// Kozijn + glas / deurblad in een sparing (lokale wandcoördinaten).
+function OpeningFill({ o, length, thickness, outside }: { o: Opening; length: number; thickness: number; outside: number }) {
+  if (o.type === "passage") return null;
+  const fw = 0.065; // kozijnbreedte
+  const fd = Math.min(thickness, 0.11);
+  const frame = o.frameColor ?? DEFAULT_FRAME;
+  const z = outside * Math.max(0, thickness / 2 - fd / 2 - 0.04);
+  const isDoor = o.type === "door";
+  const glazed = isDoor ? !!o.glazed : o.glazed !== false;
+  const w = o.width;
+  const h = o.height;
+  const bars: [number, number, number, number][] = [
+    [-w / 2 + fw / 2, 0, fw, h],
+    [w / 2 - fw / 2, 0, fw, h],
+    [0, h / 2 - fw / 2, w, fw],
+  ];
+  if (!isDoor) bars.push([0, -h / 2 + fw / 2, w, fw]);
+  if (glazed && w > 1.3) {
+    const n = Math.max(1, Math.round(w / 1.1) - 1);
+    for (let i = 1; i <= n; i++) bars.push([-w / 2 + (w * i) / (n + 1), 0, fw * 0.8, h]);
+  }
+  // hoge ramen: tussenregel (bovenlicht) op ±60%
+  if (glazed && !isDoor && h > 1.5) bars.push([0, h * 0.1, w, fw * 0.8]);
+  return (
+    <group position={[o.offset - length / 2, o.sillHeight + h / 2, z]}>
+      {bars.map(([bx, by, bw, bh], i) => (
+        <mesh key={i} position={[bx, by, 0]} castShadow>
+          <boxGeometry args={[bw, bh, fd]} />
+          <meshStandardMaterial color={frame} roughness={0.55} metalness={0.1} />
+        </mesh>
+      ))}
+      {glazed ? (
+        <mesh position={[0, isDoor ? -fw / 2 : 0, 0]}>
+          <boxGeometry args={[w - fw * 2, h - (isDoor ? fw : fw * 2), 0.012]} />
+          <meshStandardMaterial color="#9db6c2" transparent opacity={0.32} roughness={0.04} metalness={0.4} depthWrite={false} />
+        </mesh>
+      ) : (
+        <group position={[0, isDoor ? -fw / 2 : 0, 0]}>
+          <mesh castShadow>
+            <boxGeometry args={[w - fw * 2, h - (isDoor ? fw : fw * 2), 0.045]} />
+            <meshStandardMaterial color={shade(frame, 0.85)} roughness={0.6} />
+          </mesh>
+          {/* gesloten paneel: liggende delen */}
+          {!isDoor &&
+            Array.from({ length: Math.max(2, Math.floor((h - fw * 2) / 0.12)) }, (_, i) => i).map((i, _i, arr) => (
+              <mesh key={i} position={[0, -(h - fw * 2) / 2 + ((i + 0.5) * (h - fw * 2)) / arr.length, 0.03]}>
+                <boxGeometry args={[w - fw * 2, 0.012, 0.01]} />
+                <meshStandardMaterial color="#1c1d1f" />
+              </mesh>
+            ))}
+        </group>
+      )}
+    </group>
+  );
+}
+
+function WallMesh({
+  wall,
+  openings,
+  wallColor,
+  outside,
+  realistic,
+  highlight,
+}: {
+  wall: Wall;
+  openings: Opening[];
+  wallColor?: string;
+  outside: number; // +1 / -1 = buitenzijde, 0 = binnenwand
+  realistic: boolean;
+  highlight?: boolean; // 4D: nieuw in de getoonde bouwstap
+}) {
   const length = dist(wall.start, wall.end);
   const style = STATUS_3D[wall.status];
-
-  // Elk muurmateriaal krijgt zijn eigen oppervlak, geschaald op de werkelijke
-  // muurmaat — zo is een steen op een lange muur even groot als op een korte.
-  //
-  // De kleur zit ín de textuur, niet op het materiaal: zou je de statuskleur
-  // er ook nog overheen vermenigvuldigen, dan wordt baksteen knalrood. De
-  // status is daarom een lichte tint in de textuurkleur zelf.
+  const shaped = wall.heightEnd !== undefined || (wall.gablePeak ?? 0) > 0;
+  const facade = realistic && !highlight && wall.status !== "demolish" ? wall.facade : undefined;
+  // Zonder gevelafwerking: oppervlak per muurmateriaal op ware schaal, met de
+  // bouwstatus als lichte tint (zie STATUS_TINT).
   const kind = surfaceForWallMaterial(wall.material);
-  const drawColor = mixHex(
-    wallColor ?? defaultColorFor(kind),
-    wall.status === "existing" ? null : style.color,
-    STATUS_TINT,
-  );
-  const surface = useMemo(
-    () => (style.opacity >= 1 && !highlight ? makeSurface(kind, length, wall.height, drawColor) : null),
-    [kind, drawColor, style.opacity, length, wall.height, highlight],
-  );
-  // 4D: wat in de getoonde fase nieuw is, licht geel op.
-  const finalColor = highlight ? "#facc15" : surface ? "#ffffff" : drawColor;
+  const drawColor = mixHex(wallColor ?? defaultColorFor(kind), wall.status === "existing" ? null : style.color, STATUS_TINT);
+  const plinth = facade?.plinth;
+  const bottom = shaped && plinth ? plinth.height : 0;
+
+  const parts = useMemo(() => {
+    if (length < 0.01) return { boxes: [], shapeGeom: null as THREE.ExtrudeGeometry | null };
+    const surface =
+      realistic && !highlight && style.opacity >= 1
+        ? shaped
+          ? makeSurfaceMeterUv(kind, drawColor)
+          : makeSurface(kind, length, wall.height, drawColor)
+        : null;
+    const plainMat = new THREE.MeshStandardMaterial({
+      color: highlight ? "#facc15" : surface ? "#ffffff" : realistic ? drawColor : style.color,
+      map: surface?.map ?? null,
+      normalMap: surface?.normalMap ?? null,
+      transparent: style.opacity < 1,
+      opacity: style.opacity,
+      roughness: surface?.roughness ?? 0.85,
+      metalness: surface?.metalness ?? 0,
+    });
+    const interiorMat = new THREE.MeshStandardMaterial({ color: wallColor ?? INTERIOR_PLASTER, roughness: 0.95 });
+
+    // Materialen voor een box: [px, nx, py, ny, pz, nz]
+    const boxMats = (b: Box, f: NonNullable<Wall["facade"]> | { kind: NonNullable<Wall["facade"]>["kind"]; color: string; mortarColor?: string } | undefined) => {
+      if (!f) return plainMat;
+      const fm = makeFacadeMaterial(f.kind, f.color, f.mortarColor, b.w, b.h, b.localX - b.w / 2 + length / 2, b.y - b.h / 2);
+      const mats: THREE.Material[] = [fm, fm, fm, fm, fm, fm];
+      if (outside > 0) mats[5] = interiorMat;
+      else if (outside < 0) mats[4] = interiorMat;
+      return mats;
+    };
+
+    const boxes: { b: Box; mat: THREE.Material | THREE.Material[] }[] = [];
+    let shapeGeom: THREE.ExtrudeGeometry | null = null;
+    if (plinth) {
+      for (const b of wallBoxes(length, 0, plinth.height, openings))
+        boxes.push({ b, mat: boxMats(b, { kind: "brick", color: plinth.color, mortarColor: plinth.mortarColor }) });
+    }
+    if (shaped) {
+      shapeGeom = shapedWallGeometry(wall, length, bottom, openings);
+    } else {
+      for (const b of wallBoxes(length, plinth ? plinth.height : 0, wall.height, openings))
+        boxes.push({ b, mat: boxMats(b, facade) });
+    }
+    let shapeMat: THREE.Material | THREE.Material[] = plainMat;
+    if (shapeGeom && facade) {
+      const map = facadeTextureWorldUV(facade.kind, facade.color, facade.mortarColor);
+      shapeMat = new THREE.MeshStandardMaterial({
+        map: map ?? undefined,
+        color: map ? "#ffffff" : facade.color,
+        roughness: facade.kind === "brick" ? 0.92 : 0.75,
+      });
+    }
+    return { boxes, shapeGeom, shapeMat };
+  }, [wall, length, openings, wallColor, outside, realistic, highlight, facade, plinth, shaped, bottom, style, kind, drawColor]);
 
   if (length < 0.01) return null;
   const cx = (wall.start.x + wall.end.x) / 2;
   const cz = (wall.start.y + wall.end.y) / 2;
   const rotY = -angle(wall.start, wall.end);
-  const boxes = wallBoxes(length, wall.height, openings);
 
   return (
     <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
-      {boxes.map((b, i) => (
-        <mesh key={i} position={[b.localX, b.y, 0]} castShadow receiveShadow>
+      {parts.boxes.map(({ b, mat }, i) => (
+        <mesh key={i} position={[b.localX, b.y, 0]} material={mat} castShadow receiveShadow>
           <boxGeometry args={[b.w, b.h, wall.thickness]} />
-          <meshStandardMaterial
-            color={finalColor}
-            map={surface?.map}
-            normalMap={surface?.normalMap}
-            transparent={style.opacity < 1}
-            opacity={style.opacity}
-            roughness={surface?.roughness ?? 0.85}
-            metalness={surface?.metalness ?? 0}
-          />
         </mesh>
+      ))}
+      {parts.shapeGeom && (
+        <mesh geometry={parts.shapeGeom} material={parts.shapeMat} castShadow receiveShadow />
+      )}
+      {openings.map((o) => (
+        <OpeningFill key={o.id} o={o} length={length} thickness={wall.thickness} outside={outside || 1} />
       ))}
     </group>
   );
+}
+
+// Bepaal de buitenzijde van een muur: expliciet (facade.outside), anders via
+// de ruimtes (kant zonder ruimte = buiten), anders t.o.v. het zwaartepunt.
+function wallOutsideSign(wall: Wall, rooms: Room[], center: Point): number {
+  if (!wall.facade) return 0;
+  if (wall.facade.outside) return wall.facade.outside;
+  const a = angle(wall.start, wall.end);
+  const n = { x: -Math.sin(a), y: Math.cos(a) };
+  const inRoom = (p: Point) => rooms.some((r) => r.polygon.length >= 3 && pointInPolygon(p, r.polygon));
+  let score = 0;
+  for (const t of [0.25, 0.5, 0.75]) {
+    const m = { x: wall.start.x + (wall.end.x - wall.start.x) * t, y: wall.start.y + (wall.end.y - wall.start.y) * t };
+    const d = wall.thickness / 2 + 0.3;
+    if (inRoom({ x: m.x + n.x * d, y: m.y + n.y * d })) score -= 1;
+    if (inRoom({ x: m.x - n.x * d, y: m.y - n.y * d })) score += 1;
+  }
+  if (score !== 0) return score > 0 ? 1 : -1;
+  const mid = { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
+  return (mid.x - center.x) * n.x + (mid.y - center.y) * n.y >= 0 ? 1 : -1;
+}
+
+function pointInPolygon(p: Point, poly: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
 }
 
 const FLOOR_COLORS: Record<string, string> = {
@@ -1160,7 +1376,7 @@ function StaircaseModel3D({ stair, totalRise }: { stair: Staircase; totalRise: n
 
 function ColumnModel3D({ col, levelHeight }: { col: Column; levelHeight: number }) {
   const h = col.height ?? levelHeight;
-  const color = CONSTRUCTION_MATERIAL_COLOR[col.material] ?? "#a8a8a8";
+  const color = col.color ?? CONSTRUCTION_MATERIAL_COLOR[col.material] ?? "#a8a8a8";
   const surface = useMemo(
     () => makeSurface(surfaceForWallMaterial(col.material), col.size * 4, h, color),
     [col.material, col.size, h, color],
@@ -1188,10 +1404,11 @@ function ColumnModel3D({ col, levelHeight }: { col: Column; levelHeight: number 
 function BeamModel3D({ beam }: { beam: Beam }) {
   const section = findSection(beam.profile);
   const dims = section ?? BEAM_PROFILE_DIMS[beam.profile] ?? { h: 0.1, w: 0.1 };
-  const isTimber = section?.material === "timber";
+  const isOak = beam.material === "oak";
+  const isTimber = isOak || section?.material === "timber";
   const len = dist(beam.start, beam.end);
   const fw = beam.width ?? dims.w;
-  const fh = dims.h;
+  const fh = isOak ? beam.depth ?? 0.25 : dims.h;
 
   // De herhaling volgt de werkelijke lengte, dus de nerf loopt in de lengte-
   // richting van de balk — dwarse nerf ziet er meteen verkeerd uit.
@@ -1215,6 +1432,21 @@ function BeamModel3D({ beam }: { beam: Beam }) {
       metalness={surface.metalness}
     />
   );
+
+  // Eiken balk / spantbeen, eventueel schuin (heightEnd)
+  if (isOak) {
+    const h1 = beam.heightEnd ?? beam.height;
+    const L3 = Math.hypot(len, h1 - beam.height);
+    const tilt = Math.atan2(h1 - beam.height, len);
+    return (
+      <group position={[cx, (beam.height + h1) / 2, cz]} rotation={[0, rotY, 0]}>
+        <mesh rotation={[0, 0, tilt]} castShadow receiveShadow>
+          <boxGeometry args={[L3, fh, fw]} />
+          <meshStandardMaterial map={surface.map} normalMap={surface.normalMap} roughness={surface.roughness} color="#c9a274" />
+        </mesh>
+      </group>
+    );
+  }
 
   // Hout is massief; alleen staal heeft een I-profiel met flenzen en lijf.
   if (isTimber) {
@@ -1251,24 +1483,35 @@ function BeamModel3D({ beam }: { beam: Beam }) {
 
 const ROOF_COLOR = "#9b4a3a"; // terracotta
 
+const ROOF_THICKNESS: Record<NonNullable<Roof["covering"]>, number> = { reed: 0.35, tiles: 0.1, panels: 0.12, plain: 0.04 };
+
 function RoofMesh3D({
   roof,
   walls,
   dormers,
   baseY,
+  realistic,
 }: {
   roof: Roof;
   walls: Wall[];
   dormers: Dormer[];
   baseY: number;
+  realistic: boolean;
 }) {
   const fp = useMemo(() => roofFootprint(roof, walls), [roof, walls]);
   const W = fp?.W ?? 0;
   const D = fp?.D ?? 0;
+  const isGable = roof.type === "gable" || roof.type === "mansard";
+  // Met een expliciete dakbedekking (riet, pannen, panelen) tekenen we een dik
+  // dakpakket met eigen textuur; anders het standaard pannendak.
+  const covering = realistic && roof.covering && roof.covering !== "plain" ? roof.covering : null;
+  const color = roof.color ?? ROOF_COLOR;
+  const t = covering ? ROOF_THICKNESS[covering] : 0;
 
-  const geom = useMemo(() => {
+  const built = useMemo(() => {
     if (!fp) return null;
-    const raw = buildRoof(roof.type, Math.max(0.5, W), Math.max(0.5, D), roof.pitch, roof.overhang);
+    const opts = { gableEnds: roof.gableEnds ?? true, hipStart: isGable ? roof.hipStart : undefined, hipEnd: isGable ? roof.hipEnd : undefined };
+    const raw = buildRoof(roof.type, Math.max(0.5, W), Math.max(0.5, D), roof.pitch, roof.overhang, opts);
     // Dakkapellen snijden hun footprint uit het dakvlak. Zonder dat gat kijk je
     // vanaf de zolder nog steeds tegen het dak aan en levert de kapel niets op.
     const m = cutRoofHoles(raw, dormerHoles(roof, fp, dormers));
@@ -1279,36 +1522,144 @@ function RoofMesh3D({
     g.setAttribute("uv", new THREE.Float32BufferAttribute(m.uvs, 2));
     g.setIndex(m.indices);
     g.computeVertexNormals();
-    return g;
-  }, [roof, fp, W, D, dormers]);
+    if (!covering) return { m, under: g, top: null as THREE.BufferGeometry | null, edges: null as THREE.BufferGeometry | null };
+
+    // Dik dakpakket: bovenvlak (verschoven over de dikte) met UV's per vlak in
+    // de afschotrichting, plus een rand langs alle vrije randen.
+    const P = (i: number) => new THREE.Vector3(m.positions[i * 3], m.positions[i * 3 + 1], m.positions[i * 3 + 2]);
+    const key = (v: THREE.Vector3) => `${v.x.toFixed(3)},${v.y.toFixed(3)},${v.z.toFixed(3)}`;
+    const tile = ROOF_TILE_SIZE[covering];
+    const up = new THREE.Vector3(0, t, 0);
+    const topPos: number[] = [];
+    const topUv: number[] = [];
+    const edgeCount = new Map<string, [THREE.Vector3, THREE.Vector3, number]>();
+    for (let k = 0; k < m.indices.length; k += 3) {
+      const pts = [P(m.indices[k]), P(m.indices[k + 1]), P(m.indices[k + 2])];
+      const [p0, p1, p2] = pts.map((p) => p.clone().add(up));
+      const n = new THREE.Vector3().subVectors(p1, p0).cross(new THREE.Vector3().subVectors(p2, p0)).normalize();
+      if (n.y < 0) n.negate();
+      const g0 = new THREE.Vector3(0, -1, 0);
+      const d = g0.clone().sub(n.clone().multiplyScalar(g0.dot(n)));
+      if (d.length() < 1e-6) d.set(0, 0, 1);
+      d.normalize();
+      const sv = new THREE.Vector3().crossVectors(n, d).normalize();
+      for (const p of [p0, p1, p2]) {
+        topPos.push(p.x, p.y, p.z);
+        topUv.push(p.dot(sv) / tile.w, p.dot(d) / tile.h);
+      }
+      for (let e = 0; e < 3; e++) {
+        const a = pts[e];
+        const b2 = pts[(e + 1) % 3];
+        const ka = key(a);
+        const kb = key(b2);
+        const ek = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+        const cur = edgeCount.get(ek);
+        edgeCount.set(ek, cur ? [cur[0], cur[1], cur[2] + 1] : [a, b2, 1]);
+      }
+    }
+    const top = new THREE.BufferGeometry();
+    top.setAttribute("position", new THREE.Float32BufferAttribute(topPos, 3));
+    top.setAttribute("uv", new THREE.Float32BufferAttribute(topUv, 2));
+    top.computeVertexNormals();
+    const ePos: number[] = [];
+    const eUv: number[] = [];
+    for (const [pa, pb, c] of edgeCount.values()) {
+      if (c !== 1) continue;
+      const len = pa.distanceTo(pb);
+      const quad = [pa, pb, pb.clone().add(up), pa, pb.clone().add(up), pa.clone().add(up)];
+      const uv = [[0, 0], [len, 0], [len, t], [0, 0], [len, t], [0, t]];
+      quad.forEach((q, i) => {
+        ePos.push(q.x, q.y, q.z);
+        eUv.push(uv[i][0] / tile.w, uv[i][1] / tile.h);
+      });
+    }
+    const edges = new THREE.BufferGeometry();
+    edges.setAttribute("position", new THREE.Float32BufferAttribute(ePos, 3));
+    edges.setAttribute("uv", new THREE.Float32BufferAttribute(eUv, 2));
+    edges.computeVertexNormals();
+    return { m, under: g, top, edges };
+  }, [roof, fp, W, D, dormers, isGable, covering, t]);
 
   // Buitenkant pannen, binnenkant dakbeschot — dat is wat je vanaf de zolder
   // ziet, en het maakt de kap als ruimte herkenbaar.
-  const tiles = useMemo(() => makeSurfaceMeterUv("roof-tile", ROOF_COLOR), []);
+  const tiles = useMemo(() => makeSurfaceMeterUv("roof-tile", color), [color]);
   const boarding = useMemo(() => makeSurfaceMeterUv("wood", "#c2a172"), []);
+  const tex = useMemo(() => (covering ? roofTextures(covering, color) : null), [covering, color]);
 
-  if (!fp || !geom || W <= 0.5 || D <= 0.5) return null;
+  if (!fp || !built || W <= 0.5 || D <= 0.5) return null;
   const rotY = -(roof.ridgeDirection * Math.PI) / 180;
+  const y = roof.baseHeight ?? baseY;
+  const m = built.m;
+
+  if (!covering) {
+    return (
+      <group position={[fp.center.x, y, fp.center.y]} rotation={[0, rotY, 0]}>
+        <mesh geometry={built.under} castShadow receiveShadow>
+          <meshStandardMaterial map={tiles.map} normalMap={tiles.normalMap} roughness={tiles.roughness} metalness={tiles.metalness} side={THREE.FrontSide} />
+        </mesh>
+        <mesh geometry={built.under} receiveShadow>
+          <meshStandardMaterial map={boarding.map} normalMap={boarding.normalMap} roughness={boarding.roughness} side={THREE.BackSide} />
+        </mesh>
+      </group>
+    );
+  }
+
+  const ridgeLen = m.ridgeEnd - m.ridgeStart;
+  const ridgeColor = roof.ridgeColor ?? shade(color, 0.8);
+  const edgeColor = covering === "tiles" ? "#1c1d1f" : undefined;
+  const pitch = (roof.pitch * Math.PI) / 180;
 
   return (
-    <group position={[fp.center.x, baseY, fp.center.y]} rotation={[0, rotY, 0]}>
-      <mesh geometry={geom} castShadow receiveShadow>
-        <meshStandardMaterial
-          map={tiles.map}
-          normalMap={tiles.normalMap}
-          roughness={tiles.roughness}
-          metalness={tiles.metalness}
-          side={THREE.FrontSide}
-        />
+    <group position={[fp.center.x, y, fp.center.y]} rotation={[0, rotY, 0]}>
+      {/* onderzijde: dakbeschot, zichtbaar vanaf de zolder */}
+      <mesh geometry={built.under} receiveShadow>
+        <meshStandardMaterial map={boarding.map} normalMap={boarding.normalMap} roughness={boarding.roughness} side={THREE.DoubleSide} />
       </mesh>
-      <mesh geometry={geom} receiveShadow>
-        <meshStandardMaterial
-          map={boarding.map}
-          normalMap={boarding.normalMap}
-          roughness={boarding.roughness}
-          side={THREE.BackSide}
-        />
-      </mesh>
+      {built.top && (
+        <mesh geometry={built.top} castShadow receiveShadow>
+          <meshStandardMaterial
+            map={tex?.map ?? undefined}
+            bumpMap={tex?.bump ?? undefined}
+            bumpScale={covering === "tiles" ? 3 : 1.2}
+            color={tex ? "#ffffff" : color}
+            roughness={covering === "reed" ? 0.97 : covering === "tiles" ? 0.5 : 0.6}
+            metalness={covering === "panels" ? 0.3 : 0}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+      {built.edges && (
+        <mesh geometry={built.edges} castShadow>
+          <meshStandardMaterial map={edgeColor ? undefined : tex?.map ?? undefined} color={edgeColor ?? (tex ? "#c8c0b0" : color)} roughness={0.9} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+      {isGable && (
+        // nokafwerking
+        <mesh position={[(m.ridgeStart + m.ridgeEnd) / 2, m.ridgeHeight + t + 0.02, 0]} rotation={[Math.PI / 4, 0, 0]} castShadow>
+          <boxGeometry args={[ridgeLen + (covering === "reed" ? 0.2 : 0.05), covering === "reed" ? 0.3 : 0.18, covering === "reed" ? 0.3 : 0.18]} />
+          <meshStandardMaterial color={ridgeColor} roughness={0.45} metalness={covering === "reed" ? 0.5 : 0.1} />
+        </mesh>
+      )}
+      {isGable &&
+        dormers
+          .filter((dm) => dm.type === "velux")
+          .map((dm) => {
+            const lp = toRoofLocal(dm.position, roof, fp);
+            const hh = gableRoofHeightAt(W, D, roof.pitch, roof.overhang, lp.x, lp.y, { hipStart: roof.hipStart, hipEnd: roof.hipEnd });
+            const sgn = lp.y >= 0 ? 1 : -1;
+            return (
+              <group key={dm.id} position={[lp.x, hh + t + 0.03, lp.y]} rotation={[sgn * pitch, 0, 0]}>
+                <mesh castShadow>
+                  <boxGeometry args={[dm.width + 0.1, 0.09, dm.height + 0.1]} />
+                  <meshStandardMaterial color="#45494e" roughness={0.5} metalness={0.3} />
+                </mesh>
+                <mesh position={[0, 0.05, 0]}>
+                  <boxGeometry args={[dm.width - 0.08, 0.01, dm.height - 0.08]} />
+                  <meshStandardMaterial color="#2a3a46" roughness={0.05} metalness={0.6} />
+                </mesh>
+              </group>
+            );
+          })}
     </group>
   );
 }
@@ -1340,7 +1691,7 @@ function DormerMesh3D({
   const outward = local && local.y < 0 ? -1 : 1;
   const heightAt = (z: number) =>
     roof && fp && local
-      ? roofHeightAt(roof.type, fp.W, fp.D, roof.pitch, roof.overhang, { x: local.x, y: z })
+      ? roofHeightAt(roof.type, fp.W, fp.D, roof.pitch, roof.overhang, { x: local.x, y: z }, { hipStart: roof.hipStart, hipEnd: roof.hipEnd })
       : 0;
 
   if (dormer.type === "velux") {
@@ -1450,12 +1801,14 @@ function LevelScene({
   phaseOrders,
   selectedFurnitureId,
   gizmoMode,
+  realistic,
 }: {
   level: Level;
   visibleLayers: Record<string, boolean>;
   phaseOrders: Map<string, number>;
   selectedFurnitureId: string | null;
   gizmoMode: "translate" | "rotate";
+  realistic: boolean;
 }) {
   // 4D: bij een gekozen bouwstap alleen tonen wat er op dat moment staat.
   const step = useBuildSequence((s) => s.step);
@@ -1522,6 +1875,15 @@ function LevelScene({
     return m;
   }, [walls, rooms]);
 
+  // Buitenzijde per muur (voor gevelafwerking en de plaats van kozijnen).
+  const outsideById = useMemo(() => {
+    const m = new Map<string, number>();
+    const pts = allWalls.flatMap((w) => [w.start, w.end]);
+    const c = pts.length ? polygonCentroid(pts) : { x: 0, y: 0 };
+    for (const w of allWalls) m.set(w.id, wallOutsideSign(w, rooms, c));
+    return m;
+  }, [allWalls, rooms]);
+
   return (
     <group position={[0, elev, 0]}>
       {visibleLayers.rooms &&
@@ -1530,7 +1892,7 @@ function LevelScene({
           .map((r) => (
             <group key={r.id}>
               <RoomFloor3D room={r} />
-              <RoomCeiling3D room={r} height={level.height} />
+              {!r.noCeiling && <RoomCeiling3D room={r} height={level.height} />}
             </group>
           ))}
       {visibleLayers.structure &&
@@ -1538,8 +1900,10 @@ function LevelScene({
           <WallMesh
             key={w.id}
             wall={w}
-            openings={openingsByWall.get(w.id) ?? []}
+            openings={openingsByWall.get(w.id) ?? NO_OPENINGS}
             wallColor={wallColorById.get(w.id)}
+            outside={outsideById.get(w.id) ?? 0}
+            realistic={realistic}
             highlight={activeAt(wallSpan(w, phaseOrders), step)}
           />
         ))}
@@ -1600,10 +1964,13 @@ function LevelScene({
               walls={allWalls}
               dormers={dormers.filter((d) => d.roofId === r.id)}
               baseY={level.height}
+              realistic={realistic}
             />
           ))}
           {dormers.map((dm) => {
             const host = roofs.find((r) => r.id === dm.roofId) ?? null;
+            // Dakramen in een dak met dakbedekking tekent RoofMesh3D zelf (op het dikke dakpakket).
+            if (dm.type === "velux" && realistic && host?.covering && host.covering !== "plain" && (host.type === "gable" || host.type === "mansard")) return null;
             return (
               <DormerMesh3D
                 key={dm.id}
@@ -1631,6 +1998,7 @@ export function Scene3D() {
   const selectedItem = use3DEdit((s) => s.selectedItem);
   const [walkMode, setWalkMode] = useState(false);
   const [dayMode, setDayMode] = useState(true);
+  const [realistic, setRealistic] = useState(true);
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate">("translate");
 
   // Zonnestand
@@ -1707,6 +2075,12 @@ export function Scene3D() {
   const center = pts.length ? polygonCentroid(pts) : { x: 0, y: 0 };
   const maxElev = levels.length ? levels[levels.length - 1].elevation + levels[levels.length - 1].height : 8;
 
+  // Camera-afstand op basis van de afmeting van het gebouw, zodat je buiten begint.
+  const span = pts.length
+    ? Math.max(...pts.map((p) => p.x)) - Math.min(...pts.map((p) => p.x)) + Math.max(...pts.map((p) => p.y)) - Math.min(...pts.map((p) => p.y))
+    : 0;
+  const camDist = Math.max(maxElev, span * 0.75);
+
   const groundFloorElev = levels[0]?.elevation ?? 0;
   const planB = pts.length
     ? bounds(pts)
@@ -1717,7 +2091,7 @@ export function Scene3D() {
       <Canvas
         shadows
         camera={{
-          position: [center.x + maxElev, maxElev * 0.9, center.y + maxElev],
+          position: [center.x + camDist, Math.max(maxElev * 0.9, camDist * 0.55), center.y + camDist],
           fov: walkMode ? 75 : 50,
         }}
         gl={{
@@ -1778,6 +2152,7 @@ export function Scene3D() {
             phaseOrders={phaseOrders}
             selectedFurnitureId={selectedFurnitureId}
             gizmoMode={gizmoMode}
+            realistic={realistic}
           />
         ))}
 
@@ -1825,6 +2200,13 @@ export function Scene3D() {
           title="Screenshot downloaden (PNG)"
         >
           📷
+        </button>
+        <button
+          className="pointer-events-auto rounded-xl border border-white/20 bg-ink-900/80 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur hover:bg-ink-900"
+          onClick={() => setRealistic((r) => !r)}
+          title={realistic ? "Toon bouwstatus-kleuren (bestaand/nieuw/sloop)" : "Toon materialen (levensecht)"}
+        >
+          {realistic ? "Status" : "Materialen"}
         </button>
         <button
           className={`pointer-events-auto rounded-xl border border-white/20 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur ${

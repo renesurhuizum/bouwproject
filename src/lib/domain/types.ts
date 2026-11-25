@@ -21,6 +21,7 @@ export interface Project extends Entity {
   description?: string;
   northDegrees?: number;  // voor noordpijl op werkblad (0 = omhoog = Noord)
   startDate?: string;     // ISO yyyy-mm-dd voor Gantt
+  ontwerpVersie?: number; // versie van het geladen basisontwerp (sjabloon)
   revisionNumber?: number; // revisie-nummer (0 = eerste uitgave)
   revisionDate?: string;   // ISO datum van laatste revisie
   drawingScale?: number;   // tekeningschaal: 50 | 100 | 200 (1:50 etc.)
@@ -66,6 +67,22 @@ export interface Wall extends Entity {
   isExternal?: boolean; // gevel? undefined = automatisch bepalen
   insulationRc?: number; // Rc-waarde totale constructie in m²K/W
   phaseId?: string; // in welke fase wordt deze muur gebouwd/gesloopt (4D)
+  // ── Uiterlijk (levensechte 3D) ──
+  facade?: FacadeFinish; // buitenafwerking; buitenzijde wordt automatisch bepaald
+  heightEnd?: number; // hoogte bij wall.end (schuine bovenkant, bv. onder een dakvlak)
+  gablePeak?: number; // topgevel: extra hoogte in het midden boven `height`
+}
+
+// Gevelafwerking voor de 3D-weergave.
+export interface FacadeFinish {
+  kind: "brick" | "boards-v" | "boards-h" | "plaster";
+  color: string; // hoofdkleur (steen / hout / pleister)
+  mortarColor?: string; // voegkleur (baksteen) of naadkleur (hout)
+  product?: string; // bv. "Vandersanden Hubertus"
+  plinth?: { height: number; color: string; mortarColor?: string; product?: string }; // trasraam
+  // Welke kant van de muur is buiten: +1 = lokale +z-zijde (normaal (-sin a, cos a)
+  // in plan, a = hoek start→end), -1 = andere kant. Leeg = automatisch bepalen.
+  outside?: 1 | -1;
 }
 
 export type OpeningType = "door" | "window" | "passage";
@@ -77,6 +94,8 @@ export interface Opening extends Entity {
   height: number; // m
   sillHeight: number; // borsthoogte in m (0 bij deur/doorgang)
   offset: number; // m vanaf wall.start langs de muur
+  glazed?: boolean; // deur met glas (pui/schuifpui)
+  frameColor?: string; // kozijnkleur, standaard RAL 7024
   uValue?: number; // W/m²K (kozijn + glas); default per type
   /**
    * Gekozen latei-profiel (sleutel in de doorsnedetabel). Alleen zinvol bij een
@@ -95,6 +114,7 @@ export interface Room extends Entity {
   color?: string;
   wallColor?: string;      // wandverf-kleur voor 3D
   floorMaterial?: FloorMaterial;
+  noCeiling?: boolean; // open tot in de kap (geen vlak plafond)
 }
 
 // ── Installaties ──────────────────────────────────────────────────────────────
@@ -242,6 +262,7 @@ export interface Column extends Entity {
   height?: number; // m (default = verdiepingshoogte)
   material: WallMaterial;
   loadBearing: boolean;
+  color?: string; // afwijkende kleur (bv. schoorsteen in gevelsteen)
 }
 
 // Sleutel in de doorsnedetabel (lib/structural/sections.ts). Vroeger een vaste
@@ -257,6 +278,9 @@ export interface Beam extends Entity {
   profile: BeamProfile;
   height: number; // m boven vloer (positie in de gevel, voor 3D)
   width?: number; // flensbreedte m (override bij custom)
+  heightEnd?: number; // hoogte bij `end` (schuine balk, bv. spantbeen)
+  material?: "steel" | "oak"; // standaard staal
+  depth?: number; // balkhoogte m (eiken balk)
 }
 
 // ── Dak ───────────────────────────────────────────────────────────────────────
@@ -270,6 +294,14 @@ export interface Roof extends Entity {
   ridgeDirection: number; // richting van de nok (graden, 0 = nok langs X)
   overhang: number; // dakoversteek in m
   polygon?: Point[]; // optioneel dakvoet-polygoon; anders bounding box van de muren
+  baseHeight?: number; // hoogte van de dakvoet (rand overstek) boven de vloer; standaard verdiepingshoogte
+  gableEnds?: boolean; // dichte driehoeken aan de kopse kanten (standaard true)
+  color?: string; // dakbedekking
+  product?: string; // bv. "Edelriet naturel"
+  covering?: RoofCovering; // bepaalt textuur + dakdikte in 3D
+  ridgeColor?: string; // nokafwerking
+  hipStart?: { run: number; foot: number }; // wolfseind aan de kant x- (zie roofGeometry)
+  hipEnd?: { run: number; foot: number }; // wolfseind aan de kant x+
   insulationRc?: number; // m²K/W
 }
 
@@ -279,6 +311,8 @@ export interface SectionLine extends Entity {
   end: Point;
   label: string; // "A-A", "B-B"…
 }
+
+export type RoofCovering = "tiles" | "reed" | "panels" | "plain";
 
 export type DormerType = "gable-dormer" | "shed-dormer" | "velux";
 
