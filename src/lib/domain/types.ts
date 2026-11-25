@@ -21,6 +21,7 @@ export interface Project extends Entity {
   description?: string;
   northDegrees?: number;  // voor noordpijl op werkblad (0 = omhoog = Noord)
   startDate?: string;     // ISO yyyy-mm-dd voor Gantt
+  ontwerpVersie?: number; // versie van het geladen basisontwerp (sjabloon)
 }
 
 export interface Level extends Entity {

@@ -24,8 +24,9 @@
 // productnaam staat bij de gevelafwerking zodat je het later kunt verfijnen.
 
 import { getDB } from "../db/db";
-import { create, type TableName } from "../db/repo";
+import { newId, type TableName } from "../db/repo";
 import type {
+  Entity,
   Beam,
   Column,
   Dormer,
@@ -44,6 +45,11 @@ import type {
   WallMaterial,
   WallStatus,
 } from "../domain/types";
+
+// Ophogen bij elke inhoudelijke wijziging van het ontwerp: de app biedt dan
+// aan om het opgeslagen ontwerp bij te werken.
+// v1: eerste versie · v2: rieten dak + wolfseind, antraciet pannen, gevels volgens schetsen
+export const ONTWERP_VERSIE = 2;
 
 export const ONTWERP_NAAM = "Verbouw R. de Boer — schetsontwerp Visser Ontwerpburo (nov. 2026)";
 
@@ -228,6 +234,20 @@ const PROJECT_TABLES: TableName[] = [
   "stairs", "columns", "beams", "roofs", "dormers",
 ];
 
+// Het ontwerp wordt eerst in het geheugen opgebouwd en daarna in één
+// transactie met bulkPut weggeschreven: snel, en de live-queries (2D/3D)
+// verversen maar één keer.
+let buffer: Map<TableName, Entity[]> | null = null;
+
+function mk<T extends Entity>(name: TableName, data: Omit<T, "id" | "updatedAt">): T {
+  if (!buffer) throw new Error("mk() buiten laadOntwerpDeBoer");
+  const e = { ...data, id: newId(), updatedAt: Date.now() } as T;
+  const list = buffer.get(name) ?? [];
+  list.push(e);
+  buffer.set(name, list);
+  return e;
+}
+
 /**
  * Vervangt alle verdiepingen + geometrie van het project door het ontwerp.
  * Fasering, kosten, taken en materialen blijven staan.
@@ -235,49 +255,58 @@ const PROJECT_TABLES: TableName[] = [
 export async function laadOntwerpDeBoer(projectId: string): Promise<{ groundLevelId: string }> {
   const db = getDB();
 
-  // 1. Oude verdiepingen + alles wat eraan hangt hard verwijderen.
+  // 1. Bepaal wat er weg moet: oude verdiepingen + alles wat eraan hangt.
   const oldLevels = await db.levels.where("projectId").equals(projectId).toArray();
   const levelIds = new Set(oldLevels.map((l) => l.id));
-  const oldWalls = (await db.walls.toArray()).filter((w) => levelIds.has(w.levelId));
-  const wallIds = new Set(oldWalls.map((w) => w.id));
-  const oldRoofs = (await db.roofs.toArray()).filter((r) => levelIds.has(r.levelId));
-  const roofIds = new Set(oldRoofs.map((r) => r.id));
-  await db.transaction("rw", [db.levels, ...PROJECT_TABLES.map((t) => db[t])], async () => {
-    for (const t of PROJECT_TABLES) {
-      const table = db[t] as unknown as { toArray(): Promise<Record<string, unknown>[]>; bulkDelete(k: string[]): Promise<void> };
-      const rows = await table.toArray();
-      const del = rows
-        .filter((r) =>
-          (typeof r.levelId === "string" && levelIds.has(r.levelId)) ||
-          (typeof r.wallId === "string" && wallIds.has(r.wallId)) ||
-          (typeof r.roofId === "string" && roofIds.has(r.roofId)),
-        )
-        .map((r) => r.id as string);
-      if (del.length) await table.bulkDelete(del);
-    }
-    await db.levels.bulkDelete([...levelIds]);
+  const wallIds = new Set((await db.walls.toArray()).filter((w) => levelIds.has(w.levelId)).map((w) => w.id));
+  const roofIds = new Set((await db.roofs.toArray()).filter((r) => levelIds.has(r.levelId)).map((r) => r.id));
+  const toDelete = new Map<TableName, string[]>();
+  for (const t of PROJECT_TABLES) {
+    const rows = (await (db[t] as unknown as { toArray(): Promise<Record<string, unknown>[]> }).toArray()).filter(
+      (r) =>
+        (typeof r.levelId === "string" && levelIds.has(r.levelId)) ||
+        (typeof r.wallId === "string" && wallIds.has(r.wallId)) ||
+        (typeof r.roofId === "string" && roofIds.has(r.roofId)),
+    );
+    toDelete.set(t, rows.map((r) => r.id as string));
+  }
+
+  // 2. Nieuw ontwerp opbouwen in het geheugen.
+  buffer = new Map();
+  let out: Map<TableName, Entity[]>;
+  let groundLevelId: string;
+  try {
+    const bg = mk<Level>("levels", { projectId, name: "Begane grond", elevation: 0, height: F2, order: 1 });
+    const vd = mk<Level>("levels", { projectId, name: "Verdieping", elevation: F2, height: 2.6, order: 2 });
+    bouwBeganeGrond(bg.id);
+    bouwVerdieping(vd.id);
+    groundLevelId = bg.id;
+    out = buffer;
+  } finally {
+    buffer = null;
+  }
+
+  // 3. In één transactie vervangen (alleen Dexie-bewerkingen in de transactie).
+  const allTables = [db.projects, db.levels, ...PROJECT_TABLES.map((t) => db[t])];
+  await db.transaction("rw", allTables, async () => {
+    for (const [t, ids] of toDelete) if (ids.length) await (db[t] as unknown as { bulkDelete(k: string[]): Promise<void> }).bulkDelete(ids);
+    if (levelIds.size) await db.levels.bulkDelete([...levelIds]);
+    for (const [t, rows] of out) await (db[t] as unknown as { bulkPut(r: Entity[]): Promise<unknown> }).bulkPut(rows);
+    await db.projects.update(projectId, {
+      name: "Verbouw R. de Boer",
+      description: "Woonboerderij: voorhuis handhaven, achterhuis opnieuw opbouwen. " + ONTWERP_NAAM,
+      ontwerpVersie: ONTWERP_VERSIE,
+      updatedAt: Date.now(),
+    });
   });
 
-  // 2. Verdiepingen
-  const bg = await create<Level>("levels", { projectId, name: "Begane grond", elevation: 0, height: F2, order: 1 });
-  const vd = await create<Level>("levels", { projectId, name: "Verdieping", elevation: F2, height: 2.6, order: 2 });
-
-  await bouwBeganeGrond(bg.id);
-  await bouwVerdieping(vd.id);
-
-  await db.projects.update(projectId, {
-    name: "Verbouw R. de Boer",
-    description: "Woonboerderij: voorhuis handhaven, achterhuis opnieuw opbouwen. " + ONTWERP_NAAM,
-    updatedAt: Date.now(),
-  });
-
-  return { groundLevelId: bg.id };
+  return { groundLevelId };
 }
 
-async function persist(b: Build) {
+function persist(b: Build) {
   const ids: string[] = [];
-  for (const w of b.walls) ids.push((await create<Wall>("walls", w)).id);
-  for (const { wallIdx, o } of b.openings) await create<Opening>("openings", { ...o, wallId: ids[wallIdx] });
+  for (const w of b.walls) ids.push(mk<Wall>("walls", w).id);
+  for (const { wallIdx, o } of b.openings) mk<Opening>("openings", { ...o, wallId: ids[wallIdx] });
 }
 
 function rect(x0: number, y0: number, x1: number, y1: number): Point[] {
@@ -289,33 +318,33 @@ function rect(x0: number, y0: number, x1: number, y1: number): Point[] {
   ];
 }
 
-async function room(levelId: string, name: string, func: string, polygon: Point[], extra: Partial<Room> = {}) {
-  await create<Room>("rooms", { levelId, name, func, polygon, ...extra });
+function room(levelId: string, name: string, func: string, polygon: Point[], extra: Partial<Room> = {}) {
+  mk<Room>("rooms", { levelId, name, func, polygon, ...extra });
 }
 
-async function meubel(levelId: string, kind: FurnitureKind, x: number, y: number, rotation = 0, extra: Partial<Furniture> = {}) {
-  await create<Furniture>("furniture", { levelId, kind, position: { x, y }, rotation, ...extra });
+function meubel(levelId: string, kind: FurnitureKind, x: number, y: number, rotation = 0, extra: Partial<Furniture> = {}) {
+  mk<Furniture>("furniture", { levelId, kind, position: { x, y }, rotation, ...extra });
 }
 
-async function sanitair(levelId: string, fixture: FixtureKind, x: number, y: number, heightZ = 0) {
-  await create<PlumbingItem>("plumbing", { levelId, type: "fixture", fixture, position: { x, y }, heightZ });
+function sanitair(levelId: string, fixture: FixtureKind, x: number, y: number, heightZ = 0) {
+  mk<PlumbingItem>("plumbing", { levelId, type: "fixture", fixture, position: { x, y }, heightZ });
 }
 
-async function staander(levelId: string, x: number, y: number, size: number, height: number, material: WallMaterial = "timber-frame", color?: string) {
-  await create<Column>("columns", { levelId, position: { x, y }, shape: "square", size, height, material, loadBearing: true, color });
+function staander(levelId: string, x: number, y: number, size: number, height: number, material: WallMaterial = "timber-frame", color?: string) {
+  mk<Column>("columns", { levelId, position: { x, y }, shape: "square", size, height, material, loadBearing: true, color });
 }
 
-async function eiken(levelId: string, a: Point, b: Point, h0: number, h1?: number, depth = 0.25) {
-  await create<Beam>("beams", { levelId, start: a, end: b, profile: "custom", height: h0, heightEnd: h1, material: "oak", width: 0.2, depth });
+function eiken(levelId: string, a: Point, b: Point, h0: number, h1?: number, depth = 0.25) {
+  mk<Beam>("beams", { levelId, start: a, end: b, profile: "custom", height: h0, heightEnd: h1, material: "oak", width: 0.2, depth });
 }
 
-async function dakraam(roofId: string, x: number, y: number, width = 0.78, height = 1.18) {
-  await create<Dormer>("dormers", { roofId, type: "velux", position: { x, y }, width, height });
+function dakraam(roofId: string, x: number, y: number, width = 0.78, height = 1.18) {
+  mk<Dormer>("dormers", { roofId, type: "velux", position: { x, y }, width, height });
 }
 
 // ── Begane grond ────────────────────────────────────────────────────────────
 
-async function bouwBeganeGrond(levelId: string) {
+function bouwBeganeGrond(levelId: string) {
   const b = new LevelBuilder(levelId);
   const IN = { x: 10, y: 6 }; // punt binnen het achterhuis
   const IN_VH = { x: 2, y: 7.7 }; // punt binnen het voorhuis
@@ -402,90 +431,90 @@ async function bouwBeganeGrond(levelId: string) {
   b.roofWall({ x: 4.8, y: 5.2 }, { x: 6.0, y: 5.2 }, 0, F2, { ...binnen, openings: [{ at: 5.4, type: "door", width: 0.8, height: 2.1 }] });
   b.wall({ x: 6.0, y: 5.4 }, { x: 9.2, y: 5.4 }, { ...binnen, height: F2 }); // trapwand
   b.wall({ x: 3.7, y: 5.2 }, { x: 3.7, y: 10.2 }, { ...binnen, height: F2, openings: [{ at: 6.1, type: "door", width: 0.8, height: 2.1 }] });
-  await persist(b);
+  persist(b);
 
   // ── Ruimtes ──
   const tegel = { floorMaterial: "tile" as const, wallColor: "#f4f2ee" };
   const hout = { floorMaterial: "wood" as const };
   const open = { noCeiling: true };
-  await room(levelId, "Badkamer", "badkamer", rect(4.8, 0, 7.0, 2.8), { ...tegel, ...open });
-  await room(levelId, "T. (toilet)", "toilet", rect(7.0, 0, 9.2, 2.8), { ...tegel, ...open });
-  await room(levelId, "W. (was/bijkeuken)", "bijkeuken", rect(9.2, 0, 11.4, 2.8), { ...tegel, ...open });
-  await room(levelId, "H. (hobby/werkruimte)", "werkruimte", rect(11.4, 0, 15.0, 2.8), { ...hout, ...open });
-  await room(levelId, "E. (entree/hal)", "hal", rect(4.8, 2.8, 6.2, 5.2), { floorMaterial: "stone", ...open });
-  await room(levelId, "Trap / doorloop", "verkeer", rect(6.2, 2.8, 9.2, 5.4), { ...hout, ...open });
-  await room(levelId, "K. (keuken)", "keuken", rect(9.2, 2.8, 15.0, 5.4), { floorMaterial: "stone", ...open });
-  await room(levelId, "Zithoek", "woonkamer", rect(6.0, 5.4, 10.2, DEPTH), { ...hout, ...open });
-  await room(levelId, "Eethoek", "eetkamer", rect(10.2, 5.4, 15.0, DEPTH), { ...hout, ...open });
-  await room(levelId, "SL/K (slaapkamer)", "slaapkamer", rect(0, 5.2, 3.7, 10.2), hout);
-  await room(levelId, "Gang voorhuis", "verkeer", rect(3.7, 5.2, 6.0, 10.2), { floorMaterial: "stone" });
-  await room(levelId, "Terras (overdekt)", "terras", rect(15.0, 0, 17.4, DEPTH), { floorMaterial: "wood", color: "#8a7356", noCeiling: true });
+  room(levelId, "Badkamer", "badkamer", rect(4.8, 0, 7.0, 2.8), { ...tegel, ...open });
+  room(levelId, "T. (toilet)", "toilet", rect(7.0, 0, 9.2, 2.8), { ...tegel, ...open });
+  room(levelId, "W. (was/bijkeuken)", "bijkeuken", rect(9.2, 0, 11.4, 2.8), { ...tegel, ...open });
+  room(levelId, "H. (hobby/werkruimte)", "werkruimte", rect(11.4, 0, 15.0, 2.8), { ...hout, ...open });
+  room(levelId, "E. (entree/hal)", "hal", rect(4.8, 2.8, 6.2, 5.2), { floorMaterial: "stone", ...open });
+  room(levelId, "Trap / doorloop", "verkeer", rect(6.2, 2.8, 9.2, 5.4), { ...hout, ...open });
+  room(levelId, "K. (keuken)", "keuken", rect(9.2, 2.8, 15.0, 5.4), { floorMaterial: "stone", ...open });
+  room(levelId, "Zithoek", "woonkamer", rect(6.0, 5.4, 10.2, DEPTH), { ...hout, ...open });
+  room(levelId, "Eethoek", "eetkamer", rect(10.2, 5.4, 15.0, DEPTH), { ...hout, ...open });
+  room(levelId, "SL/K (slaapkamer)", "slaapkamer", rect(0, 5.2, 3.7, 10.2), hout);
+  room(levelId, "Gang voorhuis", "verkeer", rect(3.7, 5.2, 6.0, 10.2), { floorMaterial: "stone" });
+  room(levelId, "Terras (overdekt)", "terras", rect(15.0, 0, 17.4, DEPTH), { floorMaterial: "wood", color: "#8a7356", noCeiling: true });
 
   // ── Trappen ──
-  await create<Staircase>("stairs", { levelId, kind: "straight", position: { x: 6.2, y: 5.4 }, width: 1.0, run: 3.0, steps: 15, rotation: 270, direction: "up" });
-  await create<Staircase>("stairs", { levelId, kind: "straight", position: { x: 4.75, y: 9.7 }, width: 0.85, run: 3.0, steps: 15, rotation: 180, direction: "up" });
+  mk<Staircase>("stairs", { levelId, kind: "straight", position: { x: 6.2, y: 5.4 }, width: 1.0, run: 3.0, steps: 15, rotation: 270, direction: "up" });
+  mk<Staircase>("stairs", { levelId, kind: "straight", position: { x: 4.75, y: 9.7 }, width: 0.85, run: 3.0, steps: 15, rotation: 180, direction: "up" });
 
   // ── Constructie ──
   // Eiken staanders in de woonkeuken
-  for (const [x, y] of [[10.2, 4.6], [13.4, 4.6], [10.2, 6.9], [13.4, 6.9]]) await staander(levelId, x, y, 0.2, F2);
+  for (const [x, y] of [[10.2, 4.6], [13.4, 4.6], [10.2, 6.9], [13.4, 6.9]]) staander(levelId, x, y, 0.2, F2);
   // Eiken spant aan de buitenkant van het terras (achtergevel): staanders,
   // trekbalk, schuine spantbenen en makelaar (koningsstijl)
   const XS = 17.25;
-  for (const y of [1.0, 4.6, 6.8, 10.4]) await staander(levelId, XS, y, 0.2, roofAbs(XS, y) - CLEAR - 0.05);
-  await eiken(levelId, { x: XS, y: 0.55 }, { x: XS, y: DEPTH - 0.55 }, 2.35);
-  await eiken(levelId, { x: XS, y: 0.5 }, { x: XS, y: DEPTH / 2 }, roofAbs(XS, 0.5) - 0.3, RIDGE - 0.35, 0.22);
-  await eiken(levelId, { x: XS, y: DEPTH / 2 }, { x: XS, y: DEPTH - 0.5 }, RIDGE - 0.35, roofAbs(XS, DEPTH - 0.5) - 0.3, 0.22);
-  await staander(levelId, XS, DEPTH / 2, 0.2, RIDGE - 0.4);
+  for (const y of [1.0, 4.6, 6.8, 10.4]) staander(levelId, XS, y, 0.2, roofAbs(XS, y) - CLEAR - 0.05);
+  eiken(levelId, { x: XS, y: 0.55 }, { x: XS, y: DEPTH - 0.55 }, 2.35);
+  eiken(levelId, { x: XS, y: 0.5 }, { x: XS, y: DEPTH / 2 }, roofAbs(XS, 0.5) - 0.3, RIDGE - 0.35, 0.22);
+  eiken(levelId, { x: XS, y: DEPTH / 2 }, { x: XS, y: DEPTH - 0.5 }, RIDGE - 0.35, roofAbs(XS, DEPTH - 0.5) - 0.3, 0.22);
+  staander(levelId, XS, DEPTH / 2, 0.2, RIDGE - 0.4);
   // Schoorsteen voorhuis (op de nok bij de voorgevel)
-  await staander(levelId, 0.45, 7.7, 0.55, VH_RIDGE + 0.8, "brick", HUBERTUS_KLEUR);
+  staander(levelId, 0.45, 7.7, 0.55, VH_RIDGE + 0.8, "brick", HUBERTUS_KLEUR);
 
   // ── Daken ──
-  const hoofddak = await create<Roof>("roofs", {
+  const hoofddak = mk<Roof>("roofs", {
     levelId, type: "gable", pitch: 45, ridgeDirection: 0, overhang: OVERHANG,
     polygon: rect(4.8, 0, 17.4, DEPTH), baseHeight: ROOF_BASE, gableEnds: false,
     hipStart: { run: HIP_RUN, foot: HIP_FOOT - ROOF_BASE },
     covering: "reed", color: RIET, ridgeColor: RAL_7024,
     product: "Edelriet naturel, nok aluminium RAL 7024",
   });
-  const voorhuisdak = await create<Roof>("roofs", {
+  const voorhuisdak = mk<Roof>("roofs", {
     levelId, type: "gable", pitch: (Math.atan(VH_TAN) * 180) / Math.PI, ridgeDirection: 0, overhang: 0.3,
     polygon: rect(0, 5.2, 6.0, 10.2), baseHeight: VH_EAVE - 0.3 * VH_TAN, gableEnds: false,
     covering: "tiles", color: PANNEN_ANTRACIET, ridgeColor: "#2f3133",
     product: "Dakpannen antraciet",
   });
   // Dakramen (zijgevels 1 en 2)
-  await dakraam(hoofddak.id, 10.4, 1.95);
-  await dakraam(hoofddak.id, 8.4, DEPTH - 1.95);
-  await dakraam(voorhuisdak.id, 1.9, 6.35, 0.55, 0.78);
-  await dakraam(voorhuisdak.id, 1.9, 9.05, 0.55, 0.78);
+  dakraam(hoofddak.id, 10.4, 1.95);
+  dakraam(hoofddak.id, 8.4, DEPTH - 1.95);
+  dakraam(voorhuisdak.id, 1.9, 6.35, 0.55, 0.78);
+  dakraam(voorhuisdak.id, 1.9, 9.05, 0.55, 0.78);
 
   // ── Inrichting (indicatief, volgens de schets) ──
-  await meubel(levelId, "kitchen-island", 11.8, 4.75, 0, { width: 3.0, depth: 1.0 });
-  for (let i = 0; i < 5; i++) await meubel(levelId, "kitchen-base", 11.9 + i * 0.6, 3.15, 180);
-  await meubel(levelId, "kitchen-high", 14.95 - 0.35, 3.15, 180);
-  await meubel(levelId, "dining-table", 12.6, 8.6, 0, { width: 2.2, depth: 1.0 });
+  meubel(levelId, "kitchen-island", 11.8, 4.75, 0, { width: 3.0, depth: 1.0 });
+  for (let i = 0; i < 5; i++) meubel(levelId, "kitchen-base", 11.9 + i * 0.6, 3.15, 180);
+  meubel(levelId, "kitchen-high", 14.95 - 0.35, 3.15, 180);
+  meubel(levelId, "dining-table", 12.6, 8.6, 0, { width: 2.2, depth: 1.0 });
   for (const dx of [-0.7, 0, 0.7]) {
-    await meubel(levelId, "dining-chair", 12.6 + dx, 7.9, 180);
-    await meubel(levelId, "dining-chair", 12.6 + dx, 9.3, 0);
+    meubel(levelId, "dining-chair", 12.6 + dx, 7.9, 180);
+    meubel(levelId, "dining-chair", 12.6 + dx, 9.3, 0);
   }
-  await meubel(levelId, "sofa-l", 7.8, 9.9, 0);
-  await meubel(levelId, "coffee-table", 8.0, 8.3, 0);
-  await meubel(levelId, "tv-unit", 6.45, 8.0, 90);
-  await meubel(levelId, "bed-double", 1.3, 7.7, 90);
-  await meubel(levelId, "wardrobe", 3.25, 9.3, 270);
-  await meubel(levelId, "desk", 13.2, 1.4, 0);
-  await sanitair(levelId, "toilet", 5.3, 0.45);
-  await sanitair(levelId, "sink", 6.5, 0.4, 0.85);
-  await sanitair(levelId, "shower", 5.4, 2.1);
-  await sanitair(levelId, "toilet", 8.1, 0.45);
-  await sanitair(levelId, "sink", 8.9, 0.4, 0.85);
-  await sanitair(levelId, "washing-machine", 9.8, 0.45);
-  await sanitair(levelId, "boiler", 10.8, 0.4, 1.2);
+  meubel(levelId, "sofa-l", 7.8, 9.9, 0);
+  meubel(levelId, "coffee-table", 8.0, 8.3, 0);
+  meubel(levelId, "tv-unit", 6.45, 8.0, 90);
+  meubel(levelId, "bed-double", 1.3, 7.7, 90);
+  meubel(levelId, "wardrobe", 3.25, 9.3, 270);
+  meubel(levelId, "desk", 13.2, 1.4, 0);
+  sanitair(levelId, "toilet", 5.3, 0.45);
+  sanitair(levelId, "sink", 6.5, 0.4, 0.85);
+  sanitair(levelId, "shower", 5.4, 2.1);
+  sanitair(levelId, "toilet", 8.1, 0.45);
+  sanitair(levelId, "sink", 8.9, 0.4, 0.85);
+  sanitair(levelId, "washing-machine", 9.8, 0.45);
+  sanitair(levelId, "boiler", 10.8, 0.4, 1.2);
 }
 
 // ── Verdieping ──────────────────────────────────────────────────────────────
 
-async function bouwVerdieping(levelId: string) {
+function bouwVerdieping(levelId: string) {
   const b = new LevelBuilder(levelId);
   const IN = { x: 10, y: 6 };
   const binnen = { thickness: 0.1, material: "gypsum" as const, status: "new" as const };
@@ -548,30 +577,30 @@ async function bouwVerdieping(levelId: string) {
   b.wall({ x: 15.15, y: 4.7 }, { x: 17.1, y: 4.7 }, balk);
   b.wall({ x: 17.1, y: 4.7 }, { x: 17.1, y: 6.7 }, balk);
   b.wall({ x: 17.1, y: 6.7 }, { x: 15.15, y: 6.7 }, balk);
-  await persist(b);
+  persist(b);
 
   const open = { noCeiling: true, floorMaterial: "wood" as const };
-  await room(levelId, "V. (vide/overloop)", "verkeer", rect(4.8, 1.8, 8.2, 4.3), open);
-  await room(levelId, "B. (badkamer)", "badkamer", rect(8.2, 1.8, 12.5, 4.3), { noCeiling: true, floorMaterial: "tile", wallColor: "#f4f2ee" });
-  await room(levelId, "SL.1", "slaapkamer", rect(12.5, 1.8, 15.0, 5.2), open);
-  await room(levelId, "SL.2", "slaapkamer", rect(12.5, 5.2, 15.0, 9.6), open);
-  await room(levelId, "SL.3", "slaapkamer", rect(7.0, 6.1, 11.2, 9.6), open);
-  await room(levelId, "K. (kast)", "berging", rect(11.2, 6.1, 12.5, 9.6), open);
+  room(levelId, "V. (vide/overloop)", "verkeer", rect(4.8, 1.8, 8.2, 4.3), open);
+  room(levelId, "B. (badkamer)", "badkamer", rect(8.2, 1.8, 12.5, 4.3), { noCeiling: true, floorMaterial: "tile", wallColor: "#f4f2ee" });
+  room(levelId, "SL.1", "slaapkamer", rect(12.5, 1.8, 15.0, 5.2), open);
+  room(levelId, "SL.2", "slaapkamer", rect(12.5, 5.2, 15.0, 9.6), open);
+  room(levelId, "SL.3", "slaapkamer", rect(7.0, 6.1, 11.2, 9.6), open);
+  room(levelId, "K. (kast)", "berging", rect(11.2, 6.1, 12.5, 9.6), open);
   // Overloop rondom het trapgat (x 6,2–9,2 · y 4,4–5,4)
-  await room(levelId, "Overloop", "verkeer", [
+  room(levelId, "Overloop", "verkeer", [
     { x: 4.8, y: 4.3 }, { x: 12.5, y: 4.3 }, { x: 12.5, y: 6.1 }, { x: 7.0, y: 6.1 }, { x: 7.0, y: 9.6 },
     { x: 4.8, y: 9.6 }, { x: 4.8, y: 5.4 }, { x: 9.2, y: 5.4 }, { x: 9.2, y: 4.4 }, { x: 4.8, y: 4.4 },
   ], open);
-  await room(levelId, "Berging (zolder voorhuis)", "berging", rect(0.2, 5.4, 4.7, 10.0), { noCeiling: true, floorMaterial: "wood" });
-  await room(levelId, "Balkon", "buiten", rect(15.0, 4.7, 17.1, 6.7), { noCeiling: true, floorMaterial: "wood", color: "#8a7356" });
+  room(levelId, "Berging (zolder voorhuis)", "berging", rect(0.2, 5.4, 4.7, 10.0), { noCeiling: true, floorMaterial: "wood" });
+  room(levelId, "Balkon", "buiten", rect(15.0, 4.7, 17.1, 6.7), { noCeiling: true, floorMaterial: "wood", color: "#8a7356" });
 
-  await meubel(levelId, "bed-double", 13.75, 3.6, 0);
-  await meubel(levelId, "bed-double", 13.75, 7.6, 180);
-  await meubel(levelId, "bed-double", 9.1, 8.3, 180);
-  await meubel(levelId, "wardrobe", 10.6, 6.5, 0);
-  await meubel(levelId, "bathtub", 9.5, 2.3, 0);
-  await sanitair(levelId, "toilet", 8.55, 3.6);
-  await sanitair(levelId, "sink", 11.6, 2.6, 0.85);
-  await sanitair(levelId, "sink", 11.6, 3.4, 0.85);
-  await sanitair(levelId, "shower", 11.0, 3.8);
+  meubel(levelId, "bed-double", 13.75, 3.6, 0);
+  meubel(levelId, "bed-double", 13.75, 7.6, 180);
+  meubel(levelId, "bed-double", 9.1, 8.3, 180);
+  meubel(levelId, "wardrobe", 10.6, 6.5, 0);
+  meubel(levelId, "bathtub", 9.5, 2.3, 0);
+  sanitair(levelId, "toilet", 8.55, 3.6);
+  sanitair(levelId, "sink", 11.6, 2.6, 0.85);
+  sanitair(levelId, "sink", 11.6, 3.4, 0.85);
+  sanitair(levelId, "shower", 11.0, 3.8);
 }
