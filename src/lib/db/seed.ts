@@ -2,8 +2,9 @@
 
 import { getDB } from "./db";
 import { create } from "./repo";
-import { DEFAULT_LEVELS, DEFAULT_PHASES } from "../domain/constants";
-import type { Level, Phase, Project } from "../domain/types";
+import { DEFAULT_PHASES } from "../domain/constants";
+import type { Phase, Project } from "../domain/types";
+import { laadOntwerpDeBoer } from "../templates/ontwerpDeBoer";
 
 // Maakt het eerste project + verdiepingen + fasering aan als de db leeg is.
 // Geeft het actieve project-id terug.
@@ -19,16 +20,8 @@ export async function ensureSeed(): Promise<Project> {
     description: "Complete renovatie van een oude woonboerderij.",
   });
 
-  // Verdiepingen
-  for (const lvl of DEFAULT_LEVELS) {
-    await create<Level>("levels", {
-      projectId: project.id,
-      name: lvl.name,
-      elevation: lvl.elevation,
-      height: lvl.height,
-      order: lvl.order,
-    });
-  }
+  // Verdiepingen + geometrie: het schetsontwerp is de basis.
+  await laadOntwerpDeBoer(project.id);
 
   // Fasering met afhankelijkheden. Eerst aanmaken, daarna dependsOn koppelen
   // op basis van order → id.

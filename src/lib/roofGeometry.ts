@@ -36,6 +36,7 @@ export function buildRoof(
   D: number,
   pitchDeg: number,
   overhang: number,
+  gableEnds = true,
 ): RoofMesh {
   const b = builder();
   const hw = W / 2 + overhang;
@@ -87,7 +88,9 @@ export function buildRoof(
   const Dd = b.v(-hw, 0, hd);
   b.quad(A, B, r1, r0); // schuin vlak z-
   b.quad(Dd, r0, r1, C); // schuin vlak z+
-  b.tri(A, r0, Dd); // topgevel x-
-  b.tri(B, C, r1); // topgevel x+
+  if (gableEnds) {
+    b.tri(A, r0, Dd); // topgevel x-
+    b.tri(B, C, r1); // topgevel x+
+  }
   return { positions: b.positions, indices: b.indices, ridgeHeight: h };
 }

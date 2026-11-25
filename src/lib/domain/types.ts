@@ -56,6 +56,22 @@ export interface Wall extends Entity {
   material: WallMaterial;
   loadBearing: boolean; // dragend?
   status: WallStatus;
+  // ── Uiterlijk (levensechte 3D) ──
+  facade?: FacadeFinish; // buitenafwerking; buitenzijde wordt automatisch bepaald
+  heightEnd?: number; // hoogte bij wall.end (schuine bovenkant, bv. onder een dakvlak)
+  gablePeak?: number; // topgevel: extra hoogte in het midden boven `height`
+}
+
+// Gevelafwerking voor de 3D-weergave.
+export interface FacadeFinish {
+  kind: "brick" | "boards-v" | "boards-h" | "plaster";
+  color: string; // hoofdkleur (steen / hout / pleister)
+  mortarColor?: string; // voegkleur (baksteen) of naadkleur (hout)
+  product?: string; // bv. "Vandersanden Hubertus"
+  plinth?: { height: number; color: string; mortarColor?: string; product?: string }; // trasraam
+  // Welke kant van de muur is buiten: +1 = lokale +z-zijde (normaal (-sin a, cos a)
+  // in plan, a = hoek start→end), -1 = andere kant. Leeg = automatisch bepalen.
+  outside?: 1 | -1;
 }
 
 export type OpeningType = "door" | "window" | "passage";
@@ -67,6 +83,8 @@ export interface Opening extends Entity {
   height: number; // m
   sillHeight: number; // borsthoogte in m (0 bij deur/doorgang)
   offset: number; // m vanaf wall.start langs de muur
+  glazed?: boolean; // deur met glas (pui/schuifpui)
+  frameColor?: string; // kozijnkleur, standaard RAL 7024
 }
 
 export type FloorMaterial = "tile" | "wood" | "carpet" | "stone" | "concrete";
@@ -79,6 +97,7 @@ export interface Room extends Entity {
   color?: string;
   wallColor?: string;      // wandverf-kleur voor 3D
   floorMaterial?: FloorMaterial;
+  noCeiling?: boolean; // open tot in de kap (geen vlak plafond)
 }
 
 // ── Installaties ──────────────────────────────────────────────────────────────
@@ -219,6 +238,10 @@ export interface Roof extends Entity {
   ridgeDirection: number; // richting van de nok (graden, 0 = nok langs X)
   overhang: number; // dakoversteek in m
   polygon?: Point[]; // optioneel dakvoet-polygoon; anders bounding box van de muren
+  baseHeight?: number; // hoogte van de dakvoet (rand overstek) boven de vloer; standaard verdiepingshoogte
+  gableEnds?: boolean; // dichte driehoeken aan de kopse kanten (standaard true)
+  color?: string; // dakbedekking
+  product?: string; // bv. "Dakpanelen RAL 7024"
 }
 
 export type DormerType = "gable-dormer" | "shed-dormer" | "velux";
