@@ -157,3 +157,135 @@ export function facadeTextureWorldUV(kind: FacadeFinish["kind"], color: string, 
   t.needsUpdate = true;
   return t;
 }
+
+// ── Dakbedekking ────────────────────────────────────────────────────────────
+
+// Afmeting van één textuur-tegel op het dakvlak (u = langs de goot, v = afschot).
+export const ROOF_TILE_SIZE: Record<"tiles" | "reed" | "panels", { w: number; h: number }> = {
+  tiles: { w: 6 * 0.21, h: 4 * 0.31 }, // 6 pannen breed (werkende breedte 21 cm), 4 latten (31 cm)
+  reed: { w: 1.0, h: 1.0 },
+  panels: { w: 1.0, h: 1.0 },
+};
+
+const roofCache = new Map<string, { map: THREE.CanvasTexture; bump: THREE.CanvasTexture }>();
+
+function canvasTex(c: HTMLCanvasElement, srgb: boolean) {
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+// Kleur-map + bump-map. UV-v loopt in de afschotrichting (omlaag = grotere v),
+// in het canvas is dat naar boven (flipY), dus de onderrand van een pan ligt
+// aan de bovenkant van zijn rij in het canvas.
+export function roofTextures(kind: "tiles" | "reed" | "panels", color: string) {
+  if (typeof document === "undefined") return null;
+  const key = `${kind}|${color}`;
+  const hit = roofCache.get(key);
+  if (hit) return hit;
+  const S = 512;
+  const mk = () => {
+    const c = document.createElement("canvas");
+    c.width = S;
+    c.height = S;
+    return c;
+  };
+  const cMap = mk();
+  const cBump = mk();
+  const m = cMap.getContext("2d")!;
+  const bmp = cBump.getContext("2d")!;
+  const r = rng(kind === "tiles" ? 21 : 5);
+  const [R, G, B] = hexToRgb(color);
+  const col = (f: number) => `rgb(${Math.min(255, Math.round(R * f))},${Math.min(255, Math.round(G * f))},${Math.min(255, Math.round(B * f))})`;
+
+  if (kind === "tiles") {
+    const cols = 6;
+    const rows = 4;
+    const tw = S / cols;
+    const th = S / rows;
+    bmp.fillStyle = "#000";
+    bmp.fillRect(0, 0, S, S);
+    for (let row = 0; row < rows; row++) {
+      const y0 = row * th;
+      const shift = row % 2 ? tw * 0.08 : 0; // lichte verspringing
+      for (let c = -1; c <= cols; c++) {
+        const x0 = c * tw + shift;
+        const base = 0.92 + (r() - 0.5) * 0.12;
+        // golf (S-pan): helder op de bolling, donker in de goot
+        for (let x = 0; x < tw; x++) {
+          const ph = (x / tw) * Math.PI * 2;
+          const wave = 0.5 + 0.5 * Math.cos(ph - 0.6);
+          m.fillStyle = col(base * (0.72 + 0.42 * wave));
+          m.fillRect(x0 + x, y0, 1, th);
+          const g = Math.round(70 + 150 * wave);
+          bmp.fillStyle = `rgb(${g},${g},${g})`;
+          bmp.fillRect(x0 + x, y0, 1, th);
+        }
+        // naad tussen de pannen
+        m.fillStyle = "rgba(0,0,0,0.35)";
+        m.fillRect(x0, y0, 2, th);
+      }
+      // onderrand van de pan (overlap): slagschaduw + dikte
+      const grad = m.createLinearGradient(0, y0, 0, y0 + th * 0.22);
+      grad.addColorStop(0, "rgba(0,0,0,0.65)");
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+      m.fillStyle = grad;
+      m.fillRect(0, y0, S, th * 0.22);
+      m.fillStyle = "rgba(255,255,255,0.10)";
+      m.fillRect(0, y0 + th - 3, S, 3);
+      const bg = bmp.createLinearGradient(0, y0, 0, y0 + th);
+      bg.addColorStop(0, "rgba(0,0,0,0.9)");
+      bg.addColorStop(0.25, "rgba(0,0,0,0)");
+      bg.addColorStop(1, "rgba(255,255,255,0.25)");
+      bmp.fillStyle = bg;
+      bmp.fillRect(0, y0, S, th);
+    }
+  } else if (kind === "reed") {
+    m.fillStyle = color;
+    m.fillRect(0, 0, S, S);
+    bmp.fillStyle = "#808080";
+    bmp.fillRect(0, 0, S, S);
+    for (let k = 0; k < 2600; k++) {
+      const x = r() * S;
+      const y = r() * S;
+      const len = 30 + r() * 90;
+      const f = 0.7 + r() * 0.55;
+      m.strokeStyle = col(f);
+      m.lineWidth = 1 + r() * 1.2;
+      m.beginPath();
+      m.moveTo(x, y);
+      m.lineTo(x + (r() - 0.5) * 3, y + len);
+      m.stroke();
+      const g = Math.round(90 + r() * 120);
+      bmp.strokeStyle = `rgb(${g},${g},${g})`;
+      bmp.lineWidth = 1.5;
+      bmp.beginPath();
+      bmp.moveTo(x, y);
+      bmp.lineTo(x + (r() - 0.5) * 3, y + len);
+      bmp.stroke();
+    }
+    // vage gangen (lagen riet)
+    for (let i = 0; i < 4; i++) {
+      m.fillStyle = "rgba(0,0,0,0.05)";
+      m.fillRect(0, (i * S) / 4, S, 6);
+    }
+  } else {
+    // staande-naad/sandwichpanelen
+    m.fillStyle = color;
+    m.fillRect(0, 0, S, S);
+    bmp.fillStyle = "#555";
+    bmp.fillRect(0, 0, S, S);
+    for (let i = 0; i < 4; i++) {
+      m.fillStyle = "rgba(255,255,255,0.12)";
+      m.fillRect((i * S) / 4, 0, 4, S);
+      bmp.fillStyle = "#fff";
+      bmp.fillRect((i * S) / 4, 0, 6, S);
+    }
+  }
+  const res = { map: canvasTex(cMap, true), bump: canvasTex(cBump, false) };
+  roofCache.set(key, res);
+  return res;
+}

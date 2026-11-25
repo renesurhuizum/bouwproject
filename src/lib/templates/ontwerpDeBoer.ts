@@ -6,13 +6,15 @@
 //   x = lengterichting (links voorhuis → rechts achtergevel/terras), y = diepte.
 //
 //   • Voorhuis (BESTAAND, handhaven): x 0–6,0 · y 5,2–10,2 (6,0 × 5,0 m).
-//     Baksteen (Vandersanden Hubertus) met trasraam (Vandersanden Carbon),
-//     goot 3,0 m, nok 6,2 m (dak: pannen mat zwart), nok in x-richting.
-//   • Achterhuis (NIEUW, opnieuw opbouwen): x 4,8–15,0 · y 0–11,4.
-//     Zwart houten gevelbekleding, kozijnen hout antraciet RAL 7024,
-//     zadeldak 45° met dakpanelen RAL 7024, lage goot ±2,6 m, nok ±8,3 m.
-//     Ingang + badkamer in de uitbouw x 4,8–6,0 onder hetzelfde dakvlak.
-//   • Overdekt terras onder doorgezet dak: x 15,0–17,4 (240), houten staanders.
+//     Gevels baksteen zandkleur (Vandersanden Hubertus), trasraam donker
+//     (Vandersanden Carbon), kozijnen hout antraciet RAL 7024.
+//     Goot 3,00 (300+), nok 6,30 (630+), dakpannen antraciet, nok in x-richting.
+//   • Achterhuis/schuur (NIEUW): x 4,8–15,0 · y 0–11,4. Gevels zwart hout op
+//     een donker trasraam, dak edelriet naturel met aluminium nok RAL 7024,
+//     45°, dakrand 1,80 (180+), nok ±7,9 (805+). Aan de voorkant een steil
+//     wolfseind dat schuin naar achteren loopt.
+//     Ingang + badkamer in de uitbouw x 4,8–6,0 onder hetzelfde rieten dak.
+//   • Overdekt terras onder doorgezet dak: x 15,0–17,4 (240), eiken spant.
 //   • Verdieping (+2,90): kamers tussen de knieschotten op y 1,8–9,6 (780),
 //     glazen achtergevel met balkon boven het terras.
 //
@@ -24,7 +26,9 @@
 import { getDB } from "../db/db";
 import { create, type TableName } from "../db/repo";
 import type {
+  Beam,
   Column,
+  Dormer,
   FacadeFinish,
   Furniture,
   FurnitureKind,
@@ -54,13 +58,16 @@ export const ONTWERP_TEKENINGEN = [
 
 // ── Materialen ──────────────────────────────────────────────────────────────
 
-const RAL_7024 = "#45494e"; // grafietgrijs (kozijnen, dakpanelen, nok)
+const RAL_7024 = "#45494e"; // grafietgrijs (kozijnen, nok)
+const RIET = "#94825f"; // edelriet naturel
+const PANNEN_ANTRACIET = "#3d4043";
+const HUBERTUS_KLEUR = "#c7ad86";
 
 const CARBON_TRAS = { height: 0.5, color: "#2e2c2b", mortarColor: "#3b3936", product: "Vandersanden Carbon" };
 
 const HUBERTUS: FacadeFinish = {
   kind: "brick",
-  color: "#c7ad86",
+  color: HUBERTUS_KLEUR,
   mortarColor: "#d6cfc2",
   product: "Vandersanden Hubertus (zandkleur)",
   plinth: CARBON_TRAS,
@@ -71,23 +78,31 @@ const HOUT_ZWART: FacadeFinish = {
   color: "#232425",
   mortarColor: "rgba(0,0,0,0.7)",
   product: "Houten gevelbekleding zwart",
+  plinth: { ...CARBON_TRAS, height: 0.45 },
 };
 
 // ── Maatvoering ─────────────────────────────────────────────────────────────
 
 const F2 = 2.9; // vloerpeil verdieping
 const DEPTH = 11.4; // diepte achterhuis
-const EAVE = 2.6; // hoogte dakvlak boven de gevellijn y=0 / y=11,4 (lage goot)
-const TAN = 1.0; // 45°
-const RIDGE = EAVE + (DEPTH / 2) * TAN; // ≈ 8,3 m
 const OVERHANG = 0.4;
+const TAN = 1.0; // 45°
+const ROOF_BASE = 1.8; // dakrand (onderkant riet bij de overstek), "180+"
+const EAVE = ROOF_BASE + OVERHANG * TAN; // dakvlak boven de gevellijn y=0 / y=11,4 = 2,2
+const RIDGE = EAVE + (DEPTH / 2) * TAN; // ≈ 7,9 m ("805+")
+// Wolfseind aan de voorkant: dakrand x=4,4 (4,8 − overstek), onderrand schild
+// op 2,50 m, nok begint 1,80 m verder naar achteren.
+const HIP_X = 4.8 - OVERHANG;
+const HIP_FOOT = 2.5;
+const HIP_RUN = 1.8;
 
-const VH_EAVE = 3.0; // voorhuis goot
-const VH_RIDGE = 6.2; // voorhuis nok
+const VH_EAVE = 3.0; // voorhuis goot (300+)
+const VH_RIDGE = 6.3; // voorhuis nok (630+)
 const VH_TAN = (VH_RIDGE - VH_EAVE) / 2.5;
 
-// Absolute hoogte van de onderkant van het hoofddak op diepte y.
-const roofAbs = (y: number) => EAVE + Math.min(y, DEPTH - y) * TAN;
+// Absolute hoogte van de onderkant van het hoofddak op punt (x, y).
+const roofAbs = (x: number, y: number) =>
+  Math.min(EAVE + Math.min(y, DEPTH - y) * TAN, HIP_FOOT + Math.max(0, x - HIP_X) * ((RIDGE - HIP_FOOT) / HIP_RUN));
 const CLEAR = 0.2; // speling tussen wandkop en dakvlak (dakpakket)
 
 // ── Builders ────────────────────────────────────────────────────────────────
@@ -106,6 +121,19 @@ type OpeningSpec = {
   glazed?: boolean;
 };
 
+type WallOpts = {
+  height: number;
+  heightEnd?: number;
+  gablePeak?: number;
+  thickness: number;
+  material: WallMaterial;
+  status: WallStatus;
+  loadBearing?: boolean;
+  facade?: FacadeFinish;
+  inside?: Point; // punt binnen het gebouw → bepaalt de buitenzijde
+  openings?: OpeningSpec[];
+};
+
 function outsideSign(start: Point, end: Point, inside: Point): 1 | -1 {
   const a = Math.atan2(end.y - start.y, end.x - start.x);
   const n = { x: -Math.sin(a), y: Math.cos(a) };
@@ -118,22 +146,7 @@ class LevelBuilder implements Build {
   openings: Build["openings"] = [];
   constructor(public levelId: string) {}
 
-  wall(
-    start: Point,
-    end: Point,
-    opts: {
-      height: number;
-      heightEnd?: number;
-      gablePeak?: number;
-      thickness: number;
-      material: WallMaterial;
-      status: WallStatus;
-      loadBearing?: boolean;
-      facade?: FacadeFinish;
-      inside?: Point; // punt binnen het gebouw → bepaalt de buitenzijde
-      openings?: OpeningSpec[];
-    },
-  ) {
+  wall(start: Point, end: Point, opts: WallOpts) {
     const facade = opts.facade
       ? { ...opts.facade, outside: opts.inside ? outsideSign(start, end, opts.inside) : undefined }
       : undefined;
@@ -169,34 +182,40 @@ class LevelBuilder implements Build {
     }
   }
 
-  // Muur loodrecht op de nok (x = const) onder het hoofddak: splitst in een
-  // schuin deel (volgt het dakvlak) en een recht deel (max `cap`).
-  perpWall(
-    x: number,
-    y0: number,
-    y1: number,
-    levelElev: number,
-    cap: number,
-    opts: Omit<Parameters<LevelBuilder["wall"]>[2], "height" | "heightEnd">,
-  ) {
-    const h = (y: number) => Math.min(cap, roofAbs(y) - levelElev - CLEAR);
-    const flatFrom = cap + levelElev + CLEAR - EAVE; // y waarop het dak `cap` bereikt
-    const cuts = [y0, y1];
-    for (const c of [flatFrom / TAN, DEPTH - flatFrom / TAN]) if (c > Math.min(y0, y1) + 0.05 && c < Math.max(y0, y1) - 0.05) cuts.push(c);
-    const sorted = [...new Set(cuts)].sort((a, b) => (y1 >= y0 ? a - b : b - a));
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const a = sorted[i];
-      const b = sorted[i + 1];
-      const lo = Math.min(a, b);
-      const hi = Math.max(a, b);
-      const ops = (opts.openings ?? []).filter((o) => o.at >= lo && o.at < hi);
-      const ha = h(a);
-      const hb = h(b);
-      this.wall({ x, y: a }, { x, y: b }, {
+  // Asrechte muur onder het hoofddak: de kop volgt het dakvlak (incl. het
+  // wolfseind) met `CLEAR` speling en wordt afgetopt op `cap`. De muur wordt
+  // gesplitst op de knikpunten van dat profiel.
+  roofWall(start: Point, end: Point, levelElev: number, cap: number, opts: Omit<WallOpts, "height" | "heightEnd">) {
+    const L = Math.hypot(end.x - start.x, end.y - start.y);
+    const at = (s: number): Point => ({ x: start.x + ((end.x - start.x) * s) / L, y: start.y + ((end.y - start.y) * s) / L });
+    const h = (s: number) => {
+      const p = at(s);
+      return Math.min(cap, roofAbs(p.x, p.y) - levelElev - CLEAR);
+    };
+    const step = 0.02;
+    const n = Math.max(2, Math.ceil(L / step));
+    const ss = Array.from({ length: n + 1 }, (_, i) => (L * i) / n);
+    const hs = ss.map(h);
+    const cuts = [0];
+    for (let i = 1; i < n; i++) {
+      const d2 = hs[i + 1] - 2 * hs[i] + hs[i - 1];
+      if (Math.abs(d2) > 1e-4 && ss[i] - cuts[cuts.length - 1] > 0.08) cuts.push(ss[i]);
+    }
+    if (L - cuts[cuts.length - 1] < 0.08) cuts.pop();
+    cuts.push(L);
+    const horizontal = Math.abs(end.y - start.y) < 1e-6;
+    for (let i = 0; i < cuts.length - 1; i++) {
+      const a = at(cuts[i]);
+      const b = at(cuts[i + 1]);
+      const lo = horizontal ? Math.min(a.x, b.x) : Math.min(a.y, b.y);
+      const hi = horizontal ? Math.max(a.x, b.x) : Math.max(a.y, b.y);
+      const ha = h(cuts[i]);
+      const hb = h(cuts[i + 1]);
+      this.wall(a, b, {
         ...opts,
         height: ha,
         heightEnd: Math.abs(ha - hb) > 0.01 ? hb : undefined,
-        openings: ops,
+        openings: (opts.openings ?? []).filter((o) => o.at >= lo && o.at < hi),
       });
     }
   }
@@ -282,8 +301,16 @@ async function sanitair(levelId: string, fixture: FixtureKind, x: number, y: num
   await create<PlumbingItem>("plumbing", { levelId, type: "fixture", fixture, position: { x, y }, heightZ });
 }
 
-async function staander(levelId: string, x: number, y: number, size: number, height: number, material: WallMaterial = "timber-frame") {
-  await create<Column>("columns", { levelId, position: { x, y }, shape: "square", size, height, material, loadBearing: true });
+async function staander(levelId: string, x: number, y: number, size: number, height: number, material: WallMaterial = "timber-frame", color?: string) {
+  await create<Column>("columns", { levelId, position: { x, y }, shape: "square", size, height, material, loadBearing: true, color });
+}
+
+async function eiken(levelId: string, a: Point, b: Point, h0: number, h1?: number, depth = 0.25) {
+  await create<Beam>("beams", { levelId, start: a, end: b, profile: "custom", height: h0, heightEnd: h1, material: "oak", width: 0.2, depth });
+}
+
+async function dakraam(roofId: string, x: number, y: number, width = 0.78, height = 1.18) {
+  await create<Dormer>("dormers", { roofId, type: "velux", position: { x, y }, width, height });
 }
 
 // ── Begane grond ────────────────────────────────────────────────────────────
@@ -292,59 +319,67 @@ async function bouwBeganeGrond(levelId: string) {
   const b = new LevelBuilder(levelId);
   const IN = { x: 10, y: 6 }; // punt binnen het achterhuis
   const IN_VH = { x: 2, y: 7.7 }; // punt binnen het voorhuis
-  const houtExt = { thickness: 0.3, material: "timber-frame" as const, status: "new" as const, loadBearing: true, facade: HOUT_ZWART };
+  const houtExt = { thickness: 0.3, material: "timber-frame" as const, status: "new" as const, loadBearing: true, facade: HOUT_ZWART, inside: IN };
   const steenExt = { thickness: 0.33, material: "brick" as const, status: "existing" as const, loadBearing: true, facade: HUBERTUS, inside: IN_VH };
   const binnen = { thickness: 0.1, material: "gypsum" as const, status: "new" as const };
+  const HOOG = 99; // muur loopt door tot onder het dak
 
-  // Achterhuis — gevel y=0 (zijgevel 1): lage goot met 4 kleine ramen
-  const klein = (at: number): OpeningSpec => ({ at, type: "window", width: 0.6, height: 0.7, sill: 1.05 });
-  b.wall({ x: 4.8, y: 0 }, { x: 15.0, y: 0 }, { ...houtExt, height: EAVE - CLEAR, inside: IN, openings: [klein(5.5), klein(8.1), klein(10.3), klein(13.2)] });
-  // Gevel y=11,4 (zijgevel 2): schuifpui zithoek + raam eethoek
-  b.wall({ x: 15.0, y: DEPTH }, { x: 6.0, y: DEPTH }, {
-    ...houtExt, height: EAVE - CLEAR, inside: IN,
+  // ── Achterhuis ──
+  // Zijgevel 1 (y=0): lage gevel onder de rieten dakrand, 4 kleine ramen
+  const klein = (at: number): OpeningSpec => ({ at, type: "window", width: 0.6, height: 0.6, sill: 1.0 });
+  b.roofWall({ x: 4.8, y: 0 }, { x: 15.0, y: 0 }, 0, HOOG, { ...houtExt, openings: [klein(6.5), klein(8.9), klein(11.0), klein(13.6)] });
+  // Zijgevel 2 (y=11,4): raamstrook zithoek + raam eethoek
+  b.roofWall({ x: 15.0, y: DEPTH }, { x: 6.0, y: DEPTH }, 0, HOOG, {
+    ...houtExt,
     openings: [
-      { at: 8.2, type: "door", width: 2.8, height: 2.2, glazed: true },
-      { at: 12.9, type: "window", width: 1.4, height: 1.2, sill: 0.8 },
+      { at: 8.2, type: "window", width: 2.6, height: 1.05, sill: 0.6 },
+      { at: 12.85, type: "window", width: 0.7, height: 1.05, sill: 0.6 },
     ],
   });
-  // Uitbouw ingang/badkamer: kopgevel x=4,8 (voorgevel, links)
-  b.perpWall(4.8, 0, 5.2, 0, F2, {
-    ...houtExt, inside: IN,
+  // Voorgevel uitbouw (x=4,8) onder het wolfseind: glazen voordeur + zijlicht
+  b.roofWall({ x: 4.8, y: 0 }, { x: 4.8, y: 5.2 }, 0, HOOG, {
+    ...houtExt,
     openings: [
-      { at: 1.6, type: "window", width: 0.6, height: 0.6, sill: 1.5 },
-      { at: 4.2, type: "door", width: 1.0, height: 2.2 },
+      { at: 3.85, type: "door", width: 1.0, height: 2.2, glazed: true },
+      { at: 4.65, type: "window", width: 0.45, height: 1.75, sill: 0.45 },
     ],
   });
-  // Achtergevel x=15 (terras): glazen puien + deuren
-  b.perpWall(15.0, 0, DEPTH, 0, F2, {
-    ...houtExt, inside: IN,
+  // Achtergevel BG (x=15): glazen puien tussen de spanten + terrasdeuren
+  b.roofWall({ x: 15.0, y: 0 }, { x: 15.0, y: DEPTH }, 0, F2, {
+    ...houtExt,
     openings: [
-      { at: 2.55, type: "window", width: 3.5, height: 2.4, sill: 0.1 },
-      { at: 5.7, type: "door", width: 2.0, height: 2.4, glazed: true },
-      { at: 8.85, type: "window", width: 3.5, height: 2.4, sill: 0.1 },
+      { at: 2.6, type: "window", width: 3.4, height: 2.3, sill: 0.1 },
+      { at: 5.7, type: "door", width: 2.0, height: 2.3, glazed: true },
+      { at: 8.8, type: "window", width: 3.4, height: 2.3, sill: 0.1 },
     ],
   });
-  // Achterhuis x=6 tussen y 10,2 en 11,4 (buitenhoek naast voorhuis)
-  b.perpWall(6.0, 10.2, DEPTH, 0, F2, { ...houtExt, inside: IN });
+  // Buitenhoek naast het voorhuis (x=6, y 10,2–11,4)
+  b.roofWall({ x: 6.0, y: 10.2 }, { x: 6.0, y: DEPTH }, 0, HOOG, houtExt);
 
-  // Voorhuis (bestaand) — kopgevel x=0 met topgevel
+  // ── Voorhuis (bestaand) ──
+  // Voorgevel (x=0): dubbel raam met dicht paneel ertussen, smal raam rechts,
+  // smal raam in de top onder de schoorsteen.
   b.wall({ x: 0, y: 10.2 }, { x: 0, y: 5.2 }, {
     ...steenExt, height: VH_EAVE, gablePeak: VH_RIDGE - VH_EAVE,
     openings: [
-      { at: 8.7, type: "window", width: 1.0, height: 1.4, sill: 0.8 },
-      { at: 6.7, type: "window", width: 1.0, height: 1.4, sill: 0.8 },
-      { at: 7.7, type: "window", width: 0.5, height: 0.9, sill: 3.9 }, // zolderraam
+      { at: 7.05, type: "window", width: 0.75, height: 1.9, sill: 0.5 },
+      { at: 7.7, type: "window", width: 0.55, height: 1.9, sill: 0.5, glazed: false },
+      { at: 8.35, type: "window", width: 0.75, height: 1.9, sill: 0.5 },
+      { at: 9.5, type: "window", width: 0.5, height: 1.9, sill: 0.5 },
+      { at: 7.7, type: "window", width: 0.3, height: 1.2, sill: 3.6 },
     ],
   });
+  // Zijgevel 1 (y=5,2): hoog raam
   b.wall({ x: 0, y: 5.2 }, { x: 4.8, y: 5.2 }, {
     ...steenExt, height: VH_EAVE,
-    openings: [{ at: 1.8, type: "window", width: 1.2, height: 1.4, sill: 0.8 }],
+    openings: [{ at: 1.8, type: "window", width: 0.9, height: 2.0, sill: 0.5 }],
   });
+  // Zijgevel 2 (y=10,2): twee hoge ramen
   b.wall({ x: 6.0, y: 10.2 }, { x: 0, y: 10.2 }, {
     ...steenExt, height: VH_EAVE,
     openings: [
-      { at: 1.7, type: "window", width: 1.2, height: 1.4, sill: 0.8 },
-      { at: 4.3, type: "door", width: 0.9, height: 2.1 },
+      { at: 1.8, type: "window", width: 0.85, height: 2.0, sill: 0.5 },
+      { at: 4.6, type: "window", width: 0.85, height: 2.0, sill: 0.5 },
     ],
   });
   // Oude achtergevel voorhuis (nu binnenmuur naar de zithoek)
@@ -353,9 +388,9 @@ async function bouwBeganeGrond(levelId: string) {
     openings: [{ at: 9.2, type: "door", width: 0.9, height: 2.1 }],
   });
 
-  // Binnenwanden
-  b.wall({ x: 4.8, y: 2.8 }, { x: 15.0, y: 2.8 }, {
-    ...binnen, height: F2,
+  // ── Binnenwanden ──
+  b.roofWall({ x: 4.8, y: 2.8 }, { x: 15.0, y: 2.8 }, 0, F2, {
+    ...binnen,
     openings: [
       { at: 5.6, type: "door", width: 0.8, height: 2.1 },
       { at: 8.1, type: "door", width: 0.8, height: 2.1 },
@@ -363,13 +398,13 @@ async function bouwBeganeGrond(levelId: string) {
       { at: 12.9, type: "door", width: 0.9, height: 2.1 },
     ],
   });
-  for (const x of [7.0, 9.2, 11.4]) b.perpWall(x, 0, 2.8, 0, F2, binnen);
-  b.wall({ x: 4.8, y: 5.2 }, { x: 6.0, y: 5.2 }, { ...binnen, height: F2, openings: [{ at: 5.4, type: "door", width: 0.8, height: 2.1 }] });
+  for (const x of [7.0, 9.2, 11.4]) b.roofWall({ x, y: 0 }, { x, y: 2.8 }, 0, F2, binnen);
+  b.roofWall({ x: 4.8, y: 5.2 }, { x: 6.0, y: 5.2 }, 0, F2, { ...binnen, openings: [{ at: 5.4, type: "door", width: 0.8, height: 2.1 }] });
   b.wall({ x: 6.0, y: 5.4 }, { x: 9.2, y: 5.4 }, { ...binnen, height: F2 }); // trapwand
   b.wall({ x: 3.7, y: 5.2 }, { x: 3.7, y: 10.2 }, { ...binnen, height: F2, openings: [{ at: 6.1, type: "door", width: 0.8, height: 2.1 }] });
   await persist(b);
 
-  // Ruimtes
+  // ── Ruimtes ──
   const tegel = { floorMaterial: "tile" as const, wallColor: "#f4f2ee" };
   const hout = { floorMaterial: "wood" as const };
   const open = { noCeiling: true };
@@ -386,29 +421,45 @@ async function bouwBeganeGrond(levelId: string) {
   await room(levelId, "Gang voorhuis", "verkeer", rect(3.7, 5.2, 6.0, 10.2), { floorMaterial: "stone" });
   await room(levelId, "Terras (overdekt)", "terras", rect(15.0, 0, 17.4, DEPTH), { floorMaterial: "wood", color: "#8a7356", noCeiling: true });
 
-  // Trappen
+  // ── Trappen ──
   await create<Staircase>("stairs", { levelId, kind: "straight", position: { x: 6.2, y: 5.4 }, width: 1.0, run: 3.0, steps: 15, rotation: 270, direction: "up" });
   await create<Staircase>("stairs", { levelId, kind: "straight", position: { x: 4.75, y: 9.7 }, width: 0.85, run: 3.0, steps: 15, rotation: 180, direction: "up" });
 
-  // Eiken spanten (staanders) in de woonkeuken + terrasstaanders tot onder het dak
+  // ── Constructie ──
+  // Eiken staanders in de woonkeuken
   for (const [x, y] of [[10.2, 4.6], [13.4, 4.6], [10.2, 6.9], [13.4, 6.9]]) await staander(levelId, x, y, 0.2, F2);
-  for (const y of [1.2, 4.6, 6.9, 10.2]) await staander(levelId, 17.1, y, 0.18, roofAbs(y) - CLEAR);
-  // Schoorsteen voorhuis (op de nok bij de kopgevel)
-  await staander(levelId, 0.6, 7.7, 0.55, VH_RIDGE + 0.8, "brick");
+  // Eiken spant aan de buitenkant van het terras (achtergevel): staanders,
+  // trekbalk, schuine spantbenen en makelaar (koningsstijl)
+  const XS = 17.25;
+  for (const y of [1.0, 4.6, 6.8, 10.4]) await staander(levelId, XS, y, 0.2, roofAbs(XS, y) - CLEAR - 0.05);
+  await eiken(levelId, { x: XS, y: 0.55 }, { x: XS, y: DEPTH - 0.55 }, 2.35);
+  await eiken(levelId, { x: XS, y: 0.5 }, { x: XS, y: DEPTH / 2 }, roofAbs(XS, 0.5) - 0.3, RIDGE - 0.35, 0.22);
+  await eiken(levelId, { x: XS, y: DEPTH / 2 }, { x: XS, y: DEPTH - 0.5 }, RIDGE - 0.35, roofAbs(XS, DEPTH - 0.5) - 0.3, 0.22);
+  await staander(levelId, XS, DEPTH / 2, 0.2, RIDGE - 0.4);
+  // Schoorsteen voorhuis (op de nok bij de voorgevel)
+  await staander(levelId, 0.45, 7.7, 0.55, VH_RIDGE + 0.8, "brick", HUBERTUS_KLEUR);
 
-  // Daken
-  await create<Roof>("roofs", {
+  // ── Daken ──
+  const hoofddak = await create<Roof>("roofs", {
     levelId, type: "gable", pitch: 45, ridgeDirection: 0, overhang: OVERHANG,
-    polygon: rect(4.8, 0, 17.4, DEPTH), baseHeight: EAVE - OVERHANG * TAN, gableEnds: false,
-    color: RAL_7024, product: "Dakpanelen RAL 7024, nok aluminium RAL 7024",
+    polygon: rect(4.8, 0, 17.4, DEPTH), baseHeight: ROOF_BASE, gableEnds: false,
+    hipStart: { run: HIP_RUN, foot: HIP_FOOT - ROOF_BASE },
+    covering: "reed", color: RIET, ridgeColor: RAL_7024,
+    product: "Edelriet naturel, nok aluminium RAL 7024",
   });
-  await create<Roof>("roofs", {
+  const voorhuisdak = await create<Roof>("roofs", {
     levelId, type: "gable", pitch: (Math.atan(VH_TAN) * 180) / Math.PI, ridgeDirection: 0, overhang: 0.3,
     polygon: rect(0, 5.2, 6.0, 10.2), baseHeight: VH_EAVE - 0.3 * VH_TAN, gableEnds: false,
-    color: "#2b2b2c", product: "Dakpannen mat zwart",
+    covering: "tiles", color: PANNEN_ANTRACIET, ridgeColor: "#2f3133",
+    product: "Dakpannen antraciet",
   });
+  // Dakramen (zijgevels 1 en 2)
+  await dakraam(hoofddak.id, 10.4, 1.95);
+  await dakraam(hoofddak.id, 8.4, DEPTH - 1.95);
+  await dakraam(voorhuisdak.id, 1.9, 6.35, 0.55, 0.78);
+  await dakraam(voorhuisdak.id, 1.9, 9.05, 0.55, 0.78);
 
-  // Inrichting (indicatief, volgens de schets)
+  // ── Inrichting (indicatief, volgens de schets) ──
   await meubel(levelId, "kitchen-island", 11.8, 4.75, 0, { width: 3.0, depth: 1.0 });
   for (let i = 0; i < 5; i++) await meubel(levelId, "kitchen-base", 11.9 + i * 0.6, 3.15, 180);
   await meubel(levelId, "kitchen-high", 14.95 - 0.35, 3.15, 180);
@@ -438,74 +489,65 @@ async function bouwVerdieping(levelId: string) {
   const b = new LevelBuilder(levelId);
   const IN = { x: 10, y: 6 };
   const binnen = { thickness: 0.1, material: "gypsum" as const, status: "new" as const };
-  const peak = RIDGE - F2 - CLEAR * Math.SQRT2; // topgevel boven de vloer (onder het dakpakket)
+  const HOOG = 99;
 
-  // Kopgevels: driehoek vanaf de vloer (dak snijdt vloer op y=0,7 en y=10,7)
+  // Achtergevel: topgevel in zwart hout met glas in het midden (tussen de
+  // eiken stijlen) en een balkondeur.
   const y0 = (F2 + CLEAR * Math.SQRT2 - EAVE) / TAN;
   const y1 = DEPTH - y0;
-  b.wall({ x: 4.8, y: y1 }, { x: 4.8, y: y0 }, {
+  const peak = RIDGE - F2 - CLEAR * Math.SQRT2;
+  const half = (y1 - y0) / 2;
+  const triTop = (d: number) => 0.02 + (peak - 0.02) * (1 - d / half);
+  const mid = DEPTH / 2;
+  b.wall({ x: 15.0, y: y0 }, { x: 15.0, y: y1 }, {
     thickness: 0.25, material: "timber-frame", status: "new", loadBearing: true, facade: HOUT_ZWART, inside: IN,
     height: 0.02, gablePeak: peak - 0.02,
     openings: [
-      { at: 5.7, type: "window", width: 0.5, height: 1.5, sill: 2.4 }, // smal raam in de top
-      { at: 7.0, type: "door", width: 0.8, height: 2.0 }, // naar de berging (voorhuiszolder)
+      { at: mid, type: "door", width: 1.0, height: 2.2, glazed: true },
+      { at: mid, type: "window", width: 1.0, sill: 2.4, height: triTop(0.5) - 0.3 - 2.4 },
+      { at: mid - 0.9, type: "window", width: 0.6, sill: 0.1, height: triTop(1.2) - 0.35 - 0.1 },
+      { at: mid + 0.9, type: "window", width: 0.6, sill: 0.1, height: triTop(1.2) - 0.35 - 0.1 },
     ],
   });
-  // Achtergevel: glazen topgevel tussen eiken spanten + balkondeur
-  const half = (y1 - y0) / 2;
-  const triTop = (d: number) => 0.02 + (peak - 0.02) * (1 - d / half);
-  const panelen: OpeningSpec[] = [{ at: 5.7, type: "door", width: 1.0, height: 2.3, glazed: true }];
-  panelen.push({ at: 5.7, type: "window", width: 0.9, sill: 2.55, height: Math.max(0.4, triTop(0.5) - 0.25 - 2.55) });
-  for (let k = 1; k <= 4; k++) {
-    for (const sgn of [-1, 1]) {
-      const d = k * 1.05 + 0.45;
-      const hgt = triTop(d) - 0.25 - 0.1;
-      if (hgt > 0.5) panelen.push({ at: 5.7 + sgn * k * 1.05, type: "window", width: 0.9, height: hgt, sill: 0.1 });
-    }
-  }
-  b.wall({ x: 15.0, y: y0 }, { x: 15.0, y: y1 }, {
-    thickness: 0.25, material: "timber-frame", status: "new", loadBearing: true, facade: HOUT_ZWART, inside: IN,
-    height: 0.02, gablePeak: peak - 0.02, openings: panelen,
-  });
 
-  // Knieschotten (80+ lijnen) op y=1,8 en y=9,6
-  const knie = roofAbs(1.8) - F2 - CLEAR;
-  b.wall({ x: 4.8, y: 1.8 }, { x: 15.0, y: 1.8 }, { ...binnen, height: knie });
-  b.wall({ x: 15.0, y: 9.6 }, { x: 4.8, y: 9.6 }, { ...binnen, height: knie });
+  // Knieschotten (80+ lijnen) op y=1,8 en y=9,6 en onder het wolfseind (x=4,8)
+  b.roofWall({ x: 4.8, y: 1.8 }, { x: 15.0, y: 1.8 }, F2, HOOG, binnen);
+  b.roofWall({ x: 15.0, y: 9.6 }, { x: 4.8, y: 9.6 }, F2, HOOG, binnen);
+  b.roofWall({ x: 4.8, y: 1.8 }, { x: 4.8, y: 9.6 }, F2, HOOG, binnen);
 
   // Indeling
   const CAP = 2.6;
-  b.wall({ x: 4.8, y: 4.3 }, { x: 12.5, y: 4.3 }, {
-    ...binnen, height: CAP,
+  b.roofWall({ x: 4.8, y: 4.3 }, { x: 12.5, y: 4.3 }, F2, CAP, {
+    ...binnen,
     openings: [
       { at: 7.0, type: "passage", width: 1.2, height: 2.1 },
       { at: 10.8, type: "door", width: 0.8, height: 2.1 },
     ],
   });
-  b.perpWall(8.2, 1.8, 4.3, F2, CAP, binnen);
-  b.perpWall(12.5, 1.8, 9.6, F2, CAP, {
+  b.roofWall({ x: 8.2, y: 1.8 }, { x: 8.2, y: 4.3 }, F2, CAP, binnen);
+  b.roofWall({ x: 12.5, y: 1.8 }, { x: 12.5, y: 9.6 }, F2, CAP, {
     ...binnen,
     openings: [
       { at: 4.75, type: "door", width: 0.8, height: 2.1 },
       { at: 5.65, type: "door", width: 0.7, height: 2.1 },
     ],
   });
-  b.wall({ x: 12.5, y: 5.2 }, { x: 15.0, y: 5.2 }, { ...binnen, height: CAP });
-  b.wall({ x: 7.0, y: 6.1 }, { x: 12.5, y: 6.1 }, {
-    ...binnen, height: CAP,
+  b.roofWall({ x: 12.5, y: 5.2 }, { x: 15.0, y: 5.2 }, F2, CAP, binnen);
+  b.roofWall({ x: 7.0, y: 6.1 }, { x: 12.5, y: 6.1 }, F2, CAP, {
+    ...binnen,
     openings: [
       { at: 9.0, type: "door", width: 0.8, height: 2.1 },
       { at: 11.85, type: "door", width: 0.6, height: 2.1 },
     ],
   });
-  b.perpWall(7.0, 6.1, 9.6, F2, CAP, binnen);
-  b.perpWall(11.2, 6.1, 9.6, F2, CAP, binnen);
+  b.roofWall({ x: 7.0, y: 6.1 }, { x: 7.0, y: 9.6 }, F2, CAP, binnen);
+  b.roofWall({ x: 11.2, y: 6.1 }, { x: 11.2, y: 9.6 }, F2, CAP, binnen);
 
   // Balkon boven het terras: borstwering zwart hout
-  const balk = { thickness: 0.05, material: "timber-frame" as const, status: "new" as const, height: 1.0, facade: HOUT_ZWART, inside: { x: 16.2, y: 5.7 } };
-  b.wall({ x: 15.15, y: 4.7 }, { x: 17.2, y: 4.7 }, balk);
-  b.wall({ x: 17.2, y: 4.7 }, { x: 17.2, y: 6.7 }, balk);
-  b.wall({ x: 17.2, y: 6.7 }, { x: 15.15, y: 6.7 }, balk);
+  const balk = { thickness: 0.05, material: "timber-frame" as const, status: "new" as const, height: 1.0, facade: { ...HOUT_ZWART, plinth: undefined }, inside: { x: 16.2, y: 5.7 } };
+  b.wall({ x: 15.15, y: 4.7 }, { x: 17.1, y: 4.7 }, balk);
+  b.wall({ x: 17.1, y: 4.7 }, { x: 17.1, y: 6.7 }, balk);
+  b.wall({ x: 17.1, y: 6.7 }, { x: 15.15, y: 6.7 }, balk);
   await persist(b);
 
   const open = { noCeiling: true, floorMaterial: "wood" as const };
@@ -520,8 +562,8 @@ async function bouwVerdieping(levelId: string) {
     { x: 4.8, y: 4.3 }, { x: 12.5, y: 4.3 }, { x: 12.5, y: 6.1 }, { x: 7.0, y: 6.1 }, { x: 7.0, y: 9.6 },
     { x: 4.8, y: 9.6 }, { x: 4.8, y: 5.4 }, { x: 9.2, y: 5.4 }, { x: 9.2, y: 4.4 }, { x: 4.8, y: 4.4 },
   ], open);
-  await room(levelId, "Berging (zolder voorhuis)", "berging", rect(0.2, 5.4, 4.8, 10.0), { noCeiling: true, floorMaterial: "wood" });
-  await room(levelId, "Balkon", "buiten", rect(15.0, 4.7, 17.2, 6.7), { noCeiling: true, floorMaterial: "wood", color: "#8a7356" });
+  await room(levelId, "Berging (zolder voorhuis)", "berging", rect(0.2, 5.4, 4.7, 10.0), { noCeiling: true, floorMaterial: "wood" });
+  await room(levelId, "Balkon", "buiten", rect(15.0, 4.7, 17.1, 6.7), { noCeiling: true, floorMaterial: "wood", color: "#8a7356" });
 
   await meubel(levelId, "bed-double", 13.75, 3.6, 0);
   await meubel(levelId, "bed-double", 13.75, 7.6, 180);

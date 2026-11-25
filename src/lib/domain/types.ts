@@ -214,6 +214,7 @@ export interface Column extends Entity {
   height?: number; // m (default = verdiepingshoogte)
   material: WallMaterial;
   loadBearing: boolean;
+  color?: string; // afwijkende kleur (bv. schoorsteen in gevelsteen)
 }
 
 export type BeamProfile = "HEA100" | "HEA140" | "HEA160" | "HEB200" | "custom";
@@ -225,6 +226,9 @@ export interface Beam extends Entity {
   profile: BeamProfile;
   height: number; // m boven vloer (positie in de gevel, voor 3D)
   width?: number; // flensbreedte m (override bij custom)
+  heightEnd?: number; // hoogte bij `end` (schuine balk, bv. spantbeen)
+  material?: "steel" | "oak"; // standaard staal
+  depth?: number; // balkhoogte m (eiken balk)
 }
 
 // ── Dak ───────────────────────────────────────────────────────────────────────
@@ -241,8 +245,14 @@ export interface Roof extends Entity {
   baseHeight?: number; // hoogte van de dakvoet (rand overstek) boven de vloer; standaard verdiepingshoogte
   gableEnds?: boolean; // dichte driehoeken aan de kopse kanten (standaard true)
   color?: string; // dakbedekking
-  product?: string; // bv. "Dakpanelen RAL 7024"
+  product?: string; // bv. "Edelriet naturel"
+  covering?: RoofCovering; // bepaalt textuur + dakdikte in 3D
+  ridgeColor?: string; // nokafwerking
+  hipStart?: { run: number; foot: number }; // wolfseind aan de kant x- (zie roofGeometry)
+  hipEnd?: { run: number; foot: number }; // wolfseind aan de kant x+
 }
+
+export type RoofCovering = "tiles" | "reed" | "panels" | "plain";
 
 export type DormerType = "gable-dormer" | "shed-dormer" | "velux";
 
