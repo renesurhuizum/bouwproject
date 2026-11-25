@@ -1,6 +1,7 @@
 "use client";
 
-// Compliance-hints: NEN 1010 (elektra) + Bouwbesluit 2012 (ruimtes).
+// Compliance-hints: NEN 1010 (elektra) + Bouwbesluit 2012 (ruimtes) +
+// botsingscontrole (zie lib/clashDetection). Volledig overzicht: /model.
 // Verschijnt als inklapbare banner linksonder zodra er meldingen zijn.
 
 import { useDeferredValue, useMemo, useState } from "react";
@@ -11,15 +12,20 @@ import {
   useRooms,
   useElectrical,
   useWalls,
+  useOpenings,
   usePlumbing,
   useHvac,
+  useProjectModel,
 } from "@/lib/hooks";
+import { detectLevelClashes } from "@/lib/clashDetection";
 import { useEditor } from "@/lib/store/editor";
 import {
   validateElectrical,
   validateRooms,
   validateRoomServices,
   validateWalls,
+  validatePipeFall,
+  validateLintels,
   type ValidationIssue,
 } from "@/lib/validation";
 
@@ -32,17 +38,21 @@ export function ComplianceBanner() {
   const rooms = useRooms(level?.id) ?? [];
   const electrical = useElectrical(level?.id) ?? [];
   const walls = useWalls(level?.id) ?? [];
+  const openings = useOpenings(level?.id) ?? [];
   const plumbing = usePlumbing(level?.id) ?? [];
   const hvac = useHvac(level?.id ?? null) ?? [];
+  const model = useProjectModel();
   const [open, setOpen] = useState(false);
 
   // Deferred: tijdens continue edits (slider/sleep) coalescen de validatie-runs
   // zodat de editor responsief blijft; de banner loopt hooguit een tel achter.
   const dWalls = useDeferredValue(walls);
+  const dOpenings = useDeferredValue(openings);
   const dElectrical = useDeferredValue(electrical);
   const dRooms = useDeferredValue(rooms);
   const dPlumbing = useDeferredValue(plumbing);
   const dHvac = useDeferredValue(hvac);
+  const dModel = useDeferredValue(model);
 
   const issues = useMemo<ValidationIssue[]>(() => {
     if (!level) return [];
@@ -51,8 +61,18 @@ export function ComplianceBanner() {
       ...validateElectrical(dElectrical),
       ...validateRooms(dRooms, [level]),
       ...validateRoomServices(dRooms, dPlumbing, dElectrical, dHvac),
+      ...validatePipeFall(dPlumbing),
+      ...validateLintels(dWalls, dOpenings),
+      // Botsingscontrole (leidingen × constructie, elektra × kozijnen, ...).
+      ...(dModel
+        ? detectLevelClashes(dModel, level.id).map((c) => ({
+            severity: c.severity,
+            message: c.message,
+            entityId: c.entityIds[0],
+          }))
+        : []),
     ];
-  }, [dWalls, dElectrical, dRooms, dPlumbing, dHvac, level]);
+  }, [dWalls, dOpenings, dElectrical, dRooms, dPlumbing, dHvac, dModel, level]);
 
   if (issues.length === 0) return null;
 

@@ -2,11 +2,11 @@
 
 // Water-laag. Toont leidingtrajecten (path) en sanitair/tappunten (position).
 
-import { Fragment } from "react";
 import { Layer, Line, Circle, Ellipse, Rect, Group, Text, Label, Tag } from "react-konva";
 import type { PlumbingItem, FixtureKind } from "@/lib/domain/types";
 import { FIXTURE_CODE, FIXTURE_FOOTPRINT, PLUMBING_COLOR } from "@/lib/domain/constants";
 import { formatHeight } from "@/lib/format";
+import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
 
 // Bovenaanzicht-symbool per sanitair-soort, getekend in (0,0)–(w,h) px.
@@ -152,14 +152,15 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
         const ly = (p1.y + p2.y) / 2 - 6;
 
         return (
-          <Group
+          <DraggableEntity
             key={item.id}
-            onClick={() => onSelect(item.id)}
-            onTap={() => onSelect(item.id)}
+            kind="plumbing"
+            entity={item}
+            anchor={item.path![0]}
+            view={view}
+            onSelect={onSelect}
           >
             <Line
-              id={item.id}
-              name="plumbing"
               points={pts}
               stroke={selected ? "#ea580c" : color}
               strokeWidth={selected ? strokeW + 1 : strokeW}
@@ -176,7 +177,7 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
               fontStyle="bold"
               listening={false}
             />
-          </Group>
+          </DraggableEntity>
         );
       })}
 
@@ -206,7 +207,14 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
 
         if (useSymbol && item.fixture) {
           return (
-            <Fragment key={item.id}>
+            <DraggableEntity
+              key={item.id}
+              kind="plumbing"
+              entity={item}
+              anchor={item.position}
+              view={view}
+              onSelect={onSelect}
+            >
               {selected && (
                 <Rect
                   x={p.x - sw / 2 - 3}
@@ -221,18 +229,8 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
               )}
               <Group x={p.x - sw / 2} y={p.y - sh / 2}>
                 <FixtureSymbol kind={item.fixture} w={sw} h={sh} />
-                {/* onzichtbaar klikvlak over de hele voetafdruk */}
-                <Rect
-                  id={item.id}
-                  name="plumbing"
-                  x={0}
-                  y={0}
-                  width={sw}
-                  height={sh}
-                  fill="transparent"
-                  onClick={() => onSelect(item.id)}
-                  onTap={() => onSelect(item.id)}
-                />
+                {/* onzichtbaar klik-/sleepvlak over de hele voetafdruk */}
+                <Rect x={0} y={0} width={sw} height={sh} fill="transparent" />
               </Group>
               {item.heightZ != null && (
                 <Label x={p.x - 14} y={p.y + sh / 2 + 2} listening={false}>
@@ -246,26 +244,24 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
                   />
                 </Label>
               )}
-            </Fragment>
+            </DraggableEntity>
           );
         }
 
         const r = 12;
         return (
-          <Fragment key={item.id}>
+          <DraggableEntity
+            key={item.id}
+            kind="plumbing"
+            entity={item}
+            anchor={item.position}
+            view={view}
+            onSelect={onSelect}
+          >
             {selected && (
               <Circle x={p.x} y={p.y} radius={r + 5} fill="#fb923c" opacity={0.5} listening={false} />
             )}
-            <Circle
-              id={item.id}
-              name="plumbing"
-              x={p.x}
-              y={p.y}
-              radius={r}
-              fill={PLUMBING_COLOR}
-              onClick={() => onSelect(item.id)}
-              onTap={() => onSelect(item.id)}
-            />
+            <Circle x={p.x} y={p.y} radius={r} fill={PLUMBING_COLOR} />
             {item.fixture && (
               <Text
                 text={FIXTURE_CODE[item.fixture]}
@@ -292,7 +288,7 @@ export function PlumbingLayer({ view, items, selectedId, onSelect, previewPath }
                 />
               </Label>
             )}
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>

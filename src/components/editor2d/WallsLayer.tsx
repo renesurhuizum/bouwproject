@@ -4,12 +4,13 @@
 // status, stippellijn bij sloop, en een markering bij dragende muren.
 // Bij geselecteerde muur: draggable eindpunt-handles zodat je muren kunt aanpassen.
 
-import React, { Fragment } from "react";
+import React from "react";
 import { Layer, Line, Circle, Label, Tag, Text } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Wall } from "@/lib/domain/types";
 import { dist, getCornerFillPoints } from "@/lib/geometry";
 import { formatLength } from "@/lib/format";
+import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, type ViewState } from "./viewport";
 
 interface Props {
@@ -121,7 +122,14 @@ export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint, 
         const ny = (dx / len) * OFFSET;
 
         return (
-          <Fragment key={w.id}>
+          <DraggableEntity
+            key={w.id}
+            kind="wall"
+            entity={w}
+            anchor={w.start}
+            view={view}
+            onSelect={onSelect}
+          >
             {/* Selectie-highlight: iets groter dan de muur */}
             {selected && (
               <Line
@@ -136,8 +144,6 @@ export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint, 
 
             {/* Gevulde wandrechthoek */}
             <Line
-              id={w.id}
-              name="wall"
               points={polyPts}
               closed
               fill={fill}
@@ -145,8 +151,6 @@ export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint, 
               strokeWidth={w.loadBearing ? 2 : 1}
               dash={isDemolish ? [6, 4] : undefined}
               hitStrokeWidth={10}
-              onClick={() => onSelect(w.id)}
-              onTap={() => onSelect(w.id)}
             />
 
             {/* Dragende muur: extra donkere binnenrand */}
@@ -287,7 +291,7 @@ export function WallsLayer({ view, walls, selectedId, onSelect, onMoveEndpoint, 
                 </Label>
               </>
             )}
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>

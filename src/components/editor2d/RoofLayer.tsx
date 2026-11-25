@@ -5,9 +5,10 @@
 
 import { Fragment } from "react";
 import { Layer, Line, Rect, Text, Group } from "react-konva";
-import type { Roof, Dormer, Wall, Point } from "@/lib/domain/types";
+import type { Roof, Dormer, Wall } from "@/lib/domain/types";
 import { ROOF_TYPE_LABEL, DORMER_TYPE_LABEL } from "@/lib/domain/constants";
-import { bounds } from "@/lib/geometry";
+import { roofContourLines, roofFootprint } from "@/lib/roofGeometry";
+import { HEADROOM_LIVING_M, HEADROOM_USABLE_M } from "@/lib/attic";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
 
 interface Props {
@@ -19,14 +20,21 @@ interface Props {
   selectedDormerId: string | null;
   onSelectRoof: (id: string) => void;
   onSelectDormer: (id: string) => void;
+  /**
+   * Muurhoogte van deze verdieping: het dak staat daarop, dus die hoogte telt
+   * mee in de stahoogte. Bij een zolder met een kniewand van 1 m schuiven de
+   * hoogtelijnen navenant op.
+   */
+  baseHeightM?: number;
 }
 
 const ROOF_COLOR = "#7c3aed";
 
-function footprint(roof: Roof, walls: Wall[]): { min: Point; max: Point } {
-  if (roof.polygon && roof.polygon.length >= 3) return bounds(roof.polygon);
-  return bounds(walls.flatMap((w) => [w.start, w.end]));
-}
+// Stahoogtes die er in Nederland toe doen.
+const HEADROOM_MARKS = [
+  { headroom: HEADROOM_USABLE_M, color: "#0891b2", dash: [6, 4], label: "1,50 m" },
+  { headroom: HEADROOM_LIVING_M, color: "#16a34a", dash: [2, 3], label: "2,30 m" },
+];
 
 export function RoofLayer({
   view,
@@ -37,14 +45,15 @@ export function RoofLayer({
   selectedDormerId,
   onSelectRoof,
   onSelectDormer,
+  baseHeightM = 0,
 }: Props) {
   return (
     <Layer>
       {roofs.map((roof) => {
-        const bb = footprint(roof, walls);
-        if (!isFinite(bb.min.x) || bb.max.x <= bb.min.x) return null;
-        const a = metersToScreen(bb.min, view);
-        const c = metersToScreen(bb.max, view);
+        const fp = roofFootprint(roof, walls);
+        if (!fp) return null;
+        const a = metersToScreen({ x: fp.center.x - fp.W / 2, y: fp.center.y - fp.D / 2 }, view);
+        const c = metersToScreen({ x: fp.center.x + fp.W / 2, y: fp.center.y + fp.D / 2 }, view);
         const cx = (a.x + c.x) / 2;
         const cy = (a.y + c.y) / 2;
         const selected = roof.id === selectedRoofId;
@@ -88,11 +97,47 @@ export function RoofLayer({
                 />
               </>
             )}
+            {/* Hoogtelijnen: waar haal je 1,50 m (telt mee als oppervlak) en
+                2,30 m (mag verblijfsruimte zijn)? Precies de lijnen waarlangs
+                je een kniewand zet. */}
+            {roof.type !== "flat" &&
+              HEADROOM_MARKS.map(({ headroom, color, dash, label }) => {
+                const lines = roofContourLines(roof, fp, Math.max(0, headroom - baseHeightM));
+                return lines.map((ln, i) => {
+                  const p1 = metersToScreen(ln.a, view);
+                  const p2 = metersToScreen(ln.b, view);
+                  return (
+                    <Fragment key={`${headroom}-${i}`}>
+                      <Line
+                        points={[p1.x, p1.y, p2.x, p2.y]}
+                        stroke={color}
+                        strokeWidth={1.4}
+                        dash={dash}
+                        listening={false}
+                      />
+                      {i === 0 && (
+                        <Text
+                          x={(p1.x + p2.x) / 2 - 30}
+                          y={(p1.y + p2.y) / 2 - 14}
+                          width={60}
+                          align="center"
+                          text={label}
+                          fontSize={9}
+                          fontFamily="monospace"
+                          fill={color}
+                          listening={false}
+                        />
+                      )}
+                    </Fragment>
+                  );
+                });
+              })}
+            {/* Niet in het midden: daar staat het ruimtelabel al. */}
             <Text
-              x={cx - 40}
-              y={cy - 8}
-              width={80}
-              align="center"
+              x={Math.min(a.x, c.x) + 6}
+              y={Math.min(a.y, c.y) + 6}
+              width={90}
+              align="left"
               text={`${ROOF_TYPE_LABEL[roof.type]}${roof.type !== "flat" ? ` · ${Math.round(roof.pitch)}°` : ""}`}
               fontSize={11}
               fontFamily="monospace"

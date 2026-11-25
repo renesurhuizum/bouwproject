@@ -231,7 +231,7 @@ class LevelBuilder implements Build {
 
 const PROJECT_TABLES: TableName[] = [
   "walls", "openings", "rooms", "electrical", "plumbing", "hvac", "furniture",
-  "stairs", "columns", "beams", "roofs", "dormers",
+  "stairs", "columns", "beams", "roofs", "dormers", "sections",
 ];
 
 // Het ontwerp wordt eerst in het geheugen opgebouwd en daarna in één

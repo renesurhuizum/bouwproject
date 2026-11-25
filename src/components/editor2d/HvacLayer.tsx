@@ -2,11 +2,11 @@
 
 // HVAC-laag: radiatoren, vloerverwarming, ventilatie en WTW-units.
 
-import { Fragment } from "react";
 import { Layer, Rect, Circle, Line, Group, Text, Label, Tag } from "react-konva";
 import type { HvacItem } from "@/lib/domain/types";
 import { HVAC_COLOR, HVAC_CODE } from "@/lib/domain/constants";
 import { formatHeight } from "@/lib/format";
+import { DraggableEntity } from "./DraggableEntity";
 import { metersToScreen, metersToPx, type ViewState } from "./viewport";
 
 interface Props {
@@ -34,14 +34,15 @@ export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
         const color = HVAC_COLOR[item.type];
         const selected = item.id === selectedId;
         return (
-          <Group
+          <DraggableEntity
             key={item.id}
-            onClick={() => onSelect(item.id)}
-            onTap={() => onSelect(item.id)}
+            kind="hvac"
+            entity={item}
+            anchor={item.path![0]}
+            view={view}
+            onSelect={onSelect}
           >
             <Line
-              id={item.id}
-              name="hvac"
               points={toFlat(item.path!, view)}
               stroke={selected ? "#ea580c" : color}
               strokeWidth={selected ? 4 : 3}
@@ -58,7 +59,7 @@ export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
               fill={color}
               listening={false}
             />
-          </Group>
+          </DraggableEntity>
         );
       })}
 
@@ -71,32 +72,22 @@ export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
         const r = metersToPx(0.15, view);
 
         return (
-          <Fragment key={item.id}>
+          <DraggableEntity
+            key={item.id}
+            kind="hvac"
+            entity={item}
+            anchor={item.position}
+            view={view}
+            onSelect={onSelect}
+          >
             {selected && (
               <Circle x={p.x} y={p.y} radius={r + 6} fill={color} opacity={0.3} listening={false} />
             )}
 
             {item.type === "radiator" ? (
-              <RadiatorSymbol
-                id={item.id}
-                cx={p.x}
-                cy={p.y}
-                r={r}
-                color={color}
-                selected={selected}
-                onSelect={() => onSelect(item.id)}
-              />
+              <RadiatorSymbol cx={p.x} cy={p.y} r={r} color={color} selected={selected} />
             ) : (
-              <Circle
-                id={item.id}
-                name="hvac"
-                x={p.x}
-                y={p.y}
-                radius={r}
-                fill={color}
-                onClick={() => onSelect(item.id)}
-                onTap={() => onSelect(item.id)}
-              />
+              <Circle x={p.x} y={p.y} radius={r} fill={color} />
             )}
 
             <Text
@@ -124,7 +115,7 @@ export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
                 />
               </Label>
             )}
-          </Fragment>
+          </DraggableEntity>
         );
       })}
     </Layer>
@@ -132,28 +123,24 @@ export function HvacLayer({ view, items, selectedId, onSelect }: Props) {
 }
 
 function RadiatorSymbol({
-  id,
   cx,
   cy,
   r,
   color,
   selected,
-  onSelect,
 }: {
-  id: string;
   cx: number;
   cy: number;
   r: number;
   color: string;
   selected: boolean;
-  onSelect: () => void;
 }) {
   const w = r * 2.4;
   const h = r * 1.2;
   const fins = 4;
 
   return (
-    <Group id={id} name="hvac" onClick={onSelect} onTap={onSelect}>
+    <Group>
       {/* Buitenkader */}
       <Rect
         x={cx - w / 2}
